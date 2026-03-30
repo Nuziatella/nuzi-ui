@@ -59,7 +59,7 @@ end
 local PolarUiAddon = {
     name = "Nuzi UI",
     author = "Nuzi",
-    version = "0.9.3",
+    version = "1.0.0",
     desc = "Interface overhaul"
 }
 
