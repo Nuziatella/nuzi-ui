@@ -32,6 +32,50 @@ local Nameplates = {
     target_unitframe = nil
 }
 
+local function NormalizeUnitToken(unit)
+    if type(unit) ~= "string" then
+        return nil
+    end
+    local text = tostring(unit or "")
+    if text == "" then
+        return nil
+    end
+    return text
+end
+
+local function NormalizeUnitId(unitId)
+    if unitId == nil then
+        return nil
+    end
+    local valueType = type(unitId)
+    if valueType == "string" then
+        local text = tostring(unitId)
+        if text == "" then
+            return nil
+        end
+        return text
+    end
+    if valueType == "number" then
+        return tostring(unitId)
+    end
+    return nil
+end
+
+local function SafeGetUnitInfoById(unitId)
+    local normalizedId = NormalizeUnitId(unitId)
+    if normalizedId == nil or api == nil or api.Unit == nil or api.Unit.GetUnitInfoById == nil then
+        return nil
+    end
+    local info = nil
+    pcall(function()
+        info = api.Unit:GetUnitInfoById(normalizedId)
+    end)
+    if type(info) == "table" then
+        return info
+    end
+    return nil
+end
+
 local function ClampNumber(v, lo, hi, default)
     local n = tonumber(v)
     if n == nil then
@@ -417,6 +461,10 @@ local function GetCfg(settings)
 end
 
 local function UpdateOne(unit, settings)
+    unit = NormalizeUnitToken(unit)
+    if unit == nil then
+        return
+    end
     local cfg = GetCfg(settings)
     if Compat ~= nil and not Compat.NameplatesSupported() then
         SafeShow(Nameplates.frames[unit], false)
@@ -440,7 +488,11 @@ local function UpdateOne(unit, settings)
         return
     end
 
-    local id = api.Unit:GetUnitId(unit)
+    local id = nil
+    pcall(function()
+        id = api.Unit:GetUnitId(unit)
+    end)
+    id = NormalizeUnitId(id)
     if id == nil then
         SafeShow(frame, false)
         return
@@ -542,10 +594,7 @@ local function UpdateOne(unit, settings)
         end)
     end
 
-    local info = nil
-    pcall(function()
-        info = api.Unit:GetUnitInfoById(id)
-    end)
+    local info = SafeGetUnitInfoById(id)
 
     local isCharacter = true
     if type(info) == "table" and info.type ~= nil then
