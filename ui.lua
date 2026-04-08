@@ -120,6 +120,39 @@ local UI = {
     }
 }
 
+local function NormalizeUnitId(unitId)
+    if unitId == nil then
+        return nil
+    end
+    local valueType = type(unitId)
+    if valueType == "string" then
+        local text = tostring(unitId)
+        if text == "" then
+            return nil
+        end
+        return text
+    end
+    if valueType == "number" then
+        return tostring(unitId)
+    end
+    return nil
+end
+
+local function SafeGetUnitInfoById(unitId)
+    local normalizedId = NormalizeUnitId(unitId)
+    if normalizedId == nil or api == nil or api.Unit == nil or api.Unit.GetUnitInfoById == nil then
+        return nil
+    end
+    local info = nil
+    pcall(function()
+        info = api.Unit:GetUnitInfoById(normalizedId)
+    end)
+    if type(info) == "table" then
+        return info
+    end
+    return nil
+end
+
 local function ClampNumber(v, minV, maxV, fallback)
     local n = tonumber(v)
     if n == nil then
@@ -698,10 +731,7 @@ local function ApplyBarStyle(frame, style)
         if tid == nil then
             return false
         end
-        local info = nil
-        pcall(function()
-            info = api.Unit:GetUnitInfoById(tid)
-        end)
+        local info = SafeGetUnitInfoById(tid)
         if type(info) == "table" and tostring(info.faction) == "hostile" then
             return true
         end
@@ -2568,7 +2598,7 @@ local function UpdateTargetExtras(settings)
     local isCharacter = true
     pcall(function()
         if api.Unit ~= nil and api.Unit.GetUnitInfoById ~= nil then
-            local ti = api.Unit:GetUnitInfoById(targetId)
+            local ti = SafeGetUnitInfoById(targetId)
             if type(ti) == "table" and ti.type ~= nil then
                 isCharacter = (ti.type == "character")
             end
@@ -2596,7 +2626,7 @@ local function UpdateTargetExtras(settings)
     if gs == nil then
         pcall(function()
             if api.Unit ~= nil then
-                local info = api.Unit:GetUnitInfoById(targetId)
+                local info = SafeGetUnitInfoById(targetId)
                 if type(info) == "table" then
                     gs = info.gearScore or info.gearscore or info.gear_score or info.gs
                 end
@@ -2667,7 +2697,7 @@ local function UpdateTargetExtras(settings)
     local guild = ""
     pcall(function()
         if api.Unit ~= nil and api.Unit.GetUnitInfoById ~= nil then
-            local info = api.Unit:GetUnitInfoById(targetId)
+            local info = SafeGetUnitInfoById(targetId)
             if type(info) == "table" and info.expeditionName ~= nil then
                 guild = tostring(info.expeditionName or "")
             end
