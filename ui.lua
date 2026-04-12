@@ -1,31 +1,11 @@
 local api = require("api")
+local SafeRequire = require("nuzi-ui/safe_require")
 
 local SETTINGS_FILE_PATH = "nuzi-ui/.data/settings.txt"
-local Nameplates = nil
-local Runtime = nil
-do
-    local ok, mod = pcall(require, "nuzi-ui/nameplates")
-    if ok then
-        Nameplates = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.nameplates")
-        if ok then
-            Nameplates = mod
-        end
-    end
-end
-
-do
-    local ok, mod = pcall(require, "nuzi-ui/runtime")
-    if ok then
-        Runtime = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.runtime")
-        if ok then
-            Runtime = mod
-        end
-    end
-end
+local Nameplates = SafeRequire("nuzi-ui/nameplates", "nuzi-ui.nameplates")
+local Runtime = SafeRequire("nuzi-ui/runtime", "nuzi-ui.runtime")
+local AlignmentModule = SafeRequire("nuzi-ui/ui_alignment", "nuzi-ui.ui_alignment")
+local TargetExtrasModule = SafeRequire("nuzi-ui/ui_target_extras", "nuzi-ui.ui_target_extras")
 
 local function AnchorTopLeft(wnd, x, y)
     if wnd == nil or wnd.AddAnchor == nil then
@@ -58,28 +38,12 @@ end
 
 local DailyAge = nil
 do
-    local ok, mod = pcall(require, "nuzi-ui/dailyage")
-    if ok then
-        DailyAge = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.dailyage")
-        if ok then
-            DailyAge = mod
-        end
-    end
+    DailyAge = SafeRequire("nuzi-ui/dailyage", "nuzi-ui.dailyage")
 end
 
 local CooldownTracker = nil
 do
-    local ok, mod = pcall(require, "nuzi-ui/cooldown_tracker")
-    if ok then
-        CooldownTracker = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.cooldown_tracker")
-        if ok then
-            CooldownTracker = mod
-        end
-    end
+    CooldownTracker = SafeRequire("nuzi-ui/cooldown_tracker", "nuzi-ui.cooldown_tracker")
 end
 
 local UI = {
@@ -87,6 +51,7 @@ local UI = {
     enabled = true,
     accum_ms = 0,
     plates_accum_ms = 0,
+    needs_full_apply = true,
     stock_refreshed = false,
     last_large_hpmp = nil,
     last_aura_enabled = nil,
@@ -107,14 +72,7 @@ local UI = {
         role = nil,
         class_name = nil,
         gearscore = nil,
-        glider_icon = nil,
-        glider = nil,
         current_target_id = nil,
-        glider_target_id = nil,
-        glider_name = "",
-        glider_icon_path = "",
-        glider_tooltip_text = "",
-        glider_last_refresh_ms = 0,
         guild = nil,
         pdef = nil,
         mdef = nil
@@ -128,8 +86,8 @@ local UI = {
     }
 }
 
-local TARGET_FLIGHT_GEAR_SLOT = 9 -- ES_BACK
-local TARGET_GLIDER_REFRESH_MS = 0
+local BuildUiContext
+
 
 local function NormalizeUnitId(unitId)
     if unitId == nil then
@@ -164,230 +122,10 @@ local function SafeGetUnitInfoById(unitId)
     return nil
 end
 
-local function SafeGetUiMsec()
-    if api == nil or api.Time == nil or api.Time.GetUiMsec == nil then
-        return 0
-    end
-    local value = nil
-    pcall(function()
-        value = api.Time:GetUiMsec()
-    end)
-    return tonumber(value) or 0
-end
-
-local function GetTargetGliderCacheKey(targetId)
-    local normalizedTargetId = NormalizeUnitId(targetId) or ""
-    local targetName = ""
-    pcall(function()
-        if api ~= nil and api.Unit ~= nil and api.Unit.UnitInfo ~= nil then
-            local info = api.Unit:UnitInfo("target")
-            if type(info) == "table" then
-                targetName = TrimText(info.name or info.unitName or info.family_name or "")
-            end
-        end
-    end)
-    return normalizedTargetId .. "|" .. tostring(targetName or "")
-end
-
 local function TrimText(value)
     local text = tostring(value or "")
     text = string.match(text, "^%s*(.-)%s*$") or text
     return text
-end
-
-local function StripTooltipMarkup(text)
-    if type(text) ~= "string" then
-        return ""
-    end
-    local value = text
-    value = string.gsub(value, "|c%x%x%x%x%x%x%x%x", "")
-    value = string.gsub(value, "|r", "")
-    value = string.gsub(value, "|H.-|h", "")
-    value = string.gsub(value, "|h", "")
-    value = string.gsub(value, "\r", "\n")
-    return value
-end
-
-local function GetFirstTooltipLine(text)
-    local cleaned = StripTooltipMarkup(text)
-    for line in string.gmatch(cleaned, "([^\n]+)") do
-        local trimmed = TrimText(line)
-        if trimmed ~= "" then
-            return trimmed
-        end
-    end
-    return ""
-end
-
-local function NormalizeTooltipText(value, visited)
-    local valueType = type(value)
-    if valueType == "string" then
-        local text = StripTooltipMarkup(value)
-        text = string.gsub(text, "\r", "\n")
-        text = string.gsub(text, "\n%s*\n+", "\n")
-        return TrimText(text)
-    end
-    if valueType ~= "table" then
-        return ""
-    end
-
-    visited = visited or {}
-    if visited[value] then
-        return ""
-    end
-    visited[value] = true
-
-    local directKeys = {
-        "tooltipText",
-        "tooltip_text",
-        "text",
-        "description",
-        "desc",
-        "linkText",
-        "name",
-        "item_name",
-        "title"
-    }
-    for _, key in ipairs(directKeys) do
-        local text = NormalizeTooltipText(value[key], visited)
-        if text ~= "" then
-            return text
-        end
-    end
-
-    local lines = {}
-    for _, nested in ipairs(value) do
-        local text = NormalizeTooltipText(nested, visited)
-        if text ~= "" then
-            table.insert(lines, text)
-        end
-    end
-    if #lines > 0 then
-        return table.concat(lines, "\n")
-    end
-
-    return ""
-end
-
-local function ExtractItemType(value, visited)
-    if type(value) ~= "table" then
-        return nil
-    end
-    visited = visited or {}
-    if visited[value] then
-        return nil
-    end
-    visited[value] = true
-
-    local directKeys = {
-        "itemType",
-        "item_type",
-        "type",
-        "itemId",
-        "item_id"
-    }
-    for _, key in ipairs(directKeys) do
-        local num = tonumber(value[key])
-        if num ~= nil and num > 0 then
-            return num
-        end
-    end
-
-    for _, nested in ipairs(value) do
-        local num = ExtractItemType(nested, visited)
-        if num ~= nil then
-            return num
-        end
-    end
-
-    return nil
-end
-
-local function SafeGetItemInfoByType(itemType)
-    local itemId = tonumber(itemType)
-    if itemId == nil or itemId <= 0 or api == nil or api.Item == nil or api.Item.GetItemInfoByType == nil then
-        return nil
-    end
-    local info = nil
-    pcall(function()
-        info = api.Item:GetItemInfoByType(itemId)
-    end)
-    if type(info) == "table" then
-        return info
-    end
-    return nil
-end
-
-local function ContainsFlightGearKeywords(text)
-    local haystack = string.lower(tostring(text or ""))
-    if haystack == "" then
-        return false
-    end
-    local patterns = {
-        "glider",
-        "magithopter",
-        "magi thopter",
-        "thopter",
-        "wings",
-        "wing",
-        "gliding ability",
-        "flight speed",
-        "launch height",
-        "turning speed",
-        "crystal wings"
-    }
-    for _, pattern in ipairs(patterns) do
-        if string.find(haystack, pattern, 1, true) ~= nil then
-            return true
-        end
-    end
-    return false
-end
-
-local function ContainsFlightGearInfoKeywords(value)
-    if type(value) ~= "table" then
-        return false
-    end
-
-    local candidates = {
-        value.category,
-        value.categoryName,
-        value.description,
-        value.itemUsage,
-        value.icon,
-        value.iconPath,
-        value.path,
-        value.name,
-        value.item_name,
-        value.title
-    }
-    for _, candidate in ipairs(candidates) do
-        if ContainsFlightGearKeywords(candidate) then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function ExtractIconPath(value)
-    if type(value) ~= "table" then
-        return ""
-    end
-
-    local candidates = {
-        value.iconPath,
-        value.icon,
-        value.path
-    }
-    for _, candidate in ipairs(candidates) do
-        local text = TrimText(candidate or "")
-        if text ~= "" then
-            return text
-        end
-    end
-
-    return ""
 end
 
 local function ResolveUnitDisplayName(info)
@@ -422,11 +160,18 @@ local function ApplyTargetNameLevel(targetName, targetLevel)
     end
     pcall(function()
         if UI.target.wnd.name ~= nil then
-            if UI.target.wnd.name.SetText ~= nil and type(targetName) == "string" and targetName ~= "" then
+            local showName = type(targetName) == "string" and targetName ~= ""
+            if UI.target.wnd.name.SetText ~= nil and showName and UI.target.wnd.name.__polar_text ~= targetName then
                 UI.target.wnd.name:SetText(targetName)
+                UI.target.wnd.name.__polar_text = targetName
             end
-            if UI.target.wnd.name.Show ~= nil then
-                UI.target.wnd.name:Show(type(targetName) == "string" and targetName ~= "")
+            if UI.target.wnd.name.SetText ~= nil and not showName and UI.target.wnd.name.__polar_text ~= "" then
+                UI.target.wnd.name:SetText("")
+                UI.target.wnd.name.__polar_text = ""
+            end
+            if UI.target.wnd.name.Show ~= nil and UI.target.wnd.name.__polar_visible ~= showName then
+                UI.target.wnd.name:Show(showName)
+                UI.target.wnd.name.__polar_visible = showName
             end
         end
     end)
@@ -435,171 +180,49 @@ local function ApplyTargetNameLevel(targetName, targetLevel)
         if levelLabel == nil then
             return
         end
+        local showLevel = type(targetLevel) == "number" and targetLevel > 0
         if levelLabel.SetText ~= nil then
-            if type(targetLevel) == "number" and targetLevel > 0 then
-                levelLabel:SetText(tostring(targetLevel))
+            if showLevel then
+                local levelText = tostring(targetLevel)
+                if levelLabel.__polar_text ~= levelText then
+                    levelLabel:SetText(levelText)
+                    levelLabel.__polar_text = levelText
+                end
             else
-                levelLabel:SetText("")
+                if levelLabel.__polar_text ~= "" then
+                    levelLabel:SetText("")
+                    levelLabel.__polar_text = ""
+                end
             end
         end
-        if levelLabel.Show ~= nil then
-            levelLabel:Show(type(targetLevel) == "number" and targetLevel > 0)
+        if levelLabel.Show ~= nil and levelLabel.__polar_visible ~= showLevel then
+            levelLabel:Show(showLevel)
+            levelLabel.__polar_visible = showLevel
         end
     end)
 end
 
-local function ExtractNamedText(value, visited)
-    local valueType = type(value)
-    if valueType == "string" then
-        return GetFirstTooltipLine(value)
-    end
-    if valueType ~= "table" then
-        return ""
-    end
 
-    visited = visited or {}
-    if visited[value] then
-        return ""
+local function ClearTargetOverlayWidget(widget)
+    if widget == nil then
+        return
     end
-    visited[value] = true
-
-    local directKeys = {
-        "name",
-        "item_name",
-        "title",
-        "text",
-        "linkText",
-        "tooltipText",
-        "tooltip_text",
-        "buffName"
-    }
-    for _, key in ipairs(directKeys) do
-        local text = ExtractNamedText(value[key], visited)
-        if text ~= "" then
-            return text
-        end
+    if widget.SetText ~= nil then
+        widget:SetText("")
+        widget.__polar_text = ""
     end
-
-    for _, nested in ipairs(value) do
-        local text = ExtractNamedText(nested, visited)
-        if text ~= "" then
-            return text
-        end
+    if widget.Show ~= nil then
+        widget:Show(false)
+        widget.__polar_visible = false
     end
-
-    return ""
 end
 
-local function GetTargetGliderName(targetId)
-    if api == nil or api.Equipment == nil then
-        return ""
-    end
-
-    local targetCacheKey = GetTargetGliderCacheKey(targetId)
-    local nowMs = SafeGetUiMsec()
-    if TARGET_GLIDER_REFRESH_MS > 0
-        and UI.target.glider_target_id == targetCacheKey
-        and targetCacheKey ~= "|"
-        and (nowMs - (tonumber(UI.target.glider_last_refresh_ms) or 0)) < TARGET_GLIDER_REFRESH_MS
-    then
-        return tostring(UI.target.glider_name or "")
-    end
-
-    local function storeResolved(nameText, iconPath, tooltipText)
-        UI.target.glider_target_id = targetCacheKey
-        UI.target.glider_name = tostring(nameText or "")
-        UI.target.glider_icon_path = tostring(iconPath or "")
-        UI.target.glider_tooltip_text = tostring(tooltipText or "")
-        UI.target.glider_last_refresh_ms = nowMs
-        return UI.target.glider_name
-    end
-
-    local function scanSlot(slotIdx)
-        local rawTooltip = nil
-        local tooltipName = ""
-        local tooltipText = ""
-        if api.Equipment.GetEquippedItemTooltipText ~= nil then
-            pcall(function()
-                rawTooltip = api.Equipment:GetEquippedItemTooltipText("target", slotIdx)
-                tooltipName = ExtractNamedText(rawTooltip)
-                tooltipText = NormalizeTooltipText(rawTooltip)
-            end)
-        end
-
-        local info = nil
-        if api.Equipment.GetEquippedItemTooltipInfo ~= nil then
-            pcall(function()
-                info = api.Equipment:GetEquippedItemTooltipInfo(slotIdx, true)
-            end)
-        end
-
-        local itemType = ExtractItemType(info)
-        local itemInfo = SafeGetItemInfoByType(itemType)
-        local itemName = ExtractNamedText(itemInfo)
-        local infoName = ExtractNamedText(info)
-        local resolvedName = itemName
-        if resolvedName == "" then
-            resolvedName = infoName
-        end
-        if resolvedName == "" then
-            resolvedName = tooltipName
-        end
-
-        local resolvedTooltip = tooltipText
-        if resolvedTooltip == "" then
-            resolvedTooltip = NormalizeTooltipText(info)
-        end
-        if resolvedTooltip == "" then
-            resolvedTooltip = NormalizeTooltipText(itemInfo)
-        end
-
-        local resolvedIconPath = ExtractIconPath(itemInfo)
-        if resolvedIconPath == "" then
-            resolvedIconPath = ExtractIconPath(info)
-        end
-
-        local looksLikeFlightGear =
-            ContainsFlightGearKeywords(resolvedName)
-            or ContainsFlightGearKeywords(resolvedTooltip)
-            or ContainsFlightGearKeywords(tooltipName)
-            or ContainsFlightGearInfoKeywords(info)
-            or ContainsFlightGearInfoKeywords(itemInfo)
-
-        local score = 0
-        if resolvedName ~= "" then
-            score = score + 10
-        end
-        if itemType ~= nil then
-            score = score + 5
-        end
-        if resolvedIconPath ~= "" then
-            score = score + 2
-        end
-        if looksLikeFlightGear then
-            score = score + 100
-        end
-
-        return {
-            slot = slotIdx,
-            name = resolvedName,
-            iconPath = resolvedIconPath,
-            tooltipText = resolvedTooltip,
-            score = score,
-            looksLikeFlightGear = looksLikeFlightGear
-        }
-    end
-
-    local best = scanSlot(TARGET_FLIGHT_GEAR_SLOT)
-
-    if type(best) == "table"
-        and best.looksLikeFlightGear
-        and tostring(best.name or "") ~= ""
-    then
-        return storeResolved(best.name, best.iconPath, best.tooltipText)
-    end
-
-    storeResolved("", "", "")
-    return ""
+local function ClearTargetOverlayText()
+    ClearTargetOverlayWidget(UI.target.guild)
+    ClearTargetOverlayWidget(UI.target.class_name)
+    ClearTargetOverlayWidget(UI.target.gearscore)
+    ClearTargetOverlayWidget(UI.target.pdef)
+    ClearTargetOverlayWidget(UI.target.mdef)
 end
 
 local function ClampNumber(v, minV, maxV, fallback)
@@ -1155,20 +778,6 @@ local function ApplyBarStyle(frame, style)
         setStatusBarStyle("S_MP", coordsFor("S_MP", SMALL_BAR_COORDS), mpUp, mpDown)
     end
 
-    if frame.__polar_last_hp_texture_mode ~= mode then
-        frame.__polar_last_hp_texture_mode = mode
-        if mode == "pc" then
-            pcall(function()
-                frame:ChangeHpBarTexture_forPc()
-            end)
-        elseif mode == "npc" then
-            pcall(function()
-                frame:ChangeHpBarTexture_forNpc()
-            end)
-        end
-
-    end
-
     local function isHostileUnit(unit)
         if api == nil or api.Unit == nil then
             return false
@@ -1191,20 +800,47 @@ local function ApplyBarStyle(frame, style)
         return frame.__polar_small_hpmp and true or false
     end
 
+    local function getHpStyleKey(hostile)
+        local small = usesSmallHpMp()
+        if mode == "pc" then
+            if small and statusbar_style ~= nil and statusbar_style.S_HP_PARTY ~= nil then
+                return "S_HP_PARTY"
+            end
+            return hostile and (small and "S_HP_HOSTILE" or "L_HP_HOSTILE") or (small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY")
+        end
+        if mode == "npc" then
+            if hostile then
+                return small and "S_HP_HOSTILE" or "L_HP_HOSTILE"
+            end
+            if small and statusbar_style ~= nil and statusbar_style.S_HP_NEUTRAL ~= nil then
+                return "S_HP_NEUTRAL"
+            end
+            if (not small) and statusbar_style ~= nil and statusbar_style.L_HP_NEUTRAL ~= nil then
+                return "L_HP_NEUTRAL"
+            end
+            return small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY"
+        end
+        return hostile and (small and "S_HP_HOSTILE" or "L_HP_HOSTILE") or (small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY")
+    end
+
     pcall(function()
         if frame.hpBar ~= nil then
             if statusbar_style ~= nil and type(statusbar_style) == "table" then
                 local unit = frame.__polar_unit
                 local hostile = isHostileUnit(unit)
-                local styleKey = nil
-                if usesSmallHpMp() then
-                    styleKey = hostile and "S_HP_HOSTILE" or "S_HP_FRIENDLY"
-                else
-                    styleKey = hostile and "L_HP_HOSTILE" or "L_HP_FRIENDLY"
-                end
+                local styleKey = getHpStyleKey(hostile)
                 frame.hpBar:ApplyBarTexture(statusbar_style[styleKey])
             else
                 frame.hpBar:ApplyBarTexture()
+            end
+            if mode == "pc" then
+                pcall(function()
+                    frame:ChangeHpBarTexture_forPc()
+                end)
+            elseif mode == "npc" then
+                pcall(function()
+                    frame:ChangeHpBarTexture_forNpc()
+                end)
             end
         end
     end)
@@ -1522,176 +1158,10 @@ local function SafeGetExtent(wnd)
     return tonumber(w), tonumber(h)
 end
 
-local function EnsureAlignmentGridWindow()
-    if UI.alignment_grid.wnd ~= nil then
-        return UI.alignment_grid.wnd
-    end
-    if api.Interface == nil or api.Interface.CreateEmptyWindow == nil then
-        return nil
-    end
-
-    local wnd = nil
-    pcall(function()
-        wnd = api.Interface:CreateEmptyWindow("polarUiAlignmentGrid")
-    end)
-    if wnd == nil then
-        return nil
-    end
-
-    UI.alignment_grid.wnd = wnd
-    SetNotClickable(wnd)
-    pcall(function()
-        if wnd.SetUILayer ~= nil then
-            wnd:SetUILayer("hud")
-        end
-    end)
-    pcall(function()
-        if wnd.SetZOrder ~= nil then
-            wnd:SetZOrder(9999)
-        end
-    end)
-    pcall(function()
-        if wnd.RemoveAllAnchors ~= nil then
-            wnd:RemoveAllAnchors()
-        end
-        if wnd.AddAnchor ~= nil then
-            wnd:AddAnchor("TOPLEFT", "UIParent", 0, 0)
-            wnd:AddAnchor("BOTTOMRIGHT", "UIParent", 0, 0)
-        end
-    end)
-    pcall(function()
-        if wnd.Show ~= nil then
-            wnd:Show(false)
-        end
-    end)
-
-    return wnd
-end
-
-local function EnsureAlignmentGridLines(w, h)
-    local wnd = UI.alignment_grid.wnd
-    if wnd == nil then
-        return
-    end
-
-    local step = 30
-    local alpha = 0.18
-    local line_w = 1
-    local line_h = 1
-
-    local max_v = math.floor((w or 0) / step)
-    local max_h = math.floor((h or 0) / step)
-    if max_v < 1 then
-        max_v = math.floor(2042 / step)
-    end
-    if max_h < 1 then
-        max_h = math.floor(1124 / step)
-    end
-
-    for i = 0, max_v do
-        local d = UI.alignment_grid.v_lines[i]
-        if d == nil and wnd.CreateColorDrawable ~= nil then
-            pcall(function()
-                d = wnd:CreateColorDrawable(1, 1, 1, alpha, "overlay")
-            end)
-            UI.alignment_grid.v_lines[i] = d
-        end
-        if d ~= nil then
-            pcall(function()
-                if d.RemoveAllAnchors ~= nil then
-                    d:RemoveAllAnchors()
-                end
-                if d.AddAnchor ~= nil then
-                    local x = i * step
-                    d:AddAnchor("TOPLEFT", wnd, x, 0)
-                    d:AddAnchor("BOTTOMLEFT", wnd, x, 0)
-                end
-                if d.SetWidth ~= nil then
-                    d:SetWidth(line_w)
-                end
-                if d.Show ~= nil then
-                    d:Show(true)
-                end
-            end)
-        end
-    end
-
-    for i, d in pairs(UI.alignment_grid.v_lines) do
-        if type(i) == "number" and i > max_v and d ~= nil and d.Show ~= nil then
-            pcall(function()
-                d:Show(false)
-            end)
-        end
-    end
-
-    for i = 0, max_h do
-        local d = UI.alignment_grid.h_lines[i]
-        if d == nil and wnd.CreateColorDrawable ~= nil then
-            pcall(function()
-                d = wnd:CreateColorDrawable(1, 1, 1, alpha, "overlay")
-            end)
-            UI.alignment_grid.h_lines[i] = d
-        end
-        if d ~= nil then
-            pcall(function()
-                if d.RemoveAllAnchors ~= nil then
-                    d:RemoveAllAnchors()
-                end
-                if d.AddAnchor ~= nil then
-                    local y = i * step
-                    d:AddAnchor("TOPLEFT", wnd, 0, y)
-                    d:AddAnchor("TOPRIGHT", wnd, 0, y)
-                end
-                if d.SetHeight ~= nil then
-                    d:SetHeight(line_h)
-                end
-                if d.Show ~= nil then
-                    d:Show(true)
-                end
-            end)
-        end
-    end
-
-    for i, d in pairs(UI.alignment_grid.h_lines) do
-        if type(i) == "number" and i > max_h and d ~= nil and d.Show ~= nil then
-            pcall(function()
-                d:Show(false)
-            end)
-        end
-    end
-end
-
 local function EnsureAlignmentGrid(settings)
-    local enabled = (type(settings) == "table" and settings.alignment_grid_enabled) and true or false
-    local wnd = EnsureAlignmentGridWindow()
-    if wnd == nil then
-        return
+    if AlignmentModule ~= nil and AlignmentModule.Ensure ~= nil then
+        AlignmentModule.Ensure(BuildUiContext(), settings)
     end
-
-    if not enabled then
-        pcall(function()
-            wnd:Show(false)
-        end)
-        return
-    end
-
-    local w, h = SafeGetExtent(wnd)
-    if w == nil or h == nil or w <= 0 or h <= 0 then
-        w, h = SafeGetExtent(api.rootWindow)
-    end
-    if w == nil or h == nil or w <= 0 or h <= 0 then
-        w, h = 2042, 1124
-    end
-
-    if UI.alignment_grid.last_w ~= w or UI.alignment_grid.last_h ~= h then
-        UI.alignment_grid.last_w = w
-        UI.alignment_grid.last_h = h
-        EnsureAlignmentGridLines(w, h)
-    end
-
-    pcall(function()
-        wnd:Show(true)
-    end)
 end
 
 local function ApplyFrameAlpha(frame, alpha)
@@ -1736,7 +1206,6 @@ local function ApplyOverlayAlpha(alpha)
         end)
     end
 
-    applyTo(UI.target.role)
     applyTo(UI.target.class_name)
     applyTo(UI.target.guild)
 end
@@ -2521,34 +1990,6 @@ local function GetAuraCfgKey(aura)
     return string.format("%d:%d:%d:%d:%d", iconSize, xGap, yGap, perRow, sortVertical)
 end
 
-local function InList(list, value)
-    if type(list) ~= "table" or value == nil then
-        return false
-    end
-
-    local v = tostring(value):lower()
-    for _, item in pairs(list) do
-        if tostring(item):lower() == v then
-            return true
-        end
-    end
-    return false
-end
-
-local function GetRoleForClass(settings, className)
-    if type(settings) ~= "table" or type(settings.role) ~= "table" then
-        return "dps"
-    end
-
-    if InList(settings.role.tanks, className) then
-        return "tank"
-    end
-    if InList(settings.role.healers, className) then
-        return "healer"
-    end
-    return "dps"
-end
-
 local function ApplyBuffWindowPlacement(frame, cfg)
     if frame == nil or type(cfg) ~= "table" then
         return
@@ -2671,6 +2112,24 @@ local function ApplyStockFrameStyle(frame, style)
             SafeAnchor(frame.mpBar.mpLabel, frame.mpBar)
         end
     end)
+end
+
+BuildUiContext = function()
+    return {
+        UI = UI,
+        api = api,
+        Runtime = Runtime,
+        SetNotClickable = SetNotClickable,
+        SafeGetExtent = SafeGetExtent,
+        ApplyTextColor = ApplyTextColor,
+        ApplyOverlayAlpha = ApplyOverlayAlpha,
+        ResolveUnitDisplayName = ResolveUnitDisplayName,
+        ResolveUnitLevel = ResolveUnitLevel,
+        SafeGetUnitInfoById = SafeGetUnitInfoById,
+        ApplyTargetNameLevel = ApplyTargetNameLevel,
+        TrimText = TrimText,
+        NormalizeUnitId = NormalizeUnitId
+    }
 end
 
 local function EnsureUi(settings)
@@ -2871,481 +2330,23 @@ local function EnsureUi(settings)
     end
     UI.last_aura_enabled = auraEnabled
     UI.last_aura_cfg = auraCfgKey
-
-    local targetStyle = (UI.target.wnd ~= nil and type(UI.target.wnd.__polar_style_override) == "table") and UI.target.wnd.__polar_style_override or baseStyle
-    local overlayFontSize = tonumber(targetStyle.overlay_font_size) or tonumber(settings.font_size_value) or 12
-    local gsFontSize = tonumber(targetStyle.gs_font_size) or overlayFontSize
-    local classFontSize = tonumber(targetStyle.class_font_size) or overlayFontSize
-    local roleFontSize = tonumber(targetStyle.role_font_size) or overlayFontSize
-    local guildFontSize = tonumber(targetStyle.target_guild_font_size) or overlayFontSize
-    local overlayShadow = (targetStyle.overlay_shadow ~= false)
-
-    if UI.target.wnd == nil then
-        return
+    if TargetExtrasModule ~= nil and TargetExtrasModule.Ensure ~= nil then
+        TargetExtrasModule.Ensure(BuildUiContext(), settings, baseStyle)
     end
-
-    if UI.target.role == nil then
-        UI.target.role = UI.target.wnd:CreateChildWidget("label", "polarUiTargetRole", 0, true)
-        table.insert(UI.created, UI.target.role)
-        SetNotClickable(UI.target.role)
-        UI.target.role:AddAnchor("BOTTOMRIGHT", UI.target.wnd, -10, -6)
-        UI.target.role.style:SetAlign(ALIGN.RIGHT)
-        UI.target.role.style:SetShadow(overlayShadow)
-        ApplyTextColor(UI.target.role, FONT_COLOR.WHITE)
-        if UI.target.role.SetAutoResize ~= nil then
-            UI.target.role:SetAutoResize(true)
-        end
-        UI.target.role.style:SetFontSize(roleFontSize)
-    end
-
-    if UI.target.guild == nil then
-        UI.target.guild = UI.target.wnd:CreateChildWidget("label", "polarUiTargetGuild", 0, true)
-        table.insert(UI.created, UI.target.guild)
-        SetNotClickable(UI.target.guild)
-        UI.target.guild.style:SetAlign(ALIGN.LEFT)
-        UI.target.guild.style:SetShadow(overlayShadow)
-        ApplyTextColor(UI.target.guild, FONT_COLOR.WHITE)
-        if UI.target.guild.SetAutoResize ~= nil then
-            UI.target.guild:SetAutoResize(true)
-        end
-        UI.target.guild.style:SetFontSize(guildFontSize)
-        UI.target.guild:Show(false)
-    end
-
-    if UI.target.class_name == nil then
-        UI.target.class_name = UI.target.wnd:CreateChildWidget("label", "polarUiTargetClass", 0, true)
-        table.insert(UI.created, UI.target.class_name)
-        SetNotClickable(UI.target.class_name)
-        UI.target.class_name:AddAnchor("TOPLEFT", UI.target.wnd, 10, -18)
-        UI.target.class_name.style:SetAlign(ALIGN.LEFT)
-        UI.target.class_name.style:SetShadow(overlayShadow)
-        ApplyTextColor(UI.target.class_name, FONT_COLOR.WHITE)
-        if UI.target.class_name.SetAutoResize ~= nil then
-            UI.target.class_name:SetAutoResize(true)
-        end
-        UI.target.class_name.style:SetFontSize(classFontSize)
-    end
-
-    if UI.target.gearscore == nil then
-        UI.target.gearscore = UI.target.wnd:CreateChildWidget("label", "polarUiTargetGearscore", 0, true)
-        table.insert(UI.created, UI.target.gearscore)
-        SetNotClickable(UI.target.gearscore)
-        UI.target.gearscore:AddAnchor("TOPLEFT", UI.target.wnd, 10, -36)
-        UI.target.gearscore.style:SetAlign(ALIGN.LEFT)
-        UI.target.gearscore.style:SetShadow(overlayShadow)
-        ApplyTextColor(UI.target.gearscore, FONT_COLOR.WHITE)
-        if UI.target.gearscore.SetAutoResize ~= nil then
-            UI.target.gearscore:SetAutoResize(true)
-        end
-        UI.target.gearscore.style:SetFontSize(gsFontSize)
-    end
-
-    if UI.target.glider == nil then
-        UI.target.glider = UI.target.wnd:CreateChildWidget("label", "polarUiTargetGlider", 0, true)
-        table.insert(UI.created, UI.target.glider)
-        SetNotClickable(UI.target.glider)
-        UI.target.glider.style:SetAlign(ALIGN.LEFT)
-        UI.target.glider.style:SetShadow(overlayShadow)
-        ApplyTextColor(UI.target.glider, FONT_COLOR.WHITE)
-        if UI.target.glider.SetAutoResize ~= nil then
-            UI.target.glider:SetAutoResize(true)
-        end
-        UI.target.glider.style:SetFontSize(classFontSize)
-        UI.target.glider:Show(false)
-    end
-
-    if UI.target.glider_icon == nil and type(CreateItemIconButton) == "function" then
-        local ok, icon = pcall(function()
-            return CreateItemIconButton("polarUiTargetGliderIcon", UI.target.wnd)
-        end)
-        if ok and icon ~= nil then
-            table.insert(UI.created, icon)
-            UI.target.glider_icon = icon
-            pcall(function()
-                if icon.SetExtent ~= nil then
-                    icon:SetExtent(24, 24)
-                end
-                if icon.Clickable ~= nil then
-                    icon:Clickable(true)
-                end
-            end)
-            pcall(function()
-                if F_SLOT ~= nil and F_SLOT.ApplySlotSkin ~= nil and icon.back ~= nil and SLOT_STYLE ~= nil then
-                    local style = SLOT_STYLE.DEFAULT or SLOT_STYLE.BUFF or SLOT_STYLE.ITEM
-                    if style ~= nil then
-                        F_SLOT.ApplySlotSkin(icon, icon.back, style)
-                    end
-                end
-            end)
-            icon.__polar_tooltip_text = ""
-            icon.OnEnter = function(self)
-                local tooltipText = tostring(self.__polar_tooltip_text or "")
-                if tooltipText == "" or api == nil or api.Interface == nil or api.Interface.SetTooltipOnPos == nil then
-                    return
-                end
-                local posX, posY = 0, 0
-                pcall(function()
-                    if self.GetOffset ~= nil then
-                        posX, posY = self:GetOffset()
-                    end
-                end)
-                pcall(function()
-                    api.Interface:SetTooltipOnPos(tooltipText, self, posX, posY + 6)
-                end)
-            end
-            icon.OnLeave = function(self)
-                if api == nil or api.Interface == nil or api.Interface.SetTooltipOnPos == nil then
-                    return
-                end
-                local posX, posY = 0, 0
-                pcall(function()
-                    if self.GetOffset ~= nil then
-                        posX, posY = self:GetOffset()
-                    end
-                end)
-                pcall(function()
-                    api.Interface:SetTooltipOnPos(nil, self, posX, posY + 6)
-                end)
-            end
-            if icon.SetHandler ~= nil then
-                pcall(function()
-                    icon:SetHandler("OnEnter", icon.OnEnter)
-                    icon:SetHandler("OnLeave", icon.OnLeave)
-                end)
-            end
-        end
-    end
-
-    if UI.target.pdef == nil then
-        UI.target.pdef = UI.target.wnd:CreateChildWidget("label", "polarUiTargetPdef", 0, true)
-        table.insert(UI.created, UI.target.pdef)
-        SetNotClickable(UI.target.pdef)
-        UI.target.pdef.style:SetAlign(ALIGN.LEFT)
-        UI.target.pdef.style:SetShadow(overlayShadow)
-        ApplyTextColor(UI.target.pdef, FONT_COLOR.WHITE)
-        if UI.target.pdef.SetAutoResize ~= nil then
-            UI.target.pdef:SetAutoResize(true)
-        end
-        UI.target.pdef.style:SetFontSize(gsFontSize)
-        UI.target.pdef:Show(false)
-    end
-
-    if UI.target.mdef == nil then
-        UI.target.mdef = UI.target.wnd:CreateChildWidget("label", "polarUiTargetMdef", 0, true)
-        table.insert(UI.created, UI.target.mdef)
-        SetNotClickable(UI.target.mdef)
-        UI.target.mdef.style:SetAlign(ALIGN.LEFT)
-        UI.target.mdef.style:SetShadow(overlayShadow)
-        ApplyTextColor(UI.target.mdef, FONT_COLOR.WHITE)
-        if UI.target.mdef.SetAutoResize ~= nil then
-            UI.target.mdef:SetAutoResize(true)
-        end
-        UI.target.mdef.style:SetFontSize(gsFontSize)
-        UI.target.mdef:Show(false)
-    end
-
-    pcall(function()
-        if UI.target.role ~= nil and UI.target.role.style ~= nil then
-            UI.target.role.style:SetFontSize(roleFontSize)
-            UI.target.role.style:SetShadow(overlayShadow)
-        end
-        if UI.target.guild ~= nil and UI.target.guild.style ~= nil then
-            UI.target.guild.style:SetFontSize(guildFontSize)
-            UI.target.guild.style:SetShadow(overlayShadow)
-        end
-        if UI.target.class_name ~= nil and UI.target.class_name.style ~= nil then
-            UI.target.class_name.style:SetFontSize(classFontSize)
-            UI.target.class_name.style:SetShadow(overlayShadow)
-        end
-        if UI.target.gearscore ~= nil and UI.target.gearscore.style ~= nil then
-            UI.target.gearscore.style:SetFontSize(gsFontSize)
-            UI.target.gearscore.style:SetShadow(overlayShadow)
-        end
-        if UI.target.glider ~= nil and UI.target.glider.style ~= nil then
-            UI.target.glider.style:SetFontSize(classFontSize)
-            UI.target.glider.style:SetShadow(overlayShadow)
-        end
-        if UI.target.pdef ~= nil and UI.target.pdef.style ~= nil then
-            UI.target.pdef.style:SetFontSize(gsFontSize)
-            UI.target.pdef.style:SetShadow(overlayShadow)
-        end
-        if UI.target.mdef ~= nil and UI.target.mdef.style ~= nil then
-            UI.target.mdef.style:SetFontSize(gsFontSize)
-            UI.target.mdef.style:SetShadow(overlayShadow)
-        end
-    end)
-
-    pcall(function()
-        if UI.target.class_name ~= nil and UI.target.gearscore ~= nil then
-            if UI.target.guild ~= nil then
-                if UI.target.guild.RemoveAllAnchors ~= nil then
-                    UI.target.guild:RemoveAllAnchors()
-                end
-                UI.target.guild:AddAnchor(
-                    "TOPLEFT",
-                    UI.target.wnd,
-                    tonumber(targetStyle.target_guild_offset_x) or 10,
-                    tonumber(targetStyle.target_guild_offset_y) or -54
-                )
-            end
-
-            if UI.target.class_name.RemoveAllAnchors ~= nil then
-                UI.target.class_name:RemoveAllAnchors()
-            end
-            UI.target.class_name:AddAnchor("TOPLEFT", UI.target.wnd, 10, -18)
-
-            if UI.target.gearscore.RemoveAllAnchors ~= nil then
-                UI.target.gearscore:RemoveAllAnchors()
-            end
-            UI.target.gearscore:AddAnchor("TOPLEFT", UI.target.wnd, 10, -36)
-
-            if UI.target.glider ~= nil and UI.target.glider.RemoveAllAnchors ~= nil then
-                UI.target.glider:RemoveAllAnchors()
-            end
-            if UI.target.glider_icon ~= nil and UI.target.glider_icon.RemoveAllAnchors ~= nil then
-                UI.target.glider_icon:RemoveAllAnchors()
-            end
-            if UI.target.glider_icon ~= nil then
-                UI.target.glider_icon:AddAnchor("TOPLEFT", UI.target.wnd, "TOPRIGHT", 12, -18)
-            end
-            if UI.target.glider ~= nil then
-                if UI.target.glider_icon ~= nil then
-                    UI.target.glider:AddAnchor("LEFT", UI.target.glider_icon, "RIGHT", 6, 0)
-                else
-                    UI.target.glider:AddAnchor("TOPLEFT", UI.target.wnd, "TOPRIGHT", 12, -18)
-                end
-            end
-
-            if UI.target.pdef ~= nil and UI.target.pdef.RemoveAllAnchors ~= nil then
-                UI.target.pdef:RemoveAllAnchors()
-            end
-            if UI.target.pdef ~= nil then
-                UI.target.pdef:AddAnchor("TOPLEFT", UI.target.class_name, "TOPRIGHT", 10, 0)
-            end
-
-            if UI.target.mdef ~= nil and UI.target.mdef.RemoveAllAnchors ~= nil then
-                UI.target.mdef:RemoveAllAnchors()
-            end
-            if UI.target.mdef ~= nil then
-                UI.target.mdef:AddAnchor("TOPLEFT", UI.target.gearscore, "TOPRIGHT", 10, 0)
-            end
-        end
-    end)
-
-    ApplyOverlayAlpha(targetStyle.overlay_alpha)
 end
 
 local function UpdateTargetExtras(settings)
-    local targetId = api.Unit:GetUnitId("target")
-    if targetId == nil then
-        return
+    if TargetExtrasModule ~= nil and TargetExtrasModule.Update ~= nil then
+        TargetExtrasModule.Update(BuildUiContext(), settings)
     end
-
-    local targetUnitInfo = nil
-    pcall(function()
-        if api.Unit ~= nil and api.Unit.UnitInfo ~= nil then
-            local info = api.Unit:UnitInfo("target")
-            if type(info) == "table" then
-                targetUnitInfo = info
-            end
-        end
-    end)
-    local targetDisplayName = ResolveUnitDisplayName(targetUnitInfo)
-    if targetDisplayName == "" and Runtime ~= nil and Runtime.GetUnitName ~= nil then
-        targetDisplayName = TrimText(Runtime.GetUnitName("target"))
-    end
-    local targetLevel = ResolveUnitLevel(targetUnitInfo)
-
-    local isCharacter = true
-    if type(targetUnitInfo) == "table" and targetUnitInfo.type ~= nil then
-        isCharacter = (targetUnitInfo.type == "character")
-    else
-        pcall(function()
-            if api.Unit ~= nil and api.Unit.GetUnitInfoById ~= nil then
-                local ti = SafeGetUnitInfoById(targetId)
-                if type(ti) == "table" and ti.type ~= nil then
-                    isCharacter = (ti.type == "character")
-                end
-                if targetLevel == nil then
-                    targetLevel = ResolveUnitLevel(ti)
-                end
-                if targetDisplayName == "" then
-                    targetDisplayName = ResolveUnitDisplayName(ti)
-                end
-            end
-        end)
-    end
-    ApplyTargetNameLevel(targetDisplayName, targetLevel)
-
-    local gs = nil
-    pcall(function()
-        if api.Unit ~= nil then
-            gs = api.Unit:UnitGearScore("target")
-        end
-    end)
-
-    if gs == nil then
-        if type(targetUnitInfo) == "table" then
-            gs = targetUnitInfo.gearScore or targetUnitInfo.gearscore or targetUnitInfo.gear_score or targetUnitInfo.gs
-        end
-    end
-
-    if gs == nil then
-        pcall(function()
-            if api.Unit ~= nil then
-                local info = SafeGetUnitInfoById(targetId)
-                if type(info) == "table" then
-                    gs = info.gearScore or info.gearscore or info.gear_score or info.gs
-                end
-            end
-        end)
-    end
-
-    if UI.target.gearscore ~= nil and UI.target.gearscore.SetText ~= nil then
-        local txt = nil
-        if type(gs) == "number" then
-            txt = tostring(math.floor(gs + 0.5))
-        elseif type(gs) == "string" then
-            txt = gs
-        end
-        if type(txt) == "string" and txt ~= "" then
-            UI.target.gearscore:SetText(txt .. "gs")
-        else
-            UI.target.gearscore:SetText("")
-        end
-    end
-
-    if UI.target.gearscore ~= nil and UI.target.gearscore.Show ~= nil then
-        UI.target.gearscore:Show(gs ~= nil and tostring(gs) ~= "")
-    end
-
-    local className = ""
-    pcall(function()
-        if api.Ability and api.Ability.GetUnitClassName then
-            className = api.Ability:GetUnitClassName("target") or ""
-        end
-    end)
-
-    if UI.target.class_name ~= nil and UI.target.class_name.SetText ~= nil then
-        UI.target.class_name:SetText(className)
-    end
-
-    local role = GetRoleForClass(settings, className)
-    if UI.target.role ~= nil and UI.target.role.SetText ~= nil then
-        if role == "tank" then
-            UI.target.role:SetText("T")
-        elseif role == "healer" then
-            UI.target.role:SetText("H")
-        else
-            UI.target.role:SetText("D")
-        end
-    end
-
-    pcall(function()
-        if UI.target.wnd ~= nil and UI.target.wnd.UpdateTooltip ~= nil then
-            UI.target.wnd:UpdateTooltip()
-        end
-    end)
-
-    local pdef = nil
-    local mdef = nil
-    if isCharacter and type(targetUnitInfo) == "table" then
-        pdef = targetUnitInfo.armor
-        mdef = targetUnitInfo.magic_resist
-    end
-
-    local guild = ""
-    if isCharacter and type(targetUnitInfo) == "table" then
-        guild = TrimText(
-            targetUnitInfo.expeditionName
-            or targetUnitInfo.guildName
-            or targetUnitInfo.guild
-            or ""
-        )
-    end
-    if guild == "" and isCharacter then
-        local fallbackInfo = SafeGetUnitInfoById(targetId)
-        local fallbackName = ResolveUnitDisplayName(fallbackInfo)
-        local namesMatch = targetDisplayName ~= "" and fallbackName ~= ""
-            and string.lower(targetDisplayName) == string.lower(fallbackName)
-        if namesMatch and type(fallbackInfo) == "table" then
-            guild = TrimText(
-                fallbackInfo.expeditionName
-                or fallbackInfo.guildName
-                or fallbackInfo.guild
-                or ""
-            )
-        end
-    end
-
-    if UI.target.guild ~= nil and UI.target.guild.SetText ~= nil then
-        if guild ~= "" then
-            UI.target.guild:SetText("<" .. guild .. ">")
-        else
-            UI.target.guild:SetText("")
-        end
-    end
-    if UI.target.guild ~= nil and UI.target.guild.Show ~= nil then
-        UI.target.guild:Show(guild ~= "")
-    end
-
-    local gliderName = GetTargetGliderName(targetId)
-    local gliderTooltipText = tostring(UI.target.glider_tooltip_text or "")
-    local gliderIconPath = tostring(UI.target.glider_icon_path or "")
-    if UI.target.glider ~= nil and UI.target.glider.SetText ~= nil then
-        if gliderName ~= "" then
-            UI.target.glider:SetText("Flight Gear: " .. gliderName)
-        else
-            UI.target.glider:SetText("")
-        end
-    end
-    if UI.target.glider ~= nil and UI.target.glider.Show ~= nil then
-        UI.target.glider:Show(gliderName ~= "")
-    end
-    if UI.target.glider_icon ~= nil and UI.target.glider_icon.Show ~= nil then
-        if gliderName ~= "" then
-            if gliderIconPath ~= "" and F_SLOT ~= nil and F_SLOT.SetIconBackGround ~= nil then
-                pcall(function()
-                    F_SLOT.SetIconBackGround(UI.target.glider_icon, gliderIconPath)
-                end)
-            end
-            UI.target.glider_icon.__polar_tooltip_text = gliderTooltipText ~= "" and gliderTooltipText or gliderName
-            UI.target.glider_icon:Show(true)
-        else
-            UI.target.glider_icon.__polar_tooltip_text = ""
-            UI.target.glider_icon:Show(false)
-        end
-    end
-
-    if UI.target.pdef ~= nil and UI.target.pdef.SetText ~= nil then
-        if type(pdef) == "number" and pdef > 0 then
-            UI.target.pdef:SetText(string.format("PDEF %d", math.floor(pdef + 0.5)))
-        else
-            UI.target.pdef:SetText("")
-        end
-    end
-    if UI.target.pdef ~= nil and UI.target.pdef.Show ~= nil then
-        UI.target.pdef:Show(type(pdef) == "number" and pdef > 0)
-    end
-
-    if UI.target.mdef ~= nil and UI.target.mdef.SetText ~= nil then
-        if type(mdef) == "number" and mdef > 0 then
-            UI.target.mdef:SetText(string.format("MDEF %d", math.floor(mdef + 0.5)))
-        else
-            UI.target.mdef:SetText("")
-        end
-    end
-    if UI.target.mdef ~= nil and UI.target.mdef.Show ~= nil then
-        UI.target.mdef:Show(type(mdef) == "number" and mdef > 0)
-    end
-
-    -- stock distanceLabel handles distance display
 end
 
 UI.Init = function(settings)
     UI.settings = settings
     UI.enabled = settings.enabled and true or false
     UI.accum_ms = 0
+    UI.plates_accum_ms = 0
+    UI.needs_full_apply = true
     UI.stock_refreshed = false
     UI.last_large_hpmp = nil
     UI.last_aura_enabled = nil
@@ -3385,17 +2386,8 @@ UI.UnLoad = function()
             DailyAge.Unload()
         end)
     end
-    if UI.alignment_grid.wnd ~= nil then
-        pcall(function()
-            if UI.alignment_grid.wnd.Show ~= nil then
-                UI.alignment_grid.wnd:Show(false)
-            end
-        end)
-        pcall(function()
-            if api.Interface ~= nil and api.Interface.Free ~= nil then
-                api.Interface:Free(UI.alignment_grid.wnd)
-            end
-        end)
+    if AlignmentModule ~= nil and AlignmentModule.Reset ~= nil then
+        AlignmentModule.Reset(BuildUiContext())
     end
     for _, widget in ipairs(UI.created or {}) do
         pcall(function()
@@ -3410,35 +2402,26 @@ UI.UnLoad = function()
         end)
     end
     UI.created = {}
-    UI.alignment_grid.wnd = nil
-    UI.alignment_grid.v_lines = {}
-    UI.alignment_grid.h_lines = {}
-    UI.alignment_grid.last_w = nil
-    UI.alignment_grid.last_h = nil
     UI.player.wnd = nil
     UI.target.wnd = nil
+    UI.watchtarget.wnd = nil
+    UI.target_of_target.wnd = nil
+    UI.needs_full_apply = true
     UI.stock_refreshed = false
     UI.last_large_hpmp = nil
     UI.last_aura_enabled = nil
     UI.stock_distance_forced_hidden = false
-    UI.target.role = nil
     UI.target.guild = nil
     UI.target.class_name = nil
     UI.target.gearscore = nil
-    UI.target.glider_icon = nil
-    UI.target.glider = nil
     UI.target.current_target_id = nil
-    UI.target.glider_target_id = nil
-    UI.target.glider_name = ""
-    UI.target.glider_icon_path = ""
-    UI.target.glider_tooltip_text = ""
-    UI.target.glider_last_refresh_ms = 0
     UI.target.pdef = nil
     UI.target.mdef = nil
 end
 
 UI.SetEnabled = function(enabled)
     UI.enabled = enabled and true or false
+    UI.needs_full_apply = true
 
     if Nameplates ~= nil and Nameplates.SetEnabled ~= nil then
         pcall(function()
@@ -3481,52 +2464,31 @@ UI.SetEnabled = function(enabled)
         UI.last_aura_cfg = nil
     end
 
-    if UI.target.role ~= nil and UI.target.role.Show ~= nil then
-        UI.target.role:Show(UI.enabled)
-    end
     if UI.target.class_name ~= nil and UI.target.class_name.Show ~= nil then
-        UI.target.class_name:Show(UI.enabled)
+        if not UI.enabled then
+            UI.target.class_name:Show(false)
+        end
+    end
+    if UI.target.guild ~= nil and UI.target.guild.Show ~= nil then
+        if not UI.enabled then
+            UI.target.guild:Show(false)
+        end
     end
     if UI.target.gearscore ~= nil and UI.target.gearscore.Show ~= nil then
         if not UI.enabled then
             UI.target.gearscore:Show(false)
-        else
-            local tid = api.Unit:GetUnitId("target")
-            UI.target.gearscore:Show(tid ~= nil)
-        end
-    end
-    if UI.target.glider ~= nil and UI.target.glider.Show ~= nil then
-        if not UI.enabled then
-            UI.target.glider:Show(false)
-        else
-            local tid = api.Unit:GetUnitId("target")
-            UI.target.glider:Show(tid ~= nil)
-        end
-    end
-    if UI.target.glider_icon ~= nil and UI.target.glider_icon.Show ~= nil then
-        if not UI.enabled then
-            UI.target.glider_icon:Show(false)
-        else
-            local tid = api.Unit:GetUnitId("target")
-            UI.target.glider_icon:Show(tid ~= nil and tostring(UI.target.glider_name or "") ~= "")
         end
     end
 
     if UI.target.pdef ~= nil and UI.target.pdef.Show ~= nil then
         if not UI.enabled then
             UI.target.pdef:Show(false)
-        else
-            local tid = api.Unit:GetUnitId("target")
-            UI.target.pdef:Show(tid ~= nil)
         end
     end
 
     if UI.target.mdef ~= nil and UI.target.mdef.Show ~= nil then
         if not UI.enabled then
             UI.target.mdef:Show(false)
-        else
-            local tid = api.Unit:GetUnitId("target")
-            UI.target.mdef:Show(tid ~= nil)
         end
     end
     ApplyStockDistanceSetting()
@@ -3541,7 +2503,20 @@ UI.OnUpdate = function(dt)
         return
     end
 
-    EnsureUi(UI.settings)
+    EnsureAlignmentGrid(UI.settings)
+    if UI.needs_full_apply
+        or UI.player.wnd == nil
+        or UI.target.wnd == nil
+        or UI.watchtarget.wnd == nil
+        or UI.target_of_target.wnd == nil then
+        EnsureUi(UI.settings)
+        UI.needs_full_apply = (
+            UI.player.wnd == nil
+            or UI.target.wnd == nil
+            or UI.watchtarget.wnd == nil
+            or UI.target_of_target.wnd == nil
+        )
+    end
 
     UI.plates_accum_ms = (tonumber(UI.plates_accum_ms) or 0) + dt
     local platesInterval = 33
@@ -3577,57 +2552,16 @@ UI.OnUpdate = function(dt)
         end)
     end
 
-    if UI.enabled and UI.target.wnd ~= nil and UI.target.role ~= nil then
+    if UI.enabled and UI.target.wnd ~= nil then
         local tid = api.Unit:GetUnitId("target")
         if tid == nil then
             UI.target.current_target_id = nil
-            UI.target.glider_target_id = nil
-            UI.target.glider_name = ""
-            UI.target.glider_icon_path = ""
-            UI.target.glider_tooltip_text = ""
-            UI.target.glider_last_refresh_ms = 0
-            if UI.target.guild ~= nil and UI.target.guild.SetText ~= nil then
-                UI.target.guild:SetText("")
-            end
-            if UI.target.guild ~= nil and UI.target.guild.Show ~= nil then
-                UI.target.guild:Show(false)
-            end
-            if UI.target.role ~= nil and UI.target.role.Show ~= nil then
-                UI.target.role:Show(false)
-            end
-            if UI.target.class_name ~= nil and UI.target.class_name.Show ~= nil then
-                UI.target.class_name:Show(false)
-            end
-            if UI.target.gearscore ~= nil and UI.target.gearscore.Show ~= nil then
-                UI.target.gearscore:Show(false)
-            end
-            if UI.target.glider ~= nil and UI.target.glider.Show ~= nil then
-                UI.target.glider:Show(false)
-            end
-            if UI.target.glider_icon ~= nil and UI.target.glider_icon.Show ~= nil then
-                UI.target.glider_icon:Show(false)
-            end
+            ClearTargetOverlayText()
         else
             local normalizedTid = NormalizeUnitId(tid)
             if UI.target.current_target_id ~= normalizedTid then
                 UI.target.current_target_id = normalizedTid
-                UI.target.glider_target_id = nil
-                UI.target.glider_name = ""
-                UI.target.glider_icon_path = ""
-                UI.target.glider_tooltip_text = ""
-                UI.target.glider_last_refresh_ms = 0
-                if UI.target.guild ~= nil and UI.target.guild.SetText ~= nil then
-                    UI.target.guild:SetText("")
-                end
-                if UI.target.guild ~= nil and UI.target.guild.Show ~= nil then
-                    UI.target.guild:Show(false)
-                end
-            end
-            if UI.target.role ~= nil and UI.target.role.Show ~= nil then
-                UI.target.role:Show(true)
-            end
-            if UI.target.class_name ~= nil and UI.target.class_name.Show ~= nil then
-                UI.target.class_name:Show(true)
+                ClearTargetOverlayText()
             end
             UpdateTargetExtras(UI.settings)
         end

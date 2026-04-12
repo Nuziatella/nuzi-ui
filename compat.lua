@@ -19,7 +19,7 @@ local function buildRuntimeLines(caps)
     return {
         string.format("Nameplates: %s", caps.nameplates_supported and "Supported" or "Blocked"),
         string.format("Anchoring: %s | Sliders: %s", anchorText, sliderText),
-        string.format("Check buttons: %s | Targeting: passthrough only", checkText)
+        string.format("Check buttons: %s | Targeting: native", checkText)
     }
 end
 
@@ -82,7 +82,7 @@ function Compat.Probe(force)
     end
 
     caps.nameplates_supported = #blockers == 0
-    caps.targeting_mode = "passthrough"
+    caps.targeting_mode = "native"
 
     Compat.state = {
         caps = caps,

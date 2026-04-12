@@ -1,16 +1,9 @@
 local api = require("api")
-local Compat = nil
-do
-    local ok, mod = pcall(require, "nuzi-ui/compat")
-    if ok then
-        Compat = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.compat")
-        if ok then
-            Compat = mod
-        end
-    end
-end
+local SafeRequire = require("nuzi-ui/safe_require")
+local Compat = SafeRequire("nuzi-ui/compat", "nuzi-ui.compat")
+local SettingsCommon = SafeRequire("nuzi-ui/settings_common", "nuzi-ui.settings_common")
+local SettingsWidgets = SafeRequire("nuzi-ui/settings_widgets", "nuzi-ui.settings_widgets")
+local SettingsCatalog = SafeRequire("nuzi-ui/settings_catalog", "nuzi-ui.settings_catalog")
 
 local SettingsPage = {
     settings = nil,
@@ -60,28 +53,18 @@ local COOLDOWN_UNIT_LABELS = {
 
 local COOLDOWN_BUFFS_PER_PAGE = 6
 local COOLDOWN_SCAN_ROWS = 10
+local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAGES) == "table" and SettingsCatalog.PAGES) or {
+    { id = "general", label = "General", title = "General", summary = "Core addon toggles and shared runtime behavior." },
+    { id = "text", label = "Text", title = "Text", summary = "Name, level, role, guild, and number formatting." },
+    { id = "bars", label = "Bars", title = "Bars", summary = "Frame sizing, alpha, bar colors, textures, and value placement." },
+    { id = "auras", label = "Auras", title = "Auras", summary = "Aura windows, icon layout, and buff or debuff anchor controls." },
+    { id = "plates", label = "Nameplates", title = "Nameplates", summary = "Visibility rules, offsets, colors, and runtime nameplate behavior." },
+    { id = "cooldown", label = "Cooldowns", title = "Cooldown Tracker", summary = "Tracked buff icons, timers, per-unit placement, and scan helpers." },
+    { id = "dailyage", label = "Dailies", title = "Dailies", summary = "Daily quest helper visibility and the hidden-list manager." }
+}
 
-local function ClampInt(v, min_v, max_v, fallback)
-    local n = tonumber(v)
-    if n == nil then
-        return fallback
-    end
-    n = math.floor(n + 0.5)
-    if n < min_v then
-        return min_v
-    end
-    if n > max_v then
-        return max_v
-    end
-    return n
-end
-
-local function FormatBuffId(buff_id)
-    if type(buff_id) == "number" then
-        return string.format("%.0f", buff_id)
-    end
-    return tostring(buff_id)
-end
+local ClampInt = SettingsCommon.ClampInt
+local FormatBuffId = SettingsCommon.FormatBuffId
 
 local function ScanTargetEffects()
     local results = {}
@@ -170,65 +153,18 @@ local function ScanTargetEffects()
     end
 end
 
-local function EnsureDailyAgeTables(s)
-    if type(s) ~= "table" then
-        return
-    end
-    if type(s.dailyage) ~= "table" then
-        s.dailyage = {}
-    end
-    if s.dailyage.enabled == nil then
-        s.dailyage.enabled = false
-    end
-    if type(s.dailyage.hidden) ~= "table" then
-        s.dailyage.hidden = {}
-    end
-end
+local EnsureDailyAgeTables = SettingsCommon.EnsureDailyAgeTables
 
 local function GetCooldownUnitKeyFromIndex(idx)
-    idx = tonumber(idx) or 1
-    if idx < 1 then
-        idx = 1
-    end
-    if idx > #COOLDOWN_UNIT_KEYS then
-        idx = #COOLDOWN_UNIT_KEYS
-    end
-    return COOLDOWN_UNIT_KEYS[idx]
+    return SettingsCommon.GetKeyFromIndex(COOLDOWN_UNIT_KEYS, idx)
 end
 
 local function GetCooldownUnitIndexFromKey(key)
-    for i, k in ipairs(COOLDOWN_UNIT_KEYS) do
-        if k == key then
-            return i
-        end
-    end
-    return 1
+    return SettingsCommon.GetIndexFromKey(COOLDOWN_UNIT_KEYS, key)
 end
 
 local function EnsureCooldownTrackerTables(s)
-    if type(s) ~= "table" then
-        return
-    end
-    if type(s.cooldown_tracker) ~= "table" then
-        s.cooldown_tracker = {}
-    end
-    if s.cooldown_tracker.enabled == nil then
-        s.cooldown_tracker.enabled = false
-    end
-    if s.cooldown_tracker.update_interval_ms == nil then
-        s.cooldown_tracker.update_interval_ms = 50
-    end
-    if type(s.cooldown_tracker.units) ~= "table" then
-        s.cooldown_tracker.units = {}
-    end
-    for _, key in ipairs(COOLDOWN_UNIT_KEYS) do
-        if type(s.cooldown_tracker.units[key]) ~= "table" then
-            s.cooldown_tracker.units[key] = {}
-        end
-        if type(s.cooldown_tracker.units[key].tracked_buffs) ~= "table" then
-            s.cooldown_tracker.units[key].tracked_buffs = {}
-        end
-    end
+    return SettingsCommon.EnsureCooldownTrackerTables(s, COOLDOWN_UNIT_KEYS)
 end
 
 local function SetWidgetEnabled(widget, enabled)
@@ -368,148 +304,18 @@ local function RefreshCooldownBuffRows(unit_cfg)
     end
 end
 
-local function GetComboBoxIndexRaw(ctrl)
-    if ctrl == nil then
-        return nil
-    end
-    local idx = nil
-    if ctrl.GetSelectedIndex ~= nil then
-        idx = ctrl:GetSelectedIndex()
-    elseif ctrl.GetSelIndex ~= nil then
-        idx = ctrl:GetSelIndex()
-    end
-    return tonumber(idx)
-end
+local GetComboBoxIndexRaw = SettingsWidgets.GetComboBoxIndexRaw
+local SetComboBoxIndex1Based = SettingsWidgets.SetComboBoxIndex1Based
+local GetComboBoxIndex1Based = SettingsWidgets.GetComboBoxIndex1Based
 
-local function SetComboBoxIndex1Based(ctrl, idx1)
-    if ctrl == nil or idx1 == nil then
-        return
-    end
-
-    local function updateBaseFromRaw(raw)
-        raw = tonumber(raw)
-        if raw == nil then
-            return
-        end
-        if raw == idx1 then
-            ctrl.__polar_index_base = 1
-        elseif raw == (idx1 - 1) then
-            ctrl.__polar_index_base = 0
-        end
-    end
-
-    if ctrl.Select ~= nil then
-        local selVal = idx1
-        if ctrl.GetSelectedIndex ~= nil then
-            ctrl.__polar_index_base = 1
-            selVal = idx1
-        elseif ctrl.GetSelIndex ~= nil then
-            ctrl.__polar_index_base = 0
-            selVal = idx1 - 1
-        end
-
-        ctrl:Select(selVal)
-        updateBaseFromRaw(GetComboBoxIndexRaw(ctrl))
-        return
-    end
-
-    local function trySetter(setter, val)
-        local ok = pcall(function()
-            setter(ctrl, val)
-        end)
-        if not ok then
-            return nil
-        end
-        return GetComboBoxIndexRaw(ctrl)
-    end
-
-    if ctrl.SetSelectedIndex ~= nil then
-        ctrl.__polar_index_base = nil
-        local raw = trySetter(ctrl.SetSelectedIndex, idx1)
-        updateBaseFromRaw(raw)
-        if ctrl.__polar_index_base == nil then
-            raw = trySetter(ctrl.SetSelectedIndex, idx1 - 1)
-            updateBaseFromRaw(raw)
-        end
-        return
-    end
-
-    if ctrl.SetSelIndex ~= nil then
-        ctrl.__polar_index_base = 0
-        local raw = trySetter(ctrl.SetSelIndex, idx1 - 1)
-        updateBaseFromRaw(raw)
-    end
-end
-
-local function GetComboBoxIndex1Based(ctrl, maxCount)
-    local raw = GetComboBoxIndexRaw(ctrl)
-    if raw == nil then
-        return nil
-    end
-
-    local base = ctrl.__polar_index_base
-    if base == nil then
-        if raw == 0 then
-            base = 0
-        elseif raw == maxCount then
-            base = 1
-        elseif raw == (maxCount - 1) then
-            base = 0
-        else
-            base = 1
-        end
-        ctrl.__polar_index_base = base
-    end
-
-    if base == 0 then
-        return raw + 1
-    end
-    return raw
-end
-
-local function EnsureStyleFrames(settings)
-    if type(settings) ~= "table" then
-        return
-    end
-    if type(settings.style) ~= "table" then
-        settings.style = {}
-    end
-    if type(settings.style.frames) ~= "table" then
-        settings.style.frames = {}
-    end
-    if type(settings.style.frames.player) ~= "table" then
-        settings.style.frames.player = {}
-    end
-    if type(settings.style.frames.target) ~= "table" then
-        settings.style.frames.target = {}
-    end
-    if type(settings.style.frames.watchtarget) ~= "table" then
-        settings.style.frames.watchtarget = {}
-    end
-    if type(settings.style.frames.target_of_target) ~= "table" then
-        settings.style.frames.target_of_target = {}
-    end
-end
+local EnsureStyleFrames = SettingsCommon.EnsureStyleFrames
 
 local function GetStyleTargetKeyFromIndex(idx)
-    idx = tonumber(idx) or 1
-    if idx < 1 then
-        idx = 1
-    end
-    if idx > #STYLE_TARGET_KEYS then
-        idx = #STYLE_TARGET_KEYS
-    end
-    return STYLE_TARGET_KEYS[idx]
+    return SettingsCommon.GetKeyFromIndex(STYLE_TARGET_KEYS, idx)
 end
 
 local function GetStyleTargetIndexFromKey(key)
-    key = tostring(key or "all")
-    for i, k in ipairs(STYLE_TARGET_KEYS) do
-        if k == key then
-            return i
-        end
-    end
-    return 1
+    return SettingsCommon.GetIndexFromKey(STYLE_TARGET_KEYS, tostring(key or "all"))
 end
 
 local function GetStyleTargetDisplayName(key)
@@ -542,32 +348,7 @@ local function GetStyleTargetKeyFromLabel(text)
     return nil
 end
 
-local function GetComboBoxText(ctrl)
-    if ctrl == nil then
-        return nil
-    end
-
-    local getters = {
-        "GetSelectedText",
-        "GetText",
-        "GetSelectedValue",
-        "GetSelectedItemText"
-    }
-
-    for _, name in ipairs(getters) do
-        local fn = ctrl[name]
-        if type(fn) == "function" then
-            local ok, res = pcall(function()
-                return fn(ctrl)
-            end)
-            if ok and type(res) == "string" and res ~= "" then
-                return res
-            end
-        end
-    end
-
-    return nil
-end
+local GetComboBoxText = SettingsWidgets.GetComboBoxText
 
 local function GetStyleTargetKeyFromControl(ctrl, eventArg1, eventArg2)
     local directTextKeys = {
@@ -673,38 +454,8 @@ local function GetStyleTables(settings)
     return EffectiveStyle(base, override), override
 end
 
-local function DeepCopySimple(obj, visited)
-    visited = visited or {}
-    local t = type(obj)
-    if t ~= "table" then
-        return obj
-    end
-    if visited[obj] ~= nil then
-        return visited[obj]
-    end
-    local out = {}
-    visited[obj] = out
-    for k, v in pairs(obj) do
-        out[DeepCopySimple(k, visited)] = DeepCopySimple(v, visited)
-    end
-    return out
-end
-
-local function CopyTableInto(dst, src)
-    if type(dst) ~= "table" or type(src) ~= "table" then
-        return
-    end
-    for k, _ in pairs(dst) do
-        dst[k] = nil
-    end
-    for k, v in pairs(src) do
-        if type(v) == "table" then
-            dst[k] = DeepCopySimple(v)
-        else
-            dst[k] = v
-        end
-    end
-end
+local DeepCopySimple = SettingsCommon.DeepCopySimple
+local CopyTableInto = SettingsCommon.CopyTableInto
 
 local function CopyStatusbarCoords(dstKey, srcKey)
     if STATUSBAR_STYLE == nil or type(STATUSBAR_STYLE) ~= "table" then
@@ -724,20 +475,23 @@ local function CopyStatusbarCoords(dstKey, srcKey)
     dst.coords = DeepCopySimple(src.coords)
 end
 
-local function CreatePage(id, parent)
-    local page = api.Interface:CreateWidget("emptywidget", id, parent)
-    pcall(function()
-        if page.AddAnchor ~= nil then
-            page:AddAnchor("TOPLEFT", parent, 0, 0)
-            page:AddAnchor("RIGHT", parent, 0, 0)
+local CreatePage = SettingsWidgets.CreatePage
+local UpdateNavigationState
+
+local function GetPageMeta(pageId)
+    if type(SettingsCatalog) == "table" and type(SettingsCatalog.GetPage) == "function" then
+        local page = SettingsCatalog.GetPage(pageId)
+        if type(page) == "table" then
+            return page
         end
-    end)
-    pcall(function()
-        if page.Show ~= nil then
-            page:Show(false)
+    end
+
+    for _, page in ipairs(PAGE_DEFS) do
+        if page.id == pageId then
+            return page
         end
-    end)
-    return page
+    end
+    return nil
 end
 
 local function SetActivePage(pageId)
@@ -751,6 +505,9 @@ local function SetActivePage(pageId)
         end
     end
     SettingsPage.active_page = pageId
+    if type(UpdateNavigationState) == "function" then
+        UpdateNavigationState(pageId)
+    end
 
     if pageId == "dailyage" and type(SettingsPage.RefreshDailyAgeList) == "function" then
         pcall(function()
@@ -807,6 +564,29 @@ local function MakeCloseHandler()
         if SettingsPage.window ~= nil then
             SettingsPage.window:Show(false)
         end
+    end
+end
+
+UpdateNavigationState = function(activePageId)
+    local pageId = activePageId or SettingsPage.active_page
+
+    for _, page in ipairs(PAGE_DEFS) do
+        local btn = SettingsPage.nav[page.id]
+        if btn ~= nil and btn.SetText ~= nil then
+            local label = tostring(page.label or page.id)
+            if page.id == pageId then
+                label = "> " .. label
+            end
+            btn:SetText(label)
+        end
+    end
+
+    local meta = GetPageMeta(pageId) or {}
+    if SettingsPage.controls.page_header_title ~= nil and SettingsPage.controls.page_header_title.SetText ~= nil then
+        SettingsPage.controls.page_header_title:SetText(tostring(meta.title or ""))
+    end
+    if SettingsPage.controls.page_header_summary ~= nil and SettingsPage.controls.page_header_summary.SetText ~= nil then
+        SettingsPage.controls.page_header_summary:SetText(tostring(meta.summary or ""))
     end
 end
 
@@ -942,317 +722,28 @@ local function EnsureSettingsButton()
     end)
 end
 
-local function StyleLabel(label, fontSize)
-    if label == nil or label.style == nil then
-        return
+local CreateLabel = SettingsWidgets.CreateLabel
+local CreateHintLabel = SettingsWidgets.CreateHintLabel
+local ApplyCheckButtonSkin = SettingsWidgets.ApplyCheckButtonSkin
+local CreateCheckbox = SettingsWidgets.CreateCheckbox
+local CreateButton = SettingsWidgets.CreateButton
+local CreateEdit = SettingsWidgets.CreateEdit
+local GetSliderValue = SettingsWidgets.GetSliderValue
+local SetSliderValue = SettingsWidgets.SetSliderValue
+local CreateSlider = SettingsWidgets.CreateSlider
+local CreateComboBox = SettingsWidgets.CreateComboBox
+
+local function SetHpTextureModeChecks(mode)
+    local resolved = tostring(mode or "stock")
+    if SettingsPage.controls.hp_tex_stock ~= nil and SettingsPage.controls.hp_tex_stock.SetChecked ~= nil then
+        SettingsPage.controls.hp_tex_stock:SetChecked(resolved == "stock")
     end
-    pcall(function()
-        local r, g, b = 1, 1, 1
-        if FONT_COLOR ~= nil and FONT_COLOR.TITLE ~= nil then
-            r = FONT_COLOR.TITLE[1] or 1
-            g = FONT_COLOR.TITLE[2] or 1
-            b = FONT_COLOR.TITLE[3] or 1
-        end
-        label.style:SetAlign(ALIGN.LEFT)
-        label.style:SetFontSize(fontSize)
-        label.style:SetColor(r, g, b, 1)
-    end)
-end
-
-local function CreateLabel(id, parent, text, x, y, fontSize)
-    local label = api.Interface:CreateWidget("label", id, parent)
-    pcall(function()
-        label:AddAnchor("TOPLEFT", x, y)
-    end)
-    label:SetExtent(360, 20)
-    label:SetText(text)
-    StyleLabel(label, fontSize)
-    return label
-end
-
-local function CreateHintLabel(id, parent, text, x, y, width)
-    local label = api.Interface:CreateWidget("label", id, parent)
-    pcall(function()
-        label:AddAnchor("TOPLEFT", x, y)
-    end)
-    label:SetExtent(width or 520, 18)
-    label:SetText(text)
-    pcall(function()
-        if label.style ~= nil then
-            label.style:SetFontSize(12)
-            label.style:SetAlign(ALIGN.LEFT)
-            label.style:SetColor(0.75, 0.75, 0.75, 1)
-        end
-    end)
-    return label
-end
-
-local function ApplyCheckButtonSkin(checkbox)
-    if checkbox == nil or checkbox.CreateImageDrawable == nil then
-        return
+    if SettingsPage.controls.hp_tex_pc ~= nil and SettingsPage.controls.hp_tex_pc.SetChecked ~= nil then
+        SettingsPage.controls.hp_tex_pc:SetChecked(resolved == "pc")
     end
-
-    pcall(function()
-        local function makeBg(coordsX, coordsY)
-            local bg = checkbox:CreateImageDrawable("ui/button/check_button.dds", "background")
-            bg:SetExtent(18, 17)
-            bg:AddAnchor("CENTER", checkbox, 0, 0)
-            bg:SetCoords(coordsX, coordsY, 18, 17)
-            return bg
-        end
-
-        if checkbox.SetNormalBackground ~= nil then
-            checkbox:SetNormalBackground(makeBg(0, 0))
-        end
-        if checkbox.SetHighlightBackground ~= nil then
-            checkbox:SetHighlightBackground(makeBg(0, 0))
-        end
-        if checkbox.SetPushedBackground ~= nil then
-            checkbox:SetPushedBackground(makeBg(0, 0))
-        end
-        if checkbox.SetDisabledBackground ~= nil then
-            checkbox:SetDisabledBackground(makeBg(0, 17))
-        end
-        if checkbox.SetCheckedBackground ~= nil then
-            checkbox:SetCheckedBackground(makeBg(18, 0))
-        end
-        if checkbox.SetDisabledCheckedBackground ~= nil then
-            checkbox:SetDisabledCheckedBackground(makeBg(18, 17))
-        end
-    end)
-end
-
-local function CreateCheckbox(id, parent, text, x, y)
-    local checkbox = nil
-
-    if api._Library ~= nil and api._Library.UI ~= nil and api._Library.UI.CreateCheckButton ~= nil then
-        local ok, res = pcall(function()
-            return api._Library.UI.CreateCheckButton(id, parent, text)
-        end)
-        if ok then
-            checkbox = res
-        end
-        if checkbox ~= nil and checkbox.AddAnchor ~= nil then
-            local ok = pcall(function()
-                checkbox:AddAnchor("TOPLEFT", parent, x, y)
-            end)
-            if not ok then
-                pcall(function()
-                    checkbox:AddAnchor("TOPLEFT", x, y)
-                end)
-            end
-        end
-        if checkbox ~= nil and checkbox.SetButtonStyle ~= nil then
-            checkbox:SetButtonStyle("default")
-        end
-        return checkbox
+    if SettingsPage.controls.hp_tex_npc ~= nil and SettingsPage.controls.hp_tex_npc.SetChecked ~= nil then
+        SettingsPage.controls.hp_tex_npc:SetChecked(resolved == "npc")
     end
-
-    checkbox = api.Interface:CreateWidget("checkbutton", id, parent)
-    checkbox:SetExtent(18, 17)
-    pcall(function()
-        checkbox:AddAnchor("TOPLEFT", parent, x, y)
-    end)
-    ApplyCheckButtonSkin(checkbox)
-
-    local label = api.Interface:CreateWidget("label", id .. "Label", parent)
-    pcall(function()
-        label:AddAnchor("LEFT", checkbox, "RIGHT", 6, 0)
-    end)
-    label:SetExtent(320, 18)
-    label:SetText(text)
-    pcall(function()
-        if label.style ~= nil then
-            label.style:SetFontSize(13)
-            label.style:SetAlign(ALIGN.LEFT)
-            label.style:SetColor(1, 1, 1, 1)
-        end
-        if label.Clickable ~= nil then
-            label:Clickable(true)
-        end
-    end)
-
-    if label.SetHandler ~= nil then
-        label:SetHandler("OnClick", function()
-            if checkbox ~= nil and checkbox.SetChecked ~= nil and checkbox.GetChecked ~= nil then
-                checkbox:SetChecked(not checkbox:GetChecked())
-            end
-        end)
-    end
-
-    return checkbox
-end
-
-local function CreateButton(id, parent, text, x, y)
-    local button = api.Interface:CreateWidget("button", id, parent)
-    button:AddAnchor("TOPLEFT", x, y)
-    button:SetExtent(90, 26)
-    button:SetText(text)
-    api.Interface:ApplyButtonSkin(button, BUTTON_BASIC.DEFAULT)
-    return button
-end
-
-local function CreateEdit(id, parent, text, x, y, width, height)
-    local field = nil
-    pcall(function()
-        if W_CTRL ~= nil and W_CTRL.CreateEdit ~= nil then
-            field = W_CTRL.CreateEdit(id, parent)
-        elseif api.Interface ~= nil and api.Interface.CreateWidget ~= nil then
-            field = api.Interface:CreateWidget("edit", id, parent)
-        end
-    end)
-    if field == nil then
-        return nil
-    end
-    pcall(function()
-        field:SetExtent(width, height)
-        if field.AddAnchor ~= nil then
-            local ok = pcall(function()
-                field:AddAnchor("TOPLEFT", parent, x, y)
-            end)
-            if not ok then
-                field:AddAnchor("TOPLEFT", x, y)
-            end
-        end
-        if field.SetText ~= nil then
-            field:SetText(tostring(text or ""))
-        end
-        if field.style ~= nil then
-            field.style:SetColor(0, 0, 0, 1)
-            field.style:SetAlign(ALIGN.LEFT)
-        end
-    end)
-    return field
-end
-
-local function GetSliderValue(slider)
-    if slider == nil then
-        return 0
-    end
-    local ok, res = pcall(function()
-        if slider.GetValue ~= nil then
-            return slider:GetValue()
-        end
-        return nil
-    end)
-    if ok and type(res) == "number" then
-        return res
-    end
-    return 0
-end
-
-local function SetSliderValue(slider, value)
-    if slider == nil then
-        return
-    end
-    pcall(function()
-        if slider.SetValue ~= nil then
-            slider:SetValue(value, false)
-        elseif slider.SetInitialValue ~= nil then
-            slider:SetInitialValue(value)
-        end
-    end)
-end
-
-local function CreateSlider(id, parent, text, x, y, minVal, maxVal, step)
-    local label = api.Interface:CreateWidget("label", id .. "Label", parent)
-    pcall(function()
-        label:AddAnchor("TOPLEFT", x, y)
-    end)
-    label:SetExtent(170, 18)
-    label:SetText(text)
-    pcall(function()
-        if label.style ~= nil then
-            label.style:SetFontSize(13)
-            label.style:SetAlign(ALIGN.LEFT)
-            label.style:SetColor(1, 1, 1, 1)
-        end
-    end)
-
-    local slider = nil
-    if api._Library ~= nil and api._Library.UI ~= nil and api._Library.UI.CreateSlider ~= nil then
-        local ok, res = pcall(function()
-            return api._Library.UI.CreateSlider(id, parent)
-        end)
-        if ok then
-            slider = res
-        end
-    end
-
-    if slider ~= nil then
-        pcall(function()
-            slider:SetExtent(250, 26)
-            slider:AddAnchor("TOPLEFT", x + 175, y - 4)
-            slider:SetMinMaxValues(minVal, maxVal)
-            if slider.SetStep ~= nil then
-                slider:SetStep(step)
-            else
-                slider:SetValueStep(step)
-            end
-        end)
-    end
-
-    local valueLabel = api.Interface:CreateWidget("label", id .. "Value", parent)
-    pcall(function()
-        valueLabel:AddAnchor("TOPLEFT", x + 430, y)
-    end)
-    valueLabel:SetExtent(60, 18)
-    valueLabel:SetText("0")
-    pcall(function()
-        if valueLabel.style ~= nil then
-            valueLabel.style:SetFontSize(13)
-            valueLabel.style:SetAlign(ALIGN.LEFT)
-            valueLabel.style:SetColor(1, 1, 1, 1)
-        end
-    end)
-
-    return slider, valueLabel
-end
-
-local function CreateComboBox(parent, values, x, y, width, height)
-    local dropdown = nil
-    pcall(function()
-        if W_CTRL ~= nil and W_CTRL.CreateComboBox ~= nil then
-            dropdown = W_CTRL.CreateComboBox(parent)
-        elseif api.Interface ~= nil and api.Interface.CreateComboBox ~= nil then
-            dropdown = api.Interface:CreateComboBox(parent)
-        end
-    end)
-    if dropdown == nil then
-        return nil
-    end
-    dropdown.__polar_items = values
-    pcall(function()
-        local anchored = false
-        if dropdown.AddAnchor ~= nil then
-            local okAnchor = pcall(function()
-                dropdown:AddAnchor("TOPLEFT", parent, x, y)
-            end)
-            anchored = okAnchor and true or false
-            if not anchored then
-                pcall(function()
-                    dropdown:AddAnchor("TOPLEFT", x, y)
-                end)
-            end
-        end
-
-        if dropdown.SetExtent ~= nil then
-            dropdown:SetExtent(width or 220, height or 24)
-        end
-
-        if dropdown.AddItem ~= nil and type(values) == "table" then
-            for _, v in ipairs(values) do
-                dropdown:AddItem(tostring(v))
-            end
-        else
-            dropdown.dropdownItem = values
-        end
-
-        if dropdown.Show ~= nil then
-            dropdown:Show(true)
-        end
-    end)
-    return dropdown
 end
 
 local function RefreshControls()
@@ -1416,14 +907,6 @@ local function RefreshControls()
         if SettingsPage.controls.plates_show_guild ~= nil then
             SettingsPage.controls.plates_show_guild:SetChecked(s.nameplates.show_guild ~= false)
         end
-        if SettingsPage.controls.plates_click_shift ~= nil then
-            SettingsPage.controls.plates_click_shift:SetChecked(true)
-            SetWidgetEnabled(SettingsPage.controls.plates_click_shift, false)
-        end
-        if SettingsPage.controls.plates_click_ctrl ~= nil then
-            SettingsPage.controls.plates_click_ctrl:SetChecked(true)
-            SetWidgetEnabled(SettingsPage.controls.plates_click_ctrl, false)
-        end
         if SettingsPage.controls.plates_runtime_status ~= nil and SettingsPage.controls.plates_runtime_status.SetText ~= nil then
             local runtimeText = Compat ~= nil and Compat.GetStatusText() or "Runtime OK"
             SettingsPage.controls.plates_runtime_status:SetText(runtimeText)
@@ -1564,16 +1047,27 @@ local function RefreshControls()
         if SettingsPage.controls.class_font_size ~= nil then
             refreshSlider(SettingsPage.controls.class_font_size, SettingsPage.controls.class_font_size_val, tonumber(displayStyle.class_font_size) or (tonumber(displayStyle.overlay_font_size) or 12))
         end
-        if SettingsPage.controls.role_font_size ~= nil then
-            refreshSlider(SettingsPage.controls.role_font_size, SettingsPage.controls.role_font_size_val, tonumber(displayStyle.role_font_size) or (tonumber(displayStyle.overlay_font_size) or 12))
-        end
-
         if SettingsPage.controls.target_guild_font_size ~= nil then
             refreshSlider(
                 SettingsPage.controls.target_guild_font_size,
                 SettingsPage.controls.target_guild_font_size_val,
                 tonumber(displayStyle.target_guild_font_size) or (tonumber(displayStyle.overlay_font_size) or 12)
             )
+        end
+        if SettingsPage.controls.target_guild_visible ~= nil then
+            SettingsPage.controls.target_guild_visible:SetChecked(displayStyle.target_guild_visible ~= false)
+        end
+        if SettingsPage.controls.target_class_visible ~= nil then
+            SettingsPage.controls.target_class_visible:SetChecked(displayStyle.target_class_visible ~= false)
+        end
+        if SettingsPage.controls.target_gearscore_visible ~= nil then
+            SettingsPage.controls.target_gearscore_visible:SetChecked(displayStyle.target_gearscore_visible ~= false)
+        end
+        if SettingsPage.controls.target_pdef_visible ~= nil then
+            SettingsPage.controls.target_pdef_visible:SetChecked(displayStyle.target_pdef_visible ~= false)
+        end
+        if SettingsPage.controls.target_mdef_visible ~= nil then
+            SettingsPage.controls.target_mdef_visible:SetChecked(displayStyle.target_mdef_visible ~= false)
         end
 
         if SettingsPage.controls.name_shadow ~= nil then
@@ -1610,8 +1104,60 @@ local function RefreshControls()
             refreshSlider(
                 SettingsPage.controls.target_guild_offset_y,
                 SettingsPage.controls.target_guild_offset_y_val,
-                tonumber(displayStyle.target_guild_offset_y) or -54
+                tonumber(displayStyle.target_guild_offset_y) or -18
             )
+        end
+
+        local guildColor = type(displayStyle.target_guild_color) == "table" and displayStyle.target_guild_color or { 255, 255, 255, 255 }
+        local classColor = type(displayStyle.target_class_color) == "table" and displayStyle.target_class_color or { 255, 255, 255, 255 }
+        local gearscoreColor = type(displayStyle.target_gearscore_color) == "table" and displayStyle.target_gearscore_color or { 255, 255, 255, 255 }
+        local pdefColor = type(displayStyle.target_pdef_color) == "table" and displayStyle.target_pdef_color or { 255, 255, 255, 255 }
+        local mdefColor = type(displayStyle.target_mdef_color) == "table" and displayStyle.target_mdef_color or { 255, 255, 255, 255 }
+
+        if SettingsPage.controls.target_guild_r ~= nil then
+            refreshSlider(SettingsPage.controls.target_guild_r, SettingsPage.controls.target_guild_r_val, tonumber(guildColor[1]) or 255)
+        end
+        if SettingsPage.controls.target_guild_g ~= nil then
+            refreshSlider(SettingsPage.controls.target_guild_g, SettingsPage.controls.target_guild_g_val, tonumber(guildColor[2]) or 255)
+        end
+        if SettingsPage.controls.target_guild_b ~= nil then
+            refreshSlider(SettingsPage.controls.target_guild_b, SettingsPage.controls.target_guild_b_val, tonumber(guildColor[3]) or 255)
+        end
+        if SettingsPage.controls.target_class_r ~= nil then
+            refreshSlider(SettingsPage.controls.target_class_r, SettingsPage.controls.target_class_r_val, tonumber(classColor[1]) or 255)
+        end
+        if SettingsPage.controls.target_class_g ~= nil then
+            refreshSlider(SettingsPage.controls.target_class_g, SettingsPage.controls.target_class_g_val, tonumber(classColor[2]) or 255)
+        end
+        if SettingsPage.controls.target_class_b ~= nil then
+            refreshSlider(SettingsPage.controls.target_class_b, SettingsPage.controls.target_class_b_val, tonumber(classColor[3]) or 255)
+        end
+        if SettingsPage.controls.target_gearscore_r ~= nil then
+            refreshSlider(SettingsPage.controls.target_gearscore_r, SettingsPage.controls.target_gearscore_r_val, tonumber(gearscoreColor[1]) or 255)
+        end
+        if SettingsPage.controls.target_gearscore_g ~= nil then
+            refreshSlider(SettingsPage.controls.target_gearscore_g, SettingsPage.controls.target_gearscore_g_val, tonumber(gearscoreColor[2]) or 255)
+        end
+        if SettingsPage.controls.target_gearscore_b ~= nil then
+            refreshSlider(SettingsPage.controls.target_gearscore_b, SettingsPage.controls.target_gearscore_b_val, tonumber(gearscoreColor[3]) or 255)
+        end
+        if SettingsPage.controls.target_pdef_r ~= nil then
+            refreshSlider(SettingsPage.controls.target_pdef_r, SettingsPage.controls.target_pdef_r_val, tonumber(pdefColor[1]) or 255)
+        end
+        if SettingsPage.controls.target_pdef_g ~= nil then
+            refreshSlider(SettingsPage.controls.target_pdef_g, SettingsPage.controls.target_pdef_g_val, tonumber(pdefColor[2]) or 255)
+        end
+        if SettingsPage.controls.target_pdef_b ~= nil then
+            refreshSlider(SettingsPage.controls.target_pdef_b, SettingsPage.controls.target_pdef_b_val, tonumber(pdefColor[3]) or 255)
+        end
+        if SettingsPage.controls.target_mdef_r ~= nil then
+            refreshSlider(SettingsPage.controls.target_mdef_r, SettingsPage.controls.target_mdef_r_val, tonumber(mdefColor[1]) or 255)
+        end
+        if SettingsPage.controls.target_mdef_g ~= nil then
+            refreshSlider(SettingsPage.controls.target_mdef_g, SettingsPage.controls.target_mdef_g_val, tonumber(mdefColor[2]) or 255)
+        end
+        if SettingsPage.controls.target_mdef_b ~= nil then
+            refreshSlider(SettingsPage.controls.target_mdef_b, SettingsPage.controls.target_mdef_b_val, tonumber(mdefColor[3]) or 255)
         end
 
         if SettingsPage.controls.bar_colors_enabled ~= nil then
@@ -1676,15 +1222,7 @@ local function RefreshControls()
         end
 
         local tex = tostring(displayStyle.hp_texture_mode or "stock")
-        if SettingsPage.controls.hp_tex_stock ~= nil then
-            SettingsPage.controls.hp_tex_stock:SetChecked(tex == "stock")
-        end
-        if SettingsPage.controls.hp_tex_pc ~= nil then
-            SettingsPage.controls.hp_tex_pc:SetChecked(tex == "pc")
-        end
-        if SettingsPage.controls.hp_tex_npc ~= nil then
-            SettingsPage.controls.hp_tex_npc:SetChecked(tex == "npc")
-        end
+        SetHpTextureModeChecks(tex)
     end
 
     if type(displayStyle) == "table" then
@@ -1842,6 +1380,10 @@ local function ApplyControlsToSettings()
         s.style = editStyle
     end
 
+    local function colorTable(r, g, b, a)
+        return { r, g, b, a or 255 }
+    end
+
     if type(s.nameplates) ~= "table" then
         s.nameplates = {}
     end
@@ -1869,12 +1411,6 @@ local function ApplyControlsToSettings()
     end
     if SettingsPage.controls.plates_show_guild ~= nil then
         s.nameplates.show_guild = SettingsPage.controls.plates_show_guild:GetChecked() and true or false
-    end
-    if SettingsPage.controls.plates_click_shift ~= nil then
-        s.nameplates.click_through_shift = true
-    end
-    if SettingsPage.controls.plates_click_ctrl ~= nil then
-        s.nameplates.click_through_ctrl = true
     end
     if SettingsPage.controls.plates_alpha ~= nil then
         s.nameplates.alpha_pct = GetSliderValue(SettingsPage.controls.plates_alpha)
@@ -1992,12 +1528,23 @@ local function ApplyControlsToSettings()
     if SettingsPage.controls.class_font_size ~= nil then
         editStyle.class_font_size = GetSliderValue(SettingsPage.controls.class_font_size)
     end
-    if SettingsPage.controls.role_font_size ~= nil then
-        editStyle.role_font_size = GetSliderValue(SettingsPage.controls.role_font_size)
-    end
-
     if SettingsPage.controls.target_guild_font_size ~= nil then
         editStyle.target_guild_font_size = GetSliderValue(SettingsPage.controls.target_guild_font_size)
+    end
+    if SettingsPage.controls.target_guild_visible ~= nil then
+        editStyle.target_guild_visible = SettingsPage.controls.target_guild_visible:GetChecked() and true or false
+    end
+    if SettingsPage.controls.target_class_visible ~= nil then
+        editStyle.target_class_visible = SettingsPage.controls.target_class_visible:GetChecked() and true or false
+    end
+    if SettingsPage.controls.target_gearscore_visible ~= nil then
+        editStyle.target_gearscore_visible = SettingsPage.controls.target_gearscore_visible:GetChecked() and true or false
+    end
+    if SettingsPage.controls.target_pdef_visible ~= nil then
+        editStyle.target_pdef_visible = SettingsPage.controls.target_pdef_visible:GetChecked() and true or false
+    end
+    if SettingsPage.controls.target_mdef_visible ~= nil then
+        editStyle.target_mdef_visible = SettingsPage.controls.target_mdef_visible:GetChecked() and true or false
     end
 
     if SettingsPage.controls.name_shadow ~= nil then
@@ -2029,14 +1576,51 @@ local function ApplyControlsToSettings()
     if SettingsPage.controls.target_guild_offset_y ~= nil then
         editStyle.target_guild_offset_y = GetSliderValue(SettingsPage.controls.target_guild_offset_y)
     end
+    if SettingsPage.controls.target_guild_r ~= nil and SettingsPage.controls.target_guild_g ~= nil and SettingsPage.controls.target_guild_b ~= nil then
+        editStyle.target_guild_color = colorTable(
+            GetSliderValue(SettingsPage.controls.target_guild_r),
+            GetSliderValue(SettingsPage.controls.target_guild_g),
+            GetSliderValue(SettingsPage.controls.target_guild_b),
+            255
+        )
+    end
+    if SettingsPage.controls.target_class_r ~= nil and SettingsPage.controls.target_class_g ~= nil and SettingsPage.controls.target_class_b ~= nil then
+        editStyle.target_class_color = colorTable(
+            GetSliderValue(SettingsPage.controls.target_class_r),
+            GetSliderValue(SettingsPage.controls.target_class_g),
+            GetSliderValue(SettingsPage.controls.target_class_b),
+            255
+        )
+    end
+    if SettingsPage.controls.target_gearscore_r ~= nil and SettingsPage.controls.target_gearscore_g ~= nil and SettingsPage.controls.target_gearscore_b ~= nil then
+        editStyle.target_gearscore_color = colorTable(
+            GetSliderValue(SettingsPage.controls.target_gearscore_r),
+            GetSliderValue(SettingsPage.controls.target_gearscore_g),
+            GetSliderValue(SettingsPage.controls.target_gearscore_b),
+            255
+        )
+    end
+    if SettingsPage.controls.target_pdef_r ~= nil and SettingsPage.controls.target_pdef_g ~= nil and SettingsPage.controls.target_pdef_b ~= nil then
+        editStyle.target_pdef_color = colorTable(
+            GetSliderValue(SettingsPage.controls.target_pdef_r),
+            GetSliderValue(SettingsPage.controls.target_pdef_g),
+            GetSliderValue(SettingsPage.controls.target_pdef_b),
+            255
+        )
+    end
+    if SettingsPage.controls.target_mdef_r ~= nil and SettingsPage.controls.target_mdef_g ~= nil and SettingsPage.controls.target_mdef_b ~= nil then
+        editStyle.target_mdef_color = colorTable(
+            GetSliderValue(SettingsPage.controls.target_mdef_r),
+            GetSliderValue(SettingsPage.controls.target_mdef_g),
+            GetSliderValue(SettingsPage.controls.target_mdef_b),
+            255
+        )
+    end
 
     if SettingsPage.controls.bar_colors_enabled ~= nil then
         editStyle.bar_colors_enabled = SettingsPage.controls.bar_colors_enabled:GetChecked() and true or false
     end
 
-    local function colorTable(r, g, b, a)
-        return { r, g, b, a or 255 }
-    end
     local function sliderOr(slider, fallback)
         if slider ~= nil then
             return GetSliderValue(slider)
@@ -2088,6 +1672,19 @@ local function ApplyControlsToSettings()
             editStyle.hp_texture_mode = "npc"
         else
             editStyle.hp_texture_mode = "stock"
+        end
+
+        if SettingsPage.style_target == "all" and type(s.style.frames) == "table" then
+            for _, frameKey in ipairs(STYLE_TARGET_KEYS) do
+                if frameKey ~= "all" then
+                    local frameStyle = s.style.frames[frameKey]
+                    if type(frameStyle) == "table" then
+                        frameStyle.hp_texture_mode = nil
+                        frameStyle.hp_custom_texture_path = nil
+                        frameStyle.hp_custom_texture_key = nil
+                    end
+                end
+            end
         end
     end
 
@@ -2264,7 +1861,7 @@ local function EnsureWindow()
         return
     end
 
-    SettingsPage.window = api.Interface:CreateWindow("PolarUiSettings", "Nuzi UI Settings", 640, 760)
+    SettingsPage.window = api.Interface:CreateWindow("PolarUiSettings", "Nuzi UI Settings", 820, 760)
     SettingsPage.window:AddAnchor("CENTER", "UIParent", 0, 0)
 
     local closeHandler = MakeCloseHandler()
@@ -2288,9 +1885,9 @@ local function EnsureWindow()
     if SettingsPage.scroll_frame ~= nil then
         pcall(function()
             SettingsPage.scroll_frame:Show(true)
-            SettingsPage.scroll_frame:AddAnchor("TOPLEFT", SettingsPage.window, 0, 95)
-            SettingsPage.scroll_frame:AddAnchor("BOTTOMRIGHT", SettingsPage.window, -8, -50)
-            SettingsPage.scroll_frame:SetExtent(620, 605)
+            SettingsPage.scroll_frame:AddAnchor("TOPLEFT", SettingsPage.window, 185, 105)
+            SettingsPage.scroll_frame:AddAnchor("BOTTOMRIGHT", SettingsPage.window, -15, -50)
+            SettingsPage.scroll_frame:SetExtent(620, 585)
         end)
 
         if SettingsPage.scroll_frame.CreateChildWidget ~= nil then
@@ -2397,64 +1994,37 @@ local function EnsureWindow()
         end
     end
 
-    local navY = 35
-    SettingsPage.nav.general = CreateButton("polarUiNavGeneral", SettingsPage.window, "General", 15, navY)
-    SettingsPage.nav.text = CreateButton("polarUiNavText", SettingsPage.window, "Text", 105, navY)
-    SettingsPage.nav.bars = CreateButton("polarUiNavBars", SettingsPage.window, "Bars", 195, navY)
-    SettingsPage.nav.auras = CreateButton("polarUiNavAuras", SettingsPage.window, "Auras", 285, navY)
-    SettingsPage.nav.plates = CreateButton("polarUiNavPlates", SettingsPage.window, "Plates", 375, navY)
-    SettingsPage.nav.cooldown = CreateButton("polarUiNavCooldown", SettingsPage.window, "Cooldowns", 465, navY)
-    SettingsPage.nav.dailyage = CreateButton("polarUiNavDailyAge", SettingsPage.window, "Dailies", 15, navY + 30)
-
-    if SettingsPage.nav.general ~= nil and SettingsPage.nav.general.SetHandler ~= nil then
-        SettingsPage.nav.general:SetHandler("OnClick", function()
-            SetActivePage("general")
-        end)
-    end
-    if SettingsPage.nav.text ~= nil and SettingsPage.nav.text.SetHandler ~= nil then
-        SettingsPage.nav.text:SetHandler("OnClick", function()
-            SetActivePage("text")
-        end)
-    end
-    if SettingsPage.nav.bars ~= nil and SettingsPage.nav.bars.SetHandler ~= nil then
-        SettingsPage.nav.bars:SetHandler("OnClick", function()
-            SetActivePage("bars")
-        end)
-    end
-    if SettingsPage.nav.auras ~= nil and SettingsPage.nav.auras.SetHandler ~= nil then
-        SettingsPage.nav.auras:SetHandler("OnClick", function()
-            SetActivePage("auras")
-        end)
+    CreateLabel("polarUiNavTitle", SettingsPage.window, "Sections", 15, 42, 18)
+    SettingsPage.controls.page_header_title = CreateLabel("polarUiPageHeaderTitle", SettingsPage.window, "", 185, 42, 18)
+    SettingsPage.controls.page_header_summary = CreateHintLabel("polarUiPageHeaderSummary", SettingsPage.window, "", 185, 68, 600)
+    if SettingsPage.controls.page_header_summary ~= nil then
+        SettingsPage.controls.page_header_summary:SetExtent(600, 32)
     end
 
-    if SettingsPage.nav.plates ~= nil and SettingsPage.nav.plates.SetHandler ~= nil then
-        SettingsPage.nav.plates:SetHandler("OnClick", function()
-            SetActivePage("plates")
-        end)
-    end
-
-    if SettingsPage.nav.cooldown ~= nil and SettingsPage.nav.cooldown.SetHandler ~= nil then
-        SettingsPage.nav.cooldown:SetHandler("OnClick", function()
-            SetActivePage("cooldown")
-        end)
-    end
-
-    if SettingsPage.nav.dailyage ~= nil and SettingsPage.nav.dailyage.SetHandler ~= nil then
-        SettingsPage.nav.dailyage:SetHandler("OnClick", function()
-            SetActivePage("dailyage")
-        end)
+    local navY = 72
+    for _, page in ipairs(PAGE_DEFS) do
+        local button = CreateButton("polarUiNav_" .. tostring(page.id), SettingsPage.window, tostring(page.label or page.id), 15, navY)
+        if button ~= nil then
+            pcall(function()
+                button:SetExtent(155, 26)
+            end)
+            if button.SetHandler ~= nil then
+                local pageId = page.id
+                button:SetHandler("OnClick", function()
+                    SetActivePage(pageId)
+                end)
+            end
+        end
+        SettingsPage.nav[page.id] = button
+        navY = navY + 32
     end
 
     SettingsPage.pages = {}
     SettingsPage.page_heights = {}
 
-    SettingsPage.pages.general = CreatePage("polarUiPageGeneral", SettingsPage.content)
-    SettingsPage.pages.text = CreatePage("polarUiPageText", SettingsPage.content)
-    SettingsPage.pages.bars = CreatePage("polarUiPageBars", SettingsPage.content)
-    SettingsPage.pages.auras = CreatePage("polarUiPageAuras", SettingsPage.content)
-    SettingsPage.pages.plates = CreatePage("polarUiPagePlates", SettingsPage.content)
-    SettingsPage.pages.cooldown = CreatePage("polarUiPageCooldown", SettingsPage.content)
-    SettingsPage.pages.dailyage = CreatePage("polarUiPageDailyAge", SettingsPage.content)
+    for _, page in ipairs(PAGE_DEFS) do
+        SettingsPage.pages[page.id] = CreatePage("polarUiPage_" .. tostring(page.id), SettingsPage.content)
+    end
 
     local gap = 24
 
@@ -3250,18 +2820,6 @@ local function EnsureWindow()
         )
         y = y + 24
 
-        SettingsPage.controls.role_font_size, SettingsPage.controls.role_font_size_val = CreateSlider(
-            "polarUiRoleFontSize",
-            page,
-            "Role font size",
-            15,
-            y,
-            8,
-            30,
-            1
-        )
-        y = y + 24
-
         SettingsPage.controls.target_guild_font_size, SettingsPage.controls.target_guild_font_size_val = CreateSlider(
             "polarUiTargetGuildFontSize",
             page,
@@ -3273,6 +2831,64 @@ local function EnsureWindow()
             1
         )
         y = y + gap
+
+        CreateLabel("polarUiTargetOverlayFieldsTitle", page, "Target Overlay Fields", 15, y, 18)
+        y = y + 30
+
+        SettingsPage.controls.target_guild_visible = CreateCheckbox("polarUiTargetGuildVisible", page, "Show guild text", 15, y)
+        y = y + gap
+
+        SettingsPage.controls.target_class_visible = CreateCheckbox("polarUiTargetClassVisible", page, "Show class text", 15, y)
+        y = y + gap
+
+        SettingsPage.controls.target_pdef_visible = CreateCheckbox("polarUiTargetPdefVisible", page, "Show PDEF text", 15, y)
+        y = y + gap
+
+        SettingsPage.controls.target_mdef_visible = CreateCheckbox("polarUiTargetMdefVisible", page, "Show MDEF text", 15, y)
+        y = y + gap
+
+        SettingsPage.controls.target_gearscore_visible = CreateCheckbox("polarUiTargetGearscoreVisible", page, "Show gearscore text", 15, y)
+        y = y + gap
+
+        y = y + 10
+
+        CreateLabel("polarUiTargetOverlayColorsTitle", page, "Target Overlay Colors", 15, y, 18)
+        y = y + 30
+
+        SettingsPage.controls.target_guild_r, SettingsPage.controls.target_guild_r_val = CreateSlider("polarUiTargetGuildR", page, "Guild R", 15, y, 0, 255, 1)
+        y = y + 24
+        SettingsPage.controls.target_guild_g, SettingsPage.controls.target_guild_g_val = CreateSlider("polarUiTargetGuildG", page, "Guild G", 15, y, 0, 255, 1)
+        y = y + 24
+        SettingsPage.controls.target_guild_b, SettingsPage.controls.target_guild_b_val = CreateSlider("polarUiTargetGuildB", page, "Guild B", 15, y, 0, 255, 1)
+        y = y + 24
+
+        SettingsPage.controls.target_class_r, SettingsPage.controls.target_class_r_val = CreateSlider("polarUiTargetClassR", page, "Class R", 15, y, 0, 255, 1)
+        y = y + 24
+        SettingsPage.controls.target_class_g, SettingsPage.controls.target_class_g_val = CreateSlider("polarUiTargetClassG", page, "Class G", 15, y, 0, 255, 1)
+        y = y + 24
+        SettingsPage.controls.target_class_b, SettingsPage.controls.target_class_b_val = CreateSlider("polarUiTargetClassB", page, "Class B", 15, y, 0, 255, 1)
+        y = y + 24
+
+        SettingsPage.controls.target_pdef_r, SettingsPage.controls.target_pdef_r_val = CreateSlider("polarUiTargetPdefR", page, "PDEF R", 15, y, 0, 255, 1)
+        y = y + 24
+        SettingsPage.controls.target_pdef_g, SettingsPage.controls.target_pdef_g_val = CreateSlider("polarUiTargetPdefG", page, "PDEF G", 15, y, 0, 255, 1)
+        y = y + 24
+        SettingsPage.controls.target_pdef_b, SettingsPage.controls.target_pdef_b_val = CreateSlider("polarUiTargetPdefB", page, "PDEF B", 15, y, 0, 255, 1)
+        y = y + 24
+
+        SettingsPage.controls.target_mdef_r, SettingsPage.controls.target_mdef_r_val = CreateSlider("polarUiTargetMdefR", page, "MDEF R", 15, y, 0, 255, 1)
+        y = y + 24
+        SettingsPage.controls.target_mdef_g, SettingsPage.controls.target_mdef_g_val = CreateSlider("polarUiTargetMdefG", page, "MDEF G", 15, y, 0, 255, 1)
+        y = y + 24
+        SettingsPage.controls.target_mdef_b, SettingsPage.controls.target_mdef_b_val = CreateSlider("polarUiTargetMdefB", page, "MDEF B", 15, y, 0, 255, 1)
+        y = y + 24
+
+        SettingsPage.controls.target_gearscore_r, SettingsPage.controls.target_gearscore_r_val = CreateSlider("polarUiTargetGsR", page, "Gearscore R", 15, y, 0, 255, 1)
+        y = y + 24
+        SettingsPage.controls.target_gearscore_g, SettingsPage.controls.target_gearscore_g_val = CreateSlider("polarUiTargetGsG", page, "Gearscore G", 15, y, 0, 255, 1)
+        y = y + 24
+        SettingsPage.controls.target_gearscore_b, SettingsPage.controls.target_gearscore_b_val = CreateSlider("polarUiTargetGsB", page, "Gearscore B", 15, y, 0, 255, 1)
+        y = y + gap + 10
 
         CreateLabel("polarUiShadowsTitle", page, "Shadows", 15, y, 18)
         y = y + 30
@@ -3823,19 +3439,10 @@ local function EnsureWindow()
         SettingsPage.controls.plates_show_guild = CreateCheckbox("polarUiPlatesShowGuild", page, "Show guild/expedition", 15, y)
         y = y + gap + 10
 
-        CreateLabel("polarUiPlatesClickHeader", page, "Click Behavior", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.plates_click_shift = CreateCheckbox("polarUiPlatesClickShift", page, "Shift: click through plates", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.plates_click_ctrl = CreateCheckbox("polarUiPlatesClickCtrl", page, "Ctrl: click through plates", 15, y)
-        y = y + gap + 10
-
         SettingsPage.controls.plates_runtime_note = CreateLabel(
             "polarUiPlatesRuntimeNote",
             page,
-            "Current client uses passthrough targeting. Keep stock nameplates roughly aligned behind the addon plates.",
+            "Current client supports native targeting, so the old passthrough click modifiers are no longer needed.",
             15,
             y,
             13
@@ -4305,13 +3912,13 @@ local function EnsureWindow()
         SettingsPage.page_heights.cooldown = y + 40
     end
 
-    local applyBtn = CreateButton("polarUiApplySettings", SettingsPage.window, "Apply", 15, 370)
-    local closeBtn = CreateButton("polarUiCloseSettings", SettingsPage.window, "Close", 110, 370)
-    local backupBtn = CreateButton("polarUiBackupSettings", SettingsPage.window, "Backup", 205, 370)
-    local importBtn = CreateButton("polarUiImportSettings", SettingsPage.window, "Import", 300, 370)
-    local backupStatus = CreateLabel("polarUiBackupStatus", SettingsPage.window, "", 395, 370 + 6, 14)
+    local applyBtn = CreateButton("polarUiApplySettings", SettingsPage.window, "Apply", 185, 370)
+    local closeBtn = CreateButton("polarUiCloseSettings", SettingsPage.window, "Close", 280, 370)
+    local backupBtn = CreateButton("polarUiBackupSettings", SettingsPage.window, "Backup", 375, 370)
+    local importBtn = CreateButton("polarUiImportSettings", SettingsPage.window, "Import", 470, 370)
+    local backupStatus = CreateLabel("polarUiBackupStatus", SettingsPage.window, "", 570, 370 + 6, 14)
     if backupStatus ~= nil then
-        backupStatus:SetExtent(230, 18)
+        backupStatus:SetExtent(220, 18)
     end
 
     pcall(function()
@@ -4326,16 +3933,16 @@ local function EnsureWindow()
         if backupStatus ~= nil then
             backupStatus:RemoveAllAnchors()
         end
-        applyBtn:AddAnchor("BOTTOMLEFT", SettingsPage.window, 15, -15)
-        closeBtn:AddAnchor("BOTTOMLEFT", SettingsPage.window, 110, -15)
+        applyBtn:AddAnchor("BOTTOMLEFT", SettingsPage.window, 185, -15)
+        closeBtn:AddAnchor("BOTTOMLEFT", SettingsPage.window, 280, -15)
         if backupBtn ~= nil then
-            backupBtn:AddAnchor("BOTTOMLEFT", SettingsPage.window, 205, -15)
+            backupBtn:AddAnchor("BOTTOMLEFT", SettingsPage.window, 375, -15)
         end
         if importBtn ~= nil then
-            importBtn:AddAnchor("BOTTOMLEFT", SettingsPage.window, 300, -15)
+            importBtn:AddAnchor("BOTTOMLEFT", SettingsPage.window, 470, -15)
         end
         if backupStatus ~= nil then
-            backupStatus:AddAnchor("BOTTOMLEFT", SettingsPage.window, 395, -11)
+            backupStatus:AddAnchor("BOTTOMLEFT", SettingsPage.window, 570, -11)
         end
     end)
 
@@ -4383,8 +3990,22 @@ local function EnsureWindow()
         { SettingsPage.controls.overlay_font_size, SettingsPage.controls.overlay_font_size_val },
         { SettingsPage.controls.gs_font_size, SettingsPage.controls.gs_font_size_val },
         { SettingsPage.controls.class_font_size, SettingsPage.controls.class_font_size_val },
-        { SettingsPage.controls.role_font_size, SettingsPage.controls.role_font_size_val },
         { SettingsPage.controls.target_guild_font_size, SettingsPage.controls.target_guild_font_size_val },
+        { SettingsPage.controls.target_guild_r, SettingsPage.controls.target_guild_r_val },
+        { SettingsPage.controls.target_guild_g, SettingsPage.controls.target_guild_g_val },
+        { SettingsPage.controls.target_guild_b, SettingsPage.controls.target_guild_b_val },
+        { SettingsPage.controls.target_class_r, SettingsPage.controls.target_class_r_val },
+        { SettingsPage.controls.target_class_g, SettingsPage.controls.target_class_g_val },
+        { SettingsPage.controls.target_class_b, SettingsPage.controls.target_class_b_val },
+        { SettingsPage.controls.target_pdef_r, SettingsPage.controls.target_pdef_r_val },
+        { SettingsPage.controls.target_pdef_g, SettingsPage.controls.target_pdef_g_val },
+        { SettingsPage.controls.target_pdef_b, SettingsPage.controls.target_pdef_b_val },
+        { SettingsPage.controls.target_mdef_r, SettingsPage.controls.target_mdef_r_val },
+        { SettingsPage.controls.target_mdef_g, SettingsPage.controls.target_mdef_g_val },
+        { SettingsPage.controls.target_mdef_b, SettingsPage.controls.target_mdef_b_val },
+        { SettingsPage.controls.target_gearscore_r, SettingsPage.controls.target_gearscore_r_val },
+        { SettingsPage.controls.target_gearscore_g, SettingsPage.controls.target_gearscore_g_val },
+        { SettingsPage.controls.target_gearscore_b, SettingsPage.controls.target_gearscore_b_val },
         { SettingsPage.controls.hp_value_offset_x, SettingsPage.controls.hp_value_offset_x_val },
         { SettingsPage.controls.hp_value_offset_y, SettingsPage.controls.hp_value_offset_y_val },
         { SettingsPage.controls.mp_value_offset_x, SettingsPage.controls.mp_value_offset_x_val },
@@ -4486,6 +4107,11 @@ local function EnsureWindow()
         SettingsPage.controls.alignment_grid_enabled,
         SettingsPage.controls.bar_colors_enabled,
         SettingsPage.controls.overlay_shadow,
+        SettingsPage.controls.target_guild_visible,
+        SettingsPage.controls.target_class_visible,
+        SettingsPage.controls.target_gearscore_visible,
+        SettingsPage.controls.target_pdef_visible,
+        SettingsPage.controls.target_mdef_visible,
         SettingsPage.controls.name_shadow,
         SettingsPage.controls.value_shadow,
         SettingsPage.controls.buff_windows_enabled,
@@ -4497,8 +4123,6 @@ local function EnsureWindow()
         SettingsPage.controls.plates_show_watchtarget,
         SettingsPage.controls.plates_show_mount,
         SettingsPage.controls.plates_show_guild,
-        SettingsPage.controls.plates_click_shift,
-        SettingsPage.controls.plates_click_ctrl,
         SettingsPage.controls.plates_anchor_tag,
         SettingsPage.controls.plates_bg_enabled,
         SettingsPage.controls.ct_enabled,
@@ -4530,8 +4154,14 @@ local function EnsureWindow()
             pcall(function()
                 if api.Unit ~= nil and api.Unit.GetUnitId ~= nil and api.Unit.GetUnitInfoById ~= nil then
                     local id = api.Unit:GetUnitId("target")
-                    if id ~= nil then
-                        local info = api.Unit:GetUnitInfoById(id)
+                    local normalizedId = nil
+                    if type(id) == "string" then
+                        normalizedId = tostring(id)
+                    elseif type(id) == "number" then
+                        normalizedId = tostring(id)
+                    end
+                    if normalizedId ~= nil and normalizedId ~= "" then
+                        local info = api.Unit:GetUnitInfoById(normalizedId)
                         if type(info) == "table" and info.expeditionName ~= nil then
                             guild = tostring(info.expeditionName or "")
                         end
@@ -4833,6 +4463,19 @@ local function EnsureWindow()
             end)
         end
     end
+
+    local function bindHpTextureCheckbox(ctrl, mode)
+        if ctrl ~= nil and ctrl.SetHandler ~= nil then
+            ctrl:SetHandler("OnClick", function()
+                SetHpTextureModeChecks(mode)
+                sliderChanged()
+                RefreshControls()
+            end)
+        end
+    end
+    bindHpTextureCheckbox(SettingsPage.controls.hp_tex_stock, "stock")
+    bindHpTextureCheckbox(SettingsPage.controls.hp_tex_pc, "pc")
+    bindHpTextureCheckbox(SettingsPage.controls.hp_tex_npc, "npc")
 
     applyBtn:SetHandler("OnClick", function()
         if SettingsPage.settings == nil then

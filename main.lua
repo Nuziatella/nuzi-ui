@@ -1,82 +1,31 @@
 local api = require("api")
+local SafeRequire = require("nuzi-ui/safe_require")
 
-local UI = nil
-local SettingsPage = nil
-local Compat = nil
-local Runtime = nil
-do
-    local ok, mod = pcall(require, "nuzi-ui/ui")
-    if ok then
-        UI = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.ui")
-        if ok then
-            UI = mod
-        end
+local UI = SafeRequire("nuzi-ui/ui", "nuzi-ui.ui")
+local SettingsPage = SafeRequire("nuzi-ui/settings_page", "nuzi-ui.settings_page")
+local Compat = SafeRequire("nuzi-ui/compat", "nuzi-ui.compat")
+local Runtime = SafeRequire("nuzi-ui/runtime", "nuzi-ui.runtime")
+local SettingsStore = SafeRequire("nuzi-ui/settings_store", "nuzi-ui.settings_store")
 
-    end
-end
-
-do
-    local ok, mod = pcall(require, "nuzi-ui/compat")
-    if ok then
-        Compat = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.compat")
-        if ok then
-            Compat = mod
-        end
-    end
-end
-
-do
-    local ok, mod = pcall(require, "nuzi-ui/runtime")
-    if ok then
-        Runtime = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.runtime")
-        if ok then
-            Runtime = mod
-        end
-    end
-end
-
-local TryMigrateCooldownTrackerFromCbt = nil
 local SaveSettingsFile = nil
-
-do
-    local ok, mod = pcall(require, "nuzi-ui/settings_page")
-    if ok then
-        SettingsPage = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.settings_page")
-        if ok then
-            SettingsPage = mod
-        end
-    end
-end
 
 local PolarUiAddon = {
     name = "Nuzi UI",
     author = "Nuzi",
-    version = "1.0.13",
+    version = "2.0.0",
     desc = "Interface overhaul"
 }
 
-local SETTINGS_FILE_PATH = "nuzi-ui/.data/settings.txt"
-local SETTINGS_BACKUP_FILE_PATH = "nuzi-ui/.data/settings_backup.txt"
-local SETTINGS_BACKUP_INDEX_FILE_PATH = "nuzi-ui/.data/backups/index.txt"
-local SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH = "nuzi-ui/.data/settings_backup_index.txt"
-local SETTINGS_BACKUP_DIR = "nuzi-ui/.data/backups"
-local LEGACY_LOCAL_SETTINGS_FILE_PATH = "nuzi-ui/settings.txt"
-local LEGACY_LOCAL_SETTINGS_BACKUP_FILE_PATH = "nuzi-ui/settings_backup.txt"
-local LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FILE_PATH = "nuzi-ui/backups/index.txt"
-local LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH = "nuzi-ui/settings_backup_index.txt"
-local LEGACY_ADDON_ID = "polar-ui"
-local LEGACY_SETTINGS_FILE_PATH = "polar-ui/settings.txt"
-local LEGACY_SETTINGS_BACKUP_FILE_PATH = "polar-ui/settings_backup.txt"
-local LEGACY_SETTINGS_BACKUP_INDEX_FILE_PATH = "polar-ui/backups/index.txt"
-local LEGACY_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH = "polar-ui/settings_backup_index.txt"
+local SETTINGS_FILE_PATH = SettingsStore.SETTINGS_FILE_PATH
+local SETTINGS_BACKUP_FILE_PATH = SettingsStore.SETTINGS_BACKUP_FILE_PATH
+local SETTINGS_BACKUP_INDEX_FILE_PATH = SettingsStore.SETTINGS_BACKUP_INDEX_FILE_PATH
+local SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH = SettingsStore.SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH
+local SETTINGS_BACKUP_DIR = SettingsStore.SETTINGS_BACKUP_DIR
+local LEGACY_ADDON_ID = SettingsStore.LEGACY_ADDON_ID
+local LEGACY_SETTINGS_FILE_PATH = SettingsStore.LEGACY_SETTINGS_FILE_PATH
+local LEGACY_SETTINGS_BACKUP_FILE_PATH = SettingsStore.LEGACY_SETTINGS_BACKUP_FILE_PATH
+local LEGACY_SETTINGS_BACKUP_INDEX_FILE_PATH = SettingsStore.LEGACY_SETTINGS_BACKUP_INDEX_FILE_PATH
+local LEGACY_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH = SettingsStore.LEGACY_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH
 
 local ADDONS_BASE_PATH = nil
 pcall(function()
@@ -238,8 +187,6 @@ local DEFAULT_SETTINGS = {
         show_target = true,
         show_player = false,
         show_guild = true,
-        click_through_shift = true,
-        click_through_ctrl = true,
         alpha_pct = 100,
         width = 100,
         hp_height = 28,
@@ -262,10 +209,19 @@ local DEFAULT_SETTINGS = {
         overlay_shadow = true,
         gs_font_size = 12,
         class_font_size = 12,
-        role_font_size = 12,
         target_guild_font_size = 12,
         target_guild_offset_x = 10,
-        target_guild_offset_y = -54,
+        target_guild_offset_y = -18,
+        target_guild_visible = true,
+        target_class_visible = true,
+        target_gearscore_visible = true,
+        target_pdef_visible = true,
+        target_mdef_visible = true,
+        target_guild_color = { 255, 255, 255, 255 },
+        target_class_color = { 255, 255, 255, 255 },
+        target_gearscore_color = { 255, 255, 255, 255 },
+        target_pdef_color = { 255, 255, 255, 255 },
+        target_mdef_color = { 255, 255, 255, 255 },
         name_font_size = 14,
         name_shadow = true,
         name_visible = true,
@@ -293,6 +249,8 @@ local DEFAULT_SETTINGS = {
         mp_fill_color = { 86, 198, 239, 255 },
         mp_after_color = { 86, 198, 239, 255 },
         hp_texture_mode = "stock",
+        hp_custom_texture_path = "",
+        hp_custom_texture_key = "",
         buff_windows = {
             enabled = false,
             player = {
@@ -540,6 +498,32 @@ local function EnsureSettingsDefaultsAndMigrations(s)
         s.style = DeepCopyTable(DEFAULT_SETTINGS.style)
     end
 
+    local function MigrateLegacyTargetOverlayLayout(styleTable)
+        if type(styleTable) ~= "table" then
+            return
+        end
+        local legacyTogglesMissing =
+            styleTable.target_guild_visible == nil
+            and styleTable.target_class_visible == nil
+            and styleTable.target_gearscore_visible == nil
+            and styleTable.target_pdef_visible == nil
+            and styleTable.target_mdef_visible == nil
+        if legacyTogglesMissing and tonumber(styleTable.target_guild_offset_y) == -54 then
+            styleTable.target_guild_offset_y = -18
+            forceWrite = true
+        end
+        if styleTable.target_glider_visible ~= nil then
+            styleTable.target_glider_visible = nil
+            forceWrite = true
+        end
+        if styleTable.target_glider_color ~= nil then
+            styleTable.target_glider_color = nil
+            forceWrite = true
+        end
+    end
+
+    MigrateLegacyTargetOverlayLayout(s.style)
+
     EnsureCooldownTrackerDefaults(s)
     if type(TryMigrateCooldownTrackerFromCbt) == "function" and TryMigrateCooldownTrackerFromCbt(s) then
         EnsureCooldownTrackerDefaults(s)
@@ -556,6 +540,14 @@ local function EnsureSettingsDefaultsAndMigrations(s)
 
     if type(s.nameplates.guild_colors) ~= "table" then
         s.nameplates.guild_colors = {}
+    end
+    if s.nameplates.click_through_shift ~= nil then
+        s.nameplates.click_through_shift = nil
+        forceWrite = true
+    end
+    if s.nameplates.click_through_ctrl ~= nil then
+        s.nameplates.click_through_ctrl = nil
+        forceWrite = true
     end
 
     do
@@ -642,6 +634,7 @@ local function EnsureSettingsDefaultsAndMigrations(s)
     if type(s.style.frames.target_of_target) ~= "table" then
         s.style.frames.target_of_target = DeepCopyTable(DEFAULT_SETTINGS.style.frames.target_of_target)
     end
+    MigrateLegacyTargetOverlayLayout(s.style.frames.target)
     for k, v in pairs(DEFAULT_SETTINGS.style.buff_windows.player.buff) do
         if s.style.buff_windows.player.buff[k] == nil then
             s.style.buff_windows.player.buff[k] = CopyDefaultValue(v)
@@ -770,367 +763,47 @@ TryMigrateCooldownTrackerFromCbt = function(s)
 end
 
 local function EnsureSettings()
-    local runtime = api.GetSettings("nuzi-ui")
-    if type(runtime) ~= "table" then
-        runtime = api.GetSettings(LEGACY_ADDON_ID)
-    end
-    if type(runtime) ~= "table" then
-        runtime = {}
-    end
-
-    local fileSettings = nil
-    local fileMissing = false
-    local fileUnreadable = false
-    local loadedLegacyFile = false
-    lastSettingsLoadSource = ""
-    lastSettingsLoadError = ""
-    do
-        local parsed, source, err = ReadSettingsFromFile(SETTINGS_FILE_PATH)
-        lastSettingsLoadSource = source
-        lastSettingsLoadError = err
-        if parsed == nil then
-            if source == "file:missing" then
-                fileMissing = true
-                local legacyParsed, legacySource, legacyErr = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_FILE_PATH)
-                if type(legacyParsed) ~= "table" then
-                    legacyParsed, legacySource, legacyErr = ReadSettingsFromFile(LEGACY_SETTINGS_FILE_PATH)
-                end
-                if type(legacyParsed) == "table" then
-                    fileSettings = legacyParsed
-                    loadedLegacyFile = true
-                    lastSettingsLoadSource = legacySource
-                    lastSettingsLoadError = legacyErr
-                end
-            elseif source == "file:unreadable" then
-                fileUnreadable = true
-                api.Log:Err("[Nuzi UI] Failed to deserialize " .. SETTINGS_FILE_PATH .. " (file exists but was not readable)")
-            elseif source == "file:read_error" then
-                api.Log:Err("[Nuzi UI] Failed to read " .. SETTINGS_FILE_PATH .. ": " .. tostring(err))
-            elseif source == "file:nil" then
-                api.Log:Err(
-                    "[Nuzi UI] Failed to read "
-                        .. SETTINGS_FILE_PATH
-                        .. " (api.File:Read returned nil and raw fallback unavailable)"
-                )
-            elseif source == "file:legacy_text" or source == "file:string" then
-                api.Log:Err(
-                    "[Nuzi UI] Failed to load "
-                        .. SETTINGS_FILE_PATH
-                        .. " because it was a raw string file; Nuzi UI now expects api.File:Read to deserialize a table"
-                )
-            elseif source == "file:raw" then
-                api.Log:Err(
-                    "[Nuzi UI] Failed to parse "
-                        .. SETTINGS_FILE_PATH
-                        .. " (error="
-                        .. tostring(err)
-                        .. ")"
-                )
-            end
-        else
-            fileSettings = parsed
-        end
-    end
-
-    settings = runtime
-    if type(fileSettings) == "table" then
-        MergeInto(settings, fileSettings)
-    end
-
-    local forceWrite = EnsureSettingsDefaultsAndMigrations(settings)
-
-    local shouldWrite = false
-    if fileMissing or loadedLegacyFile then
-        shouldWrite = true
-    elseif not fileUnreadable and type(fileSettings) == "table" and forceWrite then
-        shouldWrite = true
-    end
-
-    if shouldWrite and api.File ~= nil and api.File.Write ~= nil then
-        pcall(function()
-            api.File:Write(SETTINGS_FILE_PATH, settings)
-        end)
-    end
+    local meta = nil
+    settings, meta = SettingsStore.LoadSettings()
+    lastSettingsLoadSource = type(meta) == "table" and tostring(meta.last_source or "") or ""
+    lastSettingsLoadError = type(meta) == "table" and tostring(meta.last_error or "") or ""
 end
 
 local function SaveSettingsBackupFile()
-    if api.File == nil or api.File.Write == nil or type(settings) ~= "table" then
-        return false, "api.File:Write unavailable"
-    end
-    EnsureSettingsDefaultsAndMigrations(settings)
-
-    local ts = nil
-    pcall(function()
-        if api.Time ~= nil and api.Time.GetLocalTime ~= nil then
-            ts = api.Time:GetLocalTime()
-        end
-    end)
-    if ts == nil then
-        ts = tostring(math.random(1000000000, 9999999999))
-    end
-    ts = tostring(ts)
-
-    local backupPath = string.format("%s/settings_%s.txt", SETTINGS_BACKUP_DIR, ts)
-    local ok, err = pcall(function()
-        api.File:Write(backupPath, settings)
-    end)
-    if not ok then
-        backupPath = string.format("nuzi-ui/.data/settings_backup_%s.txt", ts)
-        ok, err = pcall(function()
-            api.File:Write(backupPath, settings)
-        end)
-        if not ok then
-            return false, tostring(err)
-        end
-    end
-
-    local idx = nil
-    pcall(function()
-        idx = ReadSettingsFromFile(SETTINGS_BACKUP_INDEX_FILE_PATH)
-    end)
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        idx = { version = 1, backups = {} }
-    end
-
-    if type(idx.backups) ~= "table" then
-        idx.backups = {}
-    end
-
-    table.insert(idx.backups, 1, { path = backupPath, timestamp = ts })
-    while #idx.backups > 50 do
-        table.remove(idx.backups)
-    end
-
-    pcall(function()
-        api.File:Write(SETTINGS_BACKUP_INDEX_FILE_PATH, idx)
-    end)
-    pcall(function()
-        local parsed2, source2 = ReadSettingsFromFile(SETTINGS_BACKUP_INDEX_FILE_PATH)
-        if parsed2 == nil and tostring(source2) ~= "file:table" then
-            api.File:Write(SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH, idx)
-        end
-    end)
-
-    pcall(function()
-        local legacyParsed, legacySource = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_FILE_PATH)
-        if legacyParsed == nil and tostring(legacySource) == "file:missing" then
-            api.File:Write(LEGACY_LOCAL_SETTINGS_BACKUP_FILE_PATH, settings)
-        end
-    end)
-
-    api.Log:Info("[Nuzi UI] Backup saved: " .. tostring(backupPath))
-    return true, backupPath
+    return SettingsStore.SaveSettingsBackupFile(settings)
 end
 
 local function ResolveBackupPathFromArg(arg)
-    local idx = nil
-    pcall(function()
-        idx = ReadSettingsFromFile(SETTINGS_BACKUP_INDEX_FILE_PATH)
-    end)
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(LEGACY_SETTINGS_BACKUP_INDEX_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(LEGACY_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" or type(idx.backups) ~= "table" then
-        idx = nil
-    end
-
-    local raw = tostring(arg or "")
-    raw = string.match(raw, "^%s*(.-)%s*$") or raw
-
-    if raw == "" then
-        if idx ~= nil and idx.backups[1] ~= nil and type(idx.backups[1].path) == "string" then
-            return idx.backups[1].path
-        end
-        return SETTINGS_BACKUP_FILE_PATH or LEGACY_LOCAL_SETTINGS_BACKUP_FILE_PATH or LEGACY_SETTINGS_BACKUP_FILE_PATH
-    end
-
-    local n = tonumber(raw)
-    if n ~= nil and idx ~= nil and idx.backups[n] ~= nil and type(idx.backups[n].path) == "string" then
-        return idx.backups[n].path
-    end
-
-    if string.find(raw, "nuzi-ui/", 1, true) == 1 or string.find(raw, "polar-ui/", 1, true) == 1 then
-        return raw
-    end
-
-    if idx ~= nil then
-        for _, e in ipairs(idx.backups) do
-            if type(e) == "table" and tostring(e.path) == raw then
-                return raw
-            end
-        end
-    end
-
-    return nil
+    return SettingsStore.ResolveBackupPathFromArg(arg)
 end
 
 local function LogBackupList(maxN)
-    local limit = tonumber(maxN) or 10
-    if limit < 1 then
-        limit = 1
-    end
-    if limit > 50 then
-        limit = 50
-    end
-
-    local idx = nil
-    pcall(function()
-        idx = ReadSettingsFromFile(SETTINGS_BACKUP_INDEX_FILE_PATH)
-    end)
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(LEGACY_SETTINGS_BACKUP_INDEX_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" then
-        pcall(function()
-            idx = ReadSettingsFromFile(LEGACY_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
-        end)
-    end
-    if type(idx) ~= "table" or type(idx.backups) ~= "table" or #idx.backups == 0 then
-        api.Log:Info("[Nuzi UI] No backups found.")
-        return
-    end
-
-    api.Log:Info("[Nuzi UI] Backups:")
-    local n = 0
-    for i, e in ipairs(idx.backups) do
-        if n >= limit then
-            break
-        end
-        if type(e) == "table" and type(e.path) == "string" then
-            api.Log:Info(string.format("[Nuzi UI]  %d) %s", i, e.path))
-            n = n + 1
-        end
-    end
+    SettingsStore.LogBackupList(maxN)
 end
 
 local function ImportSettingsBackupFile(arg)
-    if type(settings) ~= "table" then
-        return false, "settings not initialized"
+    local ok, err = SettingsStore.ImportSettingsBackupFile(settings, arg)
+    if not ok then
+        return ok, err
     end
-
-    local backupPath = ResolveBackupPathFromArg(arg)
-    if backupPath == nil then
-        return false, "no backups found (use Backup first or run !nui backups)"
-    end
-
-    local parsed, source, err = ReadSettingsFromFile(backupPath)
-    if type(parsed) ~= "table" then
-        if err == "" then
-            err = "no backup found"
-        end
-        return false, tostring(source) .. ":" .. tostring(err)
-    end
-
-    for k in pairs(settings) do
-        settings[k] = nil
-    end
-    MergeInto(settings, parsed)
-    EnsureSettingsDefaultsAndMigrations(settings)
-
-    pcall(function()
-        local px = type(parsed.player) == "table" and parsed.player.x or nil
-        local py = type(parsed.player) == "table" and parsed.player.y or nil
-        local tx = type(parsed.target) == "table" and parsed.target.x or nil
-        local ty = type(parsed.target) == "table" and parsed.target.y or nil
-        local gcCount = 0
-        if type(parsed.nameplates) == "table" and type(parsed.nameplates.guild_colors) == "table" then
-            for _ in pairs(parsed.nameplates.guild_colors) do
-                gcCount = gcCount + 1
-            end
-        end
-        api.Log:Info(
-            string.format(
-                "[Nuzi UI] Imported backup (%s): player=(%s,%s) target=(%s,%s) guild_colors=%s",
-                tostring(backupPath),
-                tostring(px),
-                tostring(py),
-                tostring(tx),
-                tostring(ty),
-                tostring(gcCount)
-            )
-        )
-    end)
     if type(SaveSettingsFile) == "function" then
         SaveSettingsFile()
     end
-
     if UI ~= nil and UI.Init ~= nil then
         pcall(function()
             UI.Init(settings)
         end)
     end
-
     if SettingsPage ~= nil and SettingsPage.open ~= nil then
         pcall(function()
             SettingsPage.open()
         end)
     end
-
     return true, ""
 end
 
 SaveSettingsFile = function()
-    api.SaveSettings()
-    if api.File ~= nil and api.File.Write ~= nil and type(settings) == "table" then
-        EnsureSettingsDefaultsAndMigrations(settings)
-        pcall(function()
-            api.File:Write(SETTINGS_FILE_PATH, settings)
-        end)
-    end
+    SettingsStore.SaveSettingsFile(settings)
 end
 
 local function OnUpdate(dt)

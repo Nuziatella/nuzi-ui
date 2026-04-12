@@ -116,36 +116,56 @@ local function SafeShow(wnd, show)
     if wnd == nil or wnd.Show == nil then
         return
     end
+    show = show and true or false
+    if wnd.__polar_visible == show then
+        return
+    end
     pcall(function()
-        wnd:Show(show and true or false)
+        wnd:Show(show)
     end)
+    wnd.__polar_visible = show
 end
 
 local function SafeClickable(wnd, clickable)
     if wnd == nil or wnd.Clickable == nil then
         return
     end
+    clickable = clickable and true or false
+    if wnd.__polar_clickable == clickable then
+        return
+    end
     pcall(function()
-        wnd:Clickable(clickable and true or false)
+        wnd:Clickable(clickable)
     end)
+    wnd.__polar_clickable = clickable
 end
 
 local function SafeSetText(lbl, txt)
     if lbl == nil or lbl.SetText == nil then
         return
     end
+    txt = tostring(txt or "")
+    if lbl.__polar_text == txt then
+        return
+    end
     pcall(function()
-        lbl:SetText(tostring(txt or ""))
+        lbl:SetText(txt)
     end)
+    lbl.__polar_text = txt
 end
 
 local function SafeSetTextColor(lbl, r, g, b, a)
     if lbl == nil or lbl.style == nil or lbl.style.SetColor == nil then
         return
     end
+    local colorKey = string.format("%.3f:%.3f:%.3f:%.3f", tonumber(r) or 0, tonumber(g) or 0, tonumber(b) or 0, tonumber(a) or 0)
+    if lbl.__polar_text_color_key == colorKey then
+        return
+    end
     pcall(function()
         lbl.style:SetColor(r, g, b, a)
     end)
+    lbl.__polar_text_color_key = colorKey
 end
 
 local function Clamp01(v, default)
@@ -208,9 +228,14 @@ local function SafeSetAlpha(wnd, a01)
     if wnd.SetAlpha == nil then
         return
     end
+    local alpha = ClampNumber(a01, 0, 1, 1)
+    if wnd.__polar_alpha == alpha then
+        return
+    end
     pcall(function()
-        wnd:SetAlpha(ClampNumber(a01, 0, 1, 1))
+        wnd:SetAlpha(alpha)
     end)
+    wnd.__polar_alpha = alpha
 end
 
 local function SafeSetBg(frame, enabled, alpha01)
@@ -218,16 +243,56 @@ local function SafeSetBg(frame, enabled, alpha01)
         return
     end
     local bg = frame.bg
+    enabled = enabled and true or false
+    local alpha = ClampNumber(alpha01, 0, 1, 0.8)
+    SafeShow(bg, enabled)
+    if bg.SetColor ~= nil and (bg.__polar_bg_alpha ~= alpha or bg.__polar_bg_enabled ~= enabled) then
+        pcall(function()
+            bg:SetColor(1, 1, 1, alpha)
+        end)
+        bg.__polar_bg_alpha = alpha
+        bg.__polar_bg_enabled = enabled
+    end
+end
+
+local function SafeSetAnchorTopLeft(wnd, x, y)
+    if wnd == nil or wnd.AddAnchor == nil then
+        return
+    end
+    x = tonumber(x) or 0
+    y = tonumber(y) or 0
+    if wnd.__polar_anchor_x == x and wnd.__polar_anchor_y == y then
+        return
+    end
     pcall(function()
-        if bg.Show ~= nil then
-            bg:Show(enabled and true or false)
+        if wnd.RemoveAllAnchors ~= nil then
+            wnd:RemoveAllAnchors()
         end
+        wnd:AddAnchor("TOPLEFT", "UIParent", x, y)
     end)
+    wnd.__polar_anchor_x = x
+    wnd.__polar_anchor_y = y
+end
+
+local function SafeSetBarValue(statusBar, maxValue, value)
+    if statusBar == nil then
+        return
+    end
+    maxValue = tonumber(maxValue) or 0
+    value = tonumber(value) or 0
+    if statusBar.__polar_max ~= maxValue then
+        pcall(function()
+            statusBar:SetMinMaxValues(0, maxValue)
+        end)
+        statusBar.__polar_max = maxValue
+    end
+    if statusBar.__polar_value == value then
+        return
+    end
     pcall(function()
-        if bg.SetColor ~= nil then
-            bg:SetColor(1, 1, 1, ClampNumber(alpha01, 0, 1, 0.8))
-        end
+        statusBar:SetValue(value)
     end)
+    statusBar.__polar_value = value
 end
 
 local function ShouldShowUnit(unit, cfg)
@@ -267,6 +332,19 @@ local function ApplyLayout(frame, cfg)
         local guildFs = ClampNumber(cfg.guild_font_size, 6, 32, 11)
         totalHeight = guildFs + 8
     end
+
+    local layoutKey = table.concat({
+        guildOnly and "1" or "0",
+        tostring(width),
+        tostring(hpHeight),
+        tostring(mpHeight),
+        tostring(ClampNumber(cfg.name_font_size, 6, 32, 14)),
+        tostring(ClampNumber(cfg.guild_font_size, 6, 32, 11))
+    }, ":")
+    if frame.__polar_layout_key == layoutKey then
+        return
+    end
+    frame.__polar_layout_key = layoutKey
 
     pcall(function()
         if frame.SetExtent ~= nil then
@@ -332,6 +410,51 @@ local function ApplyLayout(frame, cfg)
             end
         end)
     end
+end
+
+local function ApplyGuildMode(frame, guildOnly, showMpBar)
+    if frame == nil or frame.__polar_guild_only == guildOnly then
+        if not guildOnly then
+            SafeShow(frame.hpBar, true)
+            SafeShow(frame.mpBar, showMpBar and true or false)
+        end
+        return
+    end
+    frame.__polar_guild_only = guildOnly
+
+    if guildOnly then
+        SafeShow(frame.hpBar, false)
+        SafeShow(frame.mpBar, false)
+        SafeShow(frame.nameLabel, false)
+        SafeSetBg(frame, false, 0)
+        SafeShow(frame.eventWindow, false)
+        pcall(function()
+            if frame.guildLabel ~= nil then
+                if frame.guildLabel.RemoveAllAnchors ~= nil then
+                    frame.guildLabel:RemoveAllAnchors()
+                end
+                if frame.guildLabel.AddAnchor ~= nil then
+                    frame.guildLabel:AddAnchor("TOPLEFT", frame, 3, -3)
+                end
+            end
+        end)
+        return
+    end
+
+    SafeShow(frame.nameLabel, true)
+    SafeShow(frame.hpBar, true)
+    SafeShow(frame.mpBar, showMpBar and true or false)
+    SafeShow(frame.eventWindow, false)
+    pcall(function()
+        if frame.guildLabel ~= nil and frame.nameLabel ~= nil then
+            if frame.guildLabel.RemoveAllAnchors ~= nil then
+                frame.guildLabel:RemoveAllAnchors()
+            end
+            if frame.guildLabel.AddAnchor ~= nil then
+                frame.guildLabel:AddAnchor("TOPLEFT", frame.nameLabel, "BOTTOMLEFT", 0, 0)
+            end
+        end
+    end)
 end
 
 local function EnsureFrame(unit)
@@ -556,52 +679,26 @@ local function UpdateOne(unit, settings)
     local posX = offsetX - math.ceil(width / 2)
     local posY = offsetY - math.ceil(totalHeight / 2)
 
-    pcall(function()
-        frame:RemoveAllAnchors()
-        frame:AddAnchor("TOPLEFT", "UIParent", posX, posY)
-    end)
+    SafeSetAnchorTopLeft(frame, posX, posY)
 
-    if guildOnly then
-        SafeShow(frame.hpBar, false)
-        SafeShow(frame.mpBar, false)
-        SafeShow(frame.nameLabel, false)
-        SafeSetBg(frame, false, 0)
-        SafeShow(frame.eventWindow, false)
+    ApplyGuildMode(frame, guildOnly, mpHeight > 0)
 
-        pcall(function()
-            if frame.guildLabel ~= nil then
-                if frame.guildLabel.RemoveAllAnchors ~= nil then
-                    frame.guildLabel:RemoveAllAnchors()
-                end
-                if frame.guildLabel.AddAnchor ~= nil then
-                    frame.guildLabel:AddAnchor("TOPLEFT", frame, 3, -3)
-                end
-            end
-        end)
-    else
-        SafeShow(frame.nameLabel, true)
-        SafeShow(frame.eventWindow, false)
-
-        pcall(function()
-            if frame.guildLabel ~= nil and frame.nameLabel ~= nil then
-                if frame.guildLabel.RemoveAllAnchors ~= nil then
-                    frame.guildLabel:RemoveAllAnchors()
-                end
-                if frame.guildLabel.AddAnchor ~= nil then
-                    frame.guildLabel:AddAnchor("TOPLEFT", frame.nameLabel, "BOTTOMLEFT", 0, 0)
-                end
-            end
-        end)
-    end
-
-    local info = SafeGetUnitInfoById(id)
-
+    local info = nil
     local isCharacter = true
-    if type(info) == "table" and info.type ~= nil then
-        isCharacter = (tostring(info.type) == "character")
+    if guildOnly or cfg.show_guild then
+        info = SafeGetUnitInfoById(id)
+        if type(info) == "table" and info.type ~= nil then
+            isCharacter = (tostring(info.type) == "character")
+        end
     end
 
-    local name = Runtime ~= nil and Runtime.GetUnitNameById(id) or ""
+    local name = ""
+    if type(info) == "table" then
+        name = tostring(info.name or info.unitName or info.family_name or "")
+    end
+    if name == "" and Runtime ~= nil and Runtime.GetUnitNameById ~= nil then
+        name = Runtime.GetUnitNameById(id)
+    end
     SafeSetText(frame.nameLabel, name or "")
 
     local guild = nil
@@ -625,8 +722,7 @@ local function UpdateOne(unit, settings)
             pcall(function()
                 local maxHp = api.Unit:UnitMaxHealth(unit) or 0
                 local hp = api.Unit:UnitHealth(unit) or 0
-                frame.hpBar.statusBar:SetMinMaxValues(0, maxHp)
-                frame.hpBar.statusBar:SetValue(hp)
+                SafeSetBarValue(frame.hpBar.statusBar, maxHp, hp)
             end)
         end
 
@@ -634,8 +730,7 @@ local function UpdateOne(unit, settings)
             pcall(function()
                 local maxMp = api.Unit:UnitMaxMana(unit) or 0
                 local mp = api.Unit:UnitMana(unit) or 0
-                frame.mpBar.statusBar:SetMinMaxValues(0, maxMp)
-                frame.mpBar.statusBar:SetValue(mp)
+                SafeSetBarValue(frame.mpBar.statusBar, maxMp, mp)
             end)
         end
     end
