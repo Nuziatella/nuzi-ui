@@ -30,18 +30,6 @@ SettingsCatalog.PAGES = {
         label = "Nameplates",
         title = "Nameplates",
         summary = "Visibility rules, offsets, colors, and runtime nameplate behavior."
-    },
-    {
-        id = "cooldown",
-        label = "Cooldowns",
-        title = "Cooldown Tracker",
-        summary = "Tracked buff icons, timers, per-unit placement, and scan helpers."
-    },
-    {
-        id = "dailyage",
-        label = "Dailies",
-        title = "Dailies",
-        summary = "Daily quest helper visibility and the hidden-list manager."
     }
 }
 

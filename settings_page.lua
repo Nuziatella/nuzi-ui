@@ -58,9 +58,7 @@ local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAG
     { id = "text", label = "Text", title = "Text", summary = "Name, level, role, guild, and number formatting." },
     { id = "bars", label = "Bars", title = "Bars", summary = "Frame sizing, alpha, bar colors, textures, and value placement." },
     { id = "auras", label = "Auras", title = "Auras", summary = "Aura windows, icon layout, and buff or debuff anchor controls." },
-    { id = "plates", label = "Nameplates", title = "Nameplates", summary = "Visibility rules, offsets, colors, and runtime nameplate behavior." },
-    { id = "cooldown", label = "Cooldowns", title = "Cooldown Tracker", summary = "Tracked buff icons, timers, per-unit placement, and scan helpers." },
-    { id = "dailyage", label = "Dailies", title = "Dailies", summary = "Daily quest helper visibility and the hidden-list manager." }
+    { id = "plates", label = "Nameplates", title = "Nameplates", summary = "Visibility rules, offsets, colors, and runtime nameplate behavior." }
 }
 
 local ClampInt = SettingsCommon.ClampInt
@@ -153,7 +151,7 @@ local function ScanTargetEffects()
     end
 end
 
-local EnsureDailyAgeTables = SettingsCommon.EnsureDailyAgeTables
+local EnsureDailiesTables = SettingsCommon.EnsureDailiesTables or SettingsCommon.EnsureDailyAgeTables
 
 local function GetCooldownUnitKeyFromIndex(idx)
     return SettingsCommon.GetKeyFromIndex(COOLDOWN_UNIT_KEYS, idx)
@@ -509,12 +507,6 @@ local function SetActivePage(pageId)
         UpdateNavigationState(pageId)
     end
 
-    if pageId == "dailyage" and type(SettingsPage.RefreshDailyAgeList) == "function" then
-        pcall(function()
-            SettingsPage.RefreshDailyAgeList()
-        end)
-    end
-
     local function syncStyleTargetCombo(ctrl)
         if ctrl == nil then
             return
@@ -793,11 +785,6 @@ local function RefreshControls()
 
     if SettingsPage.controls.alignment_grid_enabled ~= nil then
         SettingsPage.controls.alignment_grid_enabled:SetChecked(s.alignment_grid_enabled and true or false)
-    end
-
-    EnsureDailyAgeTables(s)
-    if SettingsPage.controls.dailyage_enabled ~= nil then
-        SettingsPage.controls.dailyage_enabled:SetChecked(s.dailyage.enabled and true or false)
     end
 
     if SettingsPage.controls.frame_alpha ~= nil then
@@ -1272,80 +1259,6 @@ local function RefreshControls()
         end
     end
 
-    EnsureCooldownTrackerTables(s)
-    if SettingsPage.controls.ct_enabled ~= nil then
-        SettingsPage.controls.ct_enabled:SetChecked(s.cooldown_tracker.enabled and true or false)
-    end
-    if SettingsPage.controls.ct_update_interval ~= nil then
-        refreshSlider(
-            SettingsPage.controls.ct_update_interval,
-            SettingsPage.controls.ct_update_interval_val,
-            tonumber(s.cooldown_tracker.update_interval_ms) or 50
-        )
-    end
-
-    local unit_key = tostring(SettingsPage.cooldown_unit_key or "player")
-    if SettingsPage.controls.ct_unit ~= nil then
-        SetComboBoxIndex1Based(SettingsPage.controls.ct_unit, GetCooldownUnitIndexFromKey(unit_key))
-    end
-
-    local unit_cfg = s.cooldown_tracker.units[unit_key]
-    if type(unit_cfg) == "table" then
-        if SettingsPage.controls.ct_unit_enabled ~= nil then
-            SettingsPage.controls.ct_unit_enabled:SetChecked(unit_cfg.enabled and true or false)
-        end
-        if SettingsPage.controls.ct_lock_position ~= nil then
-            SettingsPage.controls.ct_lock_position:SetChecked(unit_cfg.lock_position and true or false)
-        end
-        if SettingsPage.controls.ct_show_timer ~= nil then
-            SettingsPage.controls.ct_show_timer:SetChecked(unit_cfg.show_timer ~= false)
-        end
-        if SettingsPage.controls.ct_show_label ~= nil then
-            SettingsPage.controls.ct_show_label:SetChecked(unit_cfg.show_label and true or false)
-        end
-
-        if SettingsPage.controls.ct_pos_x ~= nil and SettingsPage.controls.ct_pos_x.SetText ~= nil then
-            SettingsPage.controls.ct_pos_x:SetText(tostring(tonumber(unit_cfg.pos_x) or 0))
-        end
-        if SettingsPage.controls.ct_pos_y ~= nil and SettingsPage.controls.ct_pos_y.SetText ~= nil then
-            SettingsPage.controls.ct_pos_y:SetText(tostring(tonumber(unit_cfg.pos_y) or 0))
-        end
-
-        refreshSlider(SettingsPage.controls.ct_icon_size, SettingsPage.controls.ct_icon_size_val, tonumber(unit_cfg.icon_size) or 40)
-        refreshSlider(SettingsPage.controls.ct_icon_spacing, SettingsPage.controls.ct_icon_spacing_val, tonumber(unit_cfg.icon_spacing) or 5)
-        refreshSlider(SettingsPage.controls.ct_max_icons, SettingsPage.controls.ct_max_icons_val, tonumber(unit_cfg.max_icons) or 10)
-        refreshSlider(SettingsPage.controls.ct_timer_fs, SettingsPage.controls.ct_timer_fs_val, tonumber(unit_cfg.timer_font_size) or 16)
-        refreshSlider(SettingsPage.controls.ct_label_fs, SettingsPage.controls.ct_label_fs_val, tonumber(unit_cfg.label_font_size) or 14)
-
-        do
-            local cache_val = 300
-            if unit_key == "target" then
-                cache_val = tonumber(unit_cfg.cache_timeout_s) or 300
-            end
-            refreshSlider(
-                SettingsPage.controls.ct_cache_timeout,
-                SettingsPage.controls.ct_cache_timeout_val,
-                cache_val
-            )
-            if SettingsPage.controls.ct_cache_timeout ~= nil and SettingsPage.controls.ct_cache_timeout.SetEnable ~= nil then
-                SettingsPage.controls.ct_cache_timeout:SetEnable(unit_key == "target")
-            end
-        end
-
-        local tc = type(unit_cfg.timer_color) == "table" and unit_cfg.timer_color or { 1, 1, 1, 1 }
-        refreshSlider(SettingsPage.controls.ct_timer_r, SettingsPage.controls.ct_timer_r_val, ClampInt((tc[1] or 1) * 255, 0, 255, 255))
-        refreshSlider(SettingsPage.controls.ct_timer_g, SettingsPage.controls.ct_timer_g_val, ClampInt((tc[2] or 1) * 255, 0, 255, 255))
-        refreshSlider(SettingsPage.controls.ct_timer_b, SettingsPage.controls.ct_timer_b_val, ClampInt((tc[3] or 1) * 255, 0, 255, 255))
-
-        local lc = type(unit_cfg.label_color) == "table" and unit_cfg.label_color or { 1, 1, 1, 1 }
-        refreshSlider(SettingsPage.controls.ct_label_r, SettingsPage.controls.ct_label_r_val, ClampInt((lc[1] or 1) * 255, 0, 255, 255))
-        refreshSlider(SettingsPage.controls.ct_label_g, SettingsPage.controls.ct_label_g_val, ClampInt((lc[2] or 1) * 255, 0, 255, 255))
-        refreshSlider(SettingsPage.controls.ct_label_b, SettingsPage.controls.ct_label_b_val, ClampInt((lc[3] or 1) * 255, 0, 255, 255))
-
-        RefreshCooldownBuffRows(unit_cfg)
-    end
-
-    RefreshCooldownScanRows()
 end
 
 local function ApplyControlsToSettings()
@@ -1357,11 +1270,6 @@ local function ApplyControlsToSettings()
 
     if SettingsPage.controls.alignment_grid_enabled ~= nil then
         s.alignment_grid_enabled = SettingsPage.controls.alignment_grid_enabled:GetChecked() and true or false
-    end
-
-    EnsureDailyAgeTables(s)
-    if SettingsPage.controls.dailyage_enabled ~= nil then
-        s.dailyage.enabled = SettingsPage.controls.dailyage_enabled:GetChecked() and true or false
     end
 
     EnsureStyleFrames(s)
@@ -1784,76 +1692,6 @@ local function ApplyControlsToSettings()
         editStyle.short_numbers = SettingsPage.controls.short_numbers:GetChecked() and true or false
     end
 
-    EnsureCooldownTrackerTables(s)
-    if SettingsPage.controls.ct_enabled ~= nil then
-        s.cooldown_tracker.enabled = SettingsPage.controls.ct_enabled:GetChecked() and true or false
-    end
-    if SettingsPage.controls.ct_update_interval ~= nil then
-        s.cooldown_tracker.update_interval_ms = ClampInt(GetSliderValue(SettingsPage.controls.ct_update_interval), 10, 1000, 50)
-    end
-
-    local unit_key = tostring(SettingsPage.cooldown_unit_key or "player")
-    local unit_cfg = s.cooldown_tracker.units[unit_key]
-    if type(unit_cfg) == "table" then
-        if SettingsPage.controls.ct_unit_enabled ~= nil then
-            unit_cfg.enabled = SettingsPage.controls.ct_unit_enabled:GetChecked() and true or false
-        end
-        if SettingsPage.controls.ct_lock_position ~= nil then
-            unit_cfg.lock_position = SettingsPage.controls.ct_lock_position:GetChecked() and true or false
-        end
-        if SettingsPage.controls.ct_show_timer ~= nil then
-            unit_cfg.show_timer = SettingsPage.controls.ct_show_timer:GetChecked() and true or false
-        end
-        if SettingsPage.controls.ct_show_label ~= nil then
-            unit_cfg.show_label = SettingsPage.controls.ct_show_label:GetChecked() and true or false
-        end
-
-        local pos_x = ParseEditNumber(SettingsPage.controls.ct_pos_x)
-        local pos_y = ParseEditNumber(SettingsPage.controls.ct_pos_y)
-        if pos_x ~= nil then
-            unit_cfg.pos_x = math.floor(pos_x + 0.5)
-        end
-        if pos_y ~= nil then
-            unit_cfg.pos_y = math.floor(pos_y + 0.5)
-        end
-
-        if SettingsPage.controls.ct_icon_size ~= nil then
-            unit_cfg.icon_size = ClampInt(GetSliderValue(SettingsPage.controls.ct_icon_size), 10, 200, 40)
-        end
-        if SettingsPage.controls.ct_icon_spacing ~= nil then
-            unit_cfg.icon_spacing = ClampInt(GetSliderValue(SettingsPage.controls.ct_icon_spacing), 0, 50, 5)
-        end
-        if SettingsPage.controls.ct_max_icons ~= nil then
-            unit_cfg.max_icons = ClampInt(GetSliderValue(SettingsPage.controls.ct_max_icons), 1, 50, 10)
-        end
-        if SettingsPage.controls.ct_timer_fs ~= nil then
-            unit_cfg.timer_font_size = ClampInt(GetSliderValue(SettingsPage.controls.ct_timer_fs), 6, 64, 16)
-        end
-        if SettingsPage.controls.ct_label_fs ~= nil then
-            unit_cfg.label_font_size = ClampInt(GetSliderValue(SettingsPage.controls.ct_label_fs), 6, 64, 14)
-        end
-
-        if unit_key == "target" and SettingsPage.controls.ct_cache_timeout ~= nil then
-            unit_cfg.cache_timeout_s = ClampInt(GetSliderValue(SettingsPage.controls.ct_cache_timeout), 0, 3600, 300)
-        end
-
-        if SettingsPage.controls.ct_timer_r ~= nil and SettingsPage.controls.ct_timer_g ~= nil and SettingsPage.controls.ct_timer_b ~= nil then
-            unit_cfg.timer_color = {
-                ClampInt(GetSliderValue(SettingsPage.controls.ct_timer_r), 0, 255, 255) / 255,
-                ClampInt(GetSliderValue(SettingsPage.controls.ct_timer_g), 0, 255, 255) / 255,
-                ClampInt(GetSliderValue(SettingsPage.controls.ct_timer_b), 0, 255, 255) / 255,
-                1
-            }
-        end
-        if SettingsPage.controls.ct_label_r ~= nil and SettingsPage.controls.ct_label_g ~= nil and SettingsPage.controls.ct_label_b ~= nil then
-            unit_cfg.label_color = {
-                ClampInt(GetSliderValue(SettingsPage.controls.ct_label_r), 0, 255, 255) / 255,
-                ClampInt(GetSliderValue(SettingsPage.controls.ct_label_g), 0, 255, 255) / 255,
-                ClampInt(GetSliderValue(SettingsPage.controls.ct_label_b), 0, 255, 255) / 255,
-                1
-            }
-        end
-    end
 end
 
 local function EnsureWindow()
@@ -2056,15 +1894,7 @@ local function EnsureWindow()
     end
 
     do
-        local quests = nil
-        pcall(function()
-            quests = require("nuzi-ui/dailyage_quests")
-        end)
-        if type(quests) ~= "table" then
-            pcall(function()
-                quests = require("nuzi-ui.dailyage_quests")
-            end)
-        end
+        local quests = {}
 
         local function safeGetQuestTitle(id)
             local id_num = tonumber(id)
@@ -2127,24 +1957,97 @@ local function EnsureWindow()
 
         local renderDailyAgeManagerRows = nil
 
-        local function refreshDailyAgeList()
+        local function cloneDailyAgeHidden(hidden)
+            local out = {}
+            if type(hidden) ~= "table" then
+                return out
+            end
+            for k, v in pairs(hidden) do
+                local id = tonumber(k)
+                if id ~= nil and v then
+                    out[tostring(math.floor(id + 0.5))] = true
+                end
+            end
+            return out
+        end
+
+        local function beginDailyAgeEditSession()
+            if SettingsPage.settings == nil then
+                SettingsPage.dailyage_pending_hidden = {}
+                return SettingsPage.dailyage_pending_hidden
+            end
+            EnsureDailiesTables(SettingsPage.settings)
+            SettingsPage.dailyage_pending_hidden = cloneDailyAgeHidden(SettingsPage.settings.dailies.hidden)
+            return SettingsPage.dailyage_pending_hidden
+        end
+
+        local function getDailyAgeWorkingHidden()
+            if type(SettingsPage.dailyage_pending_hidden) == "table" then
+                return SettingsPage.dailyage_pending_hidden
+            end
+            if SettingsPage.settings == nil then
+                return {}
+            end
+            EnsureDailiesTables(SettingsPage.settings)
+            return SettingsPage.settings.dailies.hidden
+        end
+
+        local function updateDailyAgeStatus(hidden)
+            local totalCount = 0
+            if type(SettingsPage.dailyage_entries) == "table" then
+                totalCount = #SettingsPage.dailyage_entries
+            end
+            local hiddenCount = 0
+            for _, v in pairs(hidden or {}) do
+                if v then
+                    hiddenCount = hiddenCount + 1
+                end
+            end
+            local shownCount = totalCount - hiddenCount
+            if shownCount < 0 then
+                shownCount = 0
+            end
+            local statusText = string.format("Shown: %d / %d  (Hidden: %d)", shownCount, totalCount, hiddenCount)
+            if SettingsPage.controls.dailyage_status ~= nil and SettingsPage.controls.dailyage_status.SetText ~= nil then
+                SettingsPage.controls.dailyage_status:SetText(statusText)
+            end
+            if SettingsPage.controls.dailyage_mgr_status ~= nil and SettingsPage.controls.dailyage_mgr_status.SetText ~= nil then
+                SettingsPage.controls.dailyage_mgr_status:SetText(statusText)
+            end
+        end
+
+        local function getDailyAgeManagerScrollValue()
+            local scrollFrame = SettingsPage.controls.dailyage_mgr_scroll_frame
+            if scrollFrame == nil then
+                return 0
+            end
+            local value = tonumber(scrollFrame.__polar_scroll_value) or 0
+            pcall(function()
+                if scrollFrame.scroll ~= nil and scrollFrame.scroll.vs ~= nil and scrollFrame.scroll.vs.GetValue ~= nil then
+                    local liveValue = scrollFrame.scroll.vs:GetValue()
+                    if type(liveValue) == "number" then
+                        value = liveValue
+                    end
+                end
+            end)
+            if value < 0 then
+                value = 0
+            end
+            return value
+        end
+
+        local function refreshDailyAgeList(preserveScrollValue)
             if SettingsPage.settings == nil then
                 return
             end
-            EnsureDailyAgeTables(SettingsPage.settings)
-            local hidden = SettingsPage.settings.dailyage.hidden
+            EnsureDailiesTables(SettingsPage.settings)
+            local hidden = getDailyAgeWorkingHidden()
             if type(hidden) ~= "table" then
                 hidden = {}
-                SettingsPage.settings.dailyage.hidden = hidden
-            end
-
-            for k, v in pairs(hidden) do
-                if type(k) == "string" then
-                    local nk = tonumber(k)
-                    if nk ~= nil then
-                        hidden[nk] = v
-                        hidden[k] = nil
-                    end
+                if type(SettingsPage.dailyage_pending_hidden) == "table" then
+                    SettingsPage.dailyage_pending_hidden = hidden
+                else
+                    SettingsPage.settings.dailies.hidden = hidden
                 end
             end
 
@@ -2158,7 +2061,7 @@ local function EnsureWindow()
             local items = {}
             for _, e in ipairs(SettingsPage.dailyage_entries) do
                 local id_key = tostring(e.id)
-                local isHidden = (hidden[e.id] or hidden[id_key]) and true or false
+                local isHidden = hidden[id_key] and true or false
                 local completed = isQuestCompleted(e.id)
 
                 local show = true
@@ -2179,84 +2082,45 @@ local function EnsureWindow()
                 end
             end
 
+            local desiredScrollValue = tonumber(preserveScrollValue)
+            if desiredScrollValue == nil then
+                desiredScrollValue = getDailyAgeManagerScrollValue()
+            end
+            local scrollFrame = SettingsPage.controls.dailyage_mgr_scroll_frame
+            if scrollFrame ~= nil then
+                scrollFrame.__polar_scroll_value = desiredScrollValue
+            end
+
             if type(renderDailyAgeManagerRows) == "function" then
                 pcall(function()
                     renderDailyAgeManagerRows(items)
                 end)
             end
 
-            if SettingsPage.controls.dailyage_status ~= nil and SettingsPage.controls.dailyage_status.SetText ~= nil then
-                local totalCount = 0
-                if type(SettingsPage.dailyage_entries) == "table" then
-                    totalCount = #SettingsPage.dailyage_entries
-                end
-                local hiddenCount = 0
-                for _, v in pairs(hidden) do
-                    if v then
-                        hiddenCount = hiddenCount + 1
-                    end
-                end
-                local shownCount = totalCount - hiddenCount
-                if shownCount < 0 then
-                    shownCount = 0
-                end
-                SettingsPage.controls.dailyage_status:SetText(
-                    string.format("Shown: %d / %d  (Hidden: %d)", shownCount, totalCount, hiddenCount)
-                )
-            end
-
-            if SettingsPage.controls.dailyage_mgr_status ~= nil and SettingsPage.controls.dailyage_mgr_status.SetText ~= nil then
-                local totalCount = 0
-                if type(SettingsPage.dailyage_entries) == "table" then
-                    totalCount = #SettingsPage.dailyage_entries
-                end
-                local hiddenCount = 0
-                for _, v in pairs(hidden) do
-                    if v then
-                        hiddenCount = hiddenCount + 1
-                    end
-                end
-                local shownCount = totalCount - hiddenCount
-                if shownCount < 0 then
-                    shownCount = 0
-                end
-                SettingsPage.controls.dailyage_mgr_status:SetText(
-                    string.format("Shown: %d / %d  (Hidden: %d)", shownCount, totalCount, hiddenCount)
-                )
-            end
+            updateDailyAgeStatus(hidden)
         end
 
         local function setDailyAgeShown(id, shown)
             if SettingsPage.settings == nil then
                 return
             end
-            EnsureDailyAgeTables(SettingsPage.settings)
             local key = tonumber(id)
             if key == nil then
                 return
             end
-            local hidden = SettingsPage.settings.dailyage.hidden
+            local hidden = getDailyAgeWorkingHidden()
             if type(hidden) ~= "table" then
-                hidden = {}
-                SettingsPage.settings.dailyage.hidden = hidden
+                hidden = beginDailyAgeEditSession()
             end
 
+            local hiddenKey = tostring(math.floor(key + 0.5))
             if shown then
-                hidden[key] = nil
+                hidden[hiddenKey] = nil
             else
-                hidden[key] = true
+                hidden[hiddenKey] = true
             end
-            refreshDailyAgeList()
-            if type(SettingsPage.on_save) == "function" then
-                pcall(function()
-                    SettingsPage.on_save()
-                end)
-            end
-            if type(SettingsPage.on_apply) == "function" then
-                pcall(function()
-                    SettingsPage.on_apply()
-                end)
-            end
+            SettingsPage.dailyage_pending_hidden = hidden
+            updateDailyAgeStatus(hidden)
         end
 
         local function EnsureDailyAgeManagerWindow()
@@ -2278,6 +2142,8 @@ local function EnsureWindow()
             SettingsPage.controls.dailyage_mgr_window = wnd
 
             local function closeHandler()
+                SettingsPage.dailyage_pending_hidden = nil
+                refreshDailyAgeList()
                 if wnd ~= nil and wnd.Show ~= nil then
                     wnd:Show(false)
                 end
@@ -2305,17 +2171,33 @@ local function EnsureWindow()
                     if SettingsPage.settings == nil then
                         return
                     end
-                    EnsureDailyAgeTables(SettingsPage.settings)
-                    SettingsPage.settings.dailyage.hidden = {}
-                    refreshDailyAgeList()
+                    local hidden = getDailyAgeWorkingHidden()
+                    if type(hidden) ~= "table" then
+                        hidden = beginDailyAgeEditSession()
+                    end
+                    for k in pairs(hidden) do
+                        hidden[k] = nil
+                    end
+                    SettingsPage.dailyage_pending_hidden = hidden
+                    local preserveScrollValue = getDailyAgeManagerScrollValue()
+                    refreshDailyAgeList(preserveScrollValue)
+                end)
+            end
+
+            local applyBtn = CreateButton("polarUiDailyAgeMgrApply", wnd, "Apply", 115, y)
+            if applyBtn ~= nil and applyBtn.SetHandler ~= nil then
+                applyBtn:SetHandler("OnClick", function()
+                    if SettingsPage.settings == nil then
+                        return
+                    end
+                    EnsureDailiesTables(SettingsPage.settings)
+                    local preserveScrollValue = getDailyAgeManagerScrollValue()
+                    SettingsPage.settings.dailies.hidden = cloneDailyAgeHidden(getDailyAgeWorkingHidden())
+                    SettingsPage.dailyage_pending_hidden = cloneDailyAgeHidden(SettingsPage.settings.dailies.hidden)
+                    refreshDailyAgeList(preserveScrollValue)
                     if type(SettingsPage.on_save) == "function" then
                         pcall(function()
                             SettingsPage.on_save()
-                        end)
-                    end
-                    if type(SettingsPage.on_apply) == "function" then
-                        pcall(function()
-                            SettingsPage.on_apply()
                         end)
                     end
                 end)
@@ -2323,8 +2205,8 @@ local function EnsureWindow()
 
             SettingsPage.controls.dailyage_mgr_status = api.Interface:CreateWidget("label", "polarUiDailyAgeMgrStatus", wnd)
             pcall(function()
-                SettingsPage.controls.dailyage_mgr_status:AddAnchor("TOPLEFT", wnd, 130, y + 6)
-                SettingsPage.controls.dailyage_mgr_status:SetExtent(400, 18)
+                SettingsPage.controls.dailyage_mgr_status:AddAnchor("TOPLEFT", wnd, 225, y + 6)
+                SettingsPage.controls.dailyage_mgr_status:SetExtent(305, 18)
                 SettingsPage.controls.dailyage_mgr_status:SetText("")
                 if SettingsPage.controls.dailyage_mgr_status.style ~= nil then
                     SettingsPage.controls.dailyage_mgr_status.style:SetFontSize(13)
@@ -2437,6 +2319,7 @@ local function EnsureWindow()
                         if type(value) ~= "number" then
                             return
                         end
+                        scrollFrame.__polar_scroll_value = value
                         if content ~= nil and content.ChangeChildAnchorByScrollValue ~= nil then
                             content:ChangeChildAnchorByScrollValue("vert", value)
                         end
@@ -2458,10 +2341,20 @@ local function EnsureWindow()
                 end)
                 scrollFrame.content = content
                 scrollFrame.scroll = scroll
+                scrollFrame.__polar_scroll_value = 0
                 function scrollFrame:ResetScroll(totalHeight)
                     if self.scroll == nil or self.scroll.vs == nil or self.scroll.vs.SetMinMaxValues == nil then
                         return
                     end
+                    local currentValue = tonumber(self.__polar_scroll_value) or 0
+                    pcall(function()
+                        if self.scroll.vs.GetValue ~= nil then
+                            local liveValue = self.scroll.vs:GetValue()
+                            if type(liveValue) == "number" then
+                                currentValue = liveValue
+                            end
+                        end
+                    end)
                     local height = 0
                     pcall(function()
                         if self.GetHeight ~= nil then
@@ -2477,8 +2370,21 @@ local function EnsureWindow()
                         maxScroll = 0
                     end
                     self.scroll.vs:SetMinMaxValues(0, maxScroll)
+                    if currentValue < 0 then
+                        currentValue = 0
+                    end
+                    if currentValue > maxScroll then
+                        currentValue = maxScroll
+                    end
+                    self.__polar_scroll_value = currentValue
                     if self.scroll.SetEnable ~= nil then
                         self.scroll:SetEnable(maxScroll > 0)
+                    end
+                    if self.scroll.vs.SetValue ~= nil then
+                        self.scroll.vs:SetValue(currentValue, false)
+                    end
+                    if self.content ~= nil and self.content.ChangeChildAnchorByScrollValue ~= nil then
+                        self.content:ChangeChildAnchorByScrollValue("vert", currentValue)
                     end
                 end
             end
@@ -2506,6 +2412,20 @@ local function EnsureWindow()
                     return rows[i]
                 end
                 local row = {}
+
+                local hitbox = api.Interface:CreateWidget("emptywidget", "polarUiDailyAgeMgrRowHitbox" .. tostring(i), content)
+                pcall(function()
+                    hitbox:SetExtent(520, rowH)
+                    if hitbox.Clickable ~= nil then
+                        hitbox:Clickable(true)
+                    end
+                    if hitbox.EnablePick ~= nil then
+                        hitbox:EnablePick(true)
+                    end
+                    if hitbox.eventWindow ~= nil and hitbox.eventWindow.EnablePick ~= nil then
+                        hitbox.eventWindow:EnablePick(true)
+                    end
+                end)
 
                 local cb = api.Interface:CreateWidget("checkbutton", "polarUiDailyAgeMgrRowCb" .. tostring(i), content)
                 cb:SetExtent(18, 17)
@@ -2549,32 +2469,53 @@ local function EnsureWindow()
                         return
                     end
                     if row.quest_id ~= nil and cb.GetChecked ~= nil then
+                        row.last_checked = cb:GetChecked() and true or false
                         setDailyAgeShown(row.quest_id, cb:GetChecked() and true or false)
                     end
                 end
 
+                local function toggleRow()
+                    if row.__polar_populating then
+                        return
+                    end
+                    if cb.SetChecked ~= nil and cb.GetChecked ~= nil then
+                        row.__polar_populating = true
+                        cb:SetChecked(not cb:GetChecked())
+                        row.__polar_populating = nil
+                    end
+                    applyState()
+                end
+
                 if cb.SetHandler ~= nil then
                     cb:SetHandler("OnClick", function()
-                        if cb.SetChecked ~= nil and cb.GetChecked ~= nil then
-                            row.__polar_populating = true
-                            cb:SetChecked(not cb:GetChecked())
-                            row.__polar_populating = nil
+                        if row.__polar_populating then
+                            return
+                        end
+                        if cb.GetChecked ~= nil and cb.SetChecked ~= nil then
+                            local checked = cb:GetChecked() and true or false
+                            if row.last_checked ~= nil and checked == row.last_checked then
+                                row.__polar_populating = true
+                                cb:SetChecked(not checked)
+                                row.__polar_populating = nil
+                            end
                         end
                         applyState()
+                    end)
+                end
+
+                if hitbox.SetHandler ~= nil then
+                    hitbox:SetHandler("OnClick", function()
+                        toggleRow()
                     end)
                 end
 
                 if label.SetHandler ~= nil then
                     label:SetHandler("OnClick", function()
-                        if cb.SetChecked ~= nil and cb.GetChecked ~= nil then
-                            row.__polar_populating = true
-                            cb:SetChecked(not cb:GetChecked())
-                            row.__polar_populating = nil
-                        end
-                        applyState()
+                        toggleRow()
                     end)
                 end
 
+                row.hitbox = hitbox
                 row.checkbox = cb
                 row.label = label
                 rows[i] = row
@@ -2597,6 +2538,7 @@ local function EnsureWindow()
                     row.checkbox:SetChecked(item.hidden and false or true)
                 end
                 row.__polar_populating = nil
+                row.last_checked = not item.hidden
 
                 if row.label ~= nil and row.label.SetText ~= nil then
                     row.label:SetText(text)
@@ -2613,10 +2555,16 @@ local function EnsureWindow()
                 end)
 
                 pcall(function()
+                    if row.hitbox ~= nil and row.hitbox.RemoveAllAnchors ~= nil then
+                        row.hitbox:RemoveAllAnchors()
+                    end
+                    if row.hitbox ~= nil then
+                        row.hitbox:AddAnchor("TOPLEFT", content, 0, y)
+                    end
                     if row.checkbox.RemoveAllAnchors ~= nil then
                         row.checkbox:RemoveAllAnchors()
                     end
-                    row.checkbox:AddAnchor("TOPLEFT", content, 0, y)
+                    row.checkbox:AddAnchor("TOPLEFT", content, 0, y + 3)
                     if row.label.RemoveAllAnchors ~= nil then
                         row.label:RemoveAllAnchors()
                     end
@@ -2624,6 +2572,9 @@ local function EnsureWindow()
                 end)
 
                 pcall(function()
+                    if row.hitbox ~= nil and row.hitbox.Show ~= nil then
+                        row.hitbox:Show(true)
+                    end
                     if row.checkbox.Show ~= nil then
                         row.checkbox:Show(true)
                     end
@@ -2639,6 +2590,9 @@ local function EnsureWindow()
                 local row = rows[i]
                 if type(row) == "table" then
                     pcall(function()
+                        if row.hitbox ~= nil and row.hitbox.Show ~= nil then
+                            row.hitbox:Show(false)
+                        end
                         if row.checkbox ~= nil and row.checkbox.Show ~= nil then
                             row.checkbox:Show(false)
                         end
@@ -2656,7 +2610,8 @@ local function EnsureWindow()
             end
         end
 
-        local page = SettingsPage.pages.dailyage
+        local page = SettingsPage.pages.dailies
+        if page ~= nil then
         local y = 35
         CreateLabel("polarUiDailyAgePageTitle", page, "Dailies", 15, y, 18)
         y = y + 30
@@ -2670,17 +2625,12 @@ local function EnsureWindow()
                 if SettingsPage.settings == nil then
                     return
                 end
-                EnsureDailyAgeTables(SettingsPage.settings)
-                SettingsPage.settings.dailyage.hidden = {}
+                EnsureDailiesTables(SettingsPage.settings)
+                SettingsPage.settings.dailies.hidden = {}
                 refreshDailyAgeList()
                 if type(SettingsPage.on_save) == "function" then
                     pcall(function()
                         SettingsPage.on_save()
-                    end)
-                end
-                if type(SettingsPage.on_apply) == "function" then
-                    pcall(function()
-                        SettingsPage.on_apply()
                     end)
                 end
             end)
@@ -2701,6 +2651,7 @@ local function EnsureWindow()
         if SettingsPage.controls.dailyage_manage ~= nil and SettingsPage.controls.dailyage_manage.SetHandler ~= nil then
             SettingsPage.controls.dailyage_manage:SetHandler("OnClick", function()
                 local wnd = EnsureDailyAgeManagerWindow()
+                beginDailyAgeEditSession()
                 if wnd ~= nil and wnd.Show ~= nil then
                     pcall(function()
                         wnd:Show(true)
@@ -2711,12 +2662,13 @@ local function EnsureWindow()
         end
 
         y = y + 70
-        SettingsPage.page_heights.dailyage = y + 40
+        SettingsPage.page_heights.dailies = y + 40
 
         SettingsPage.dailyage_entries = nil
         SettingsPage.dailyage_search_text = ""
         SettingsPage.RefreshDailyAgeList = refreshDailyAgeList
         refreshDailyAgeList()
+        end
     end
 
     do
@@ -3677,6 +3629,7 @@ local function EnsureWindow()
 
     do
         local page = SettingsPage.pages.cooldown
+        if page ~= nil then
         local y = 35
         CreateLabel("polarUiCooldownPageTitle", page, "Cooldown Tracker", 15, y, 18)
         y = y + 30
@@ -3910,6 +3863,7 @@ local function EnsureWindow()
         y = y + (COOLDOWN_SCAN_ROWS * 26) + 20
 
         SettingsPage.page_heights.cooldown = y + 40
+        end
     end
 
     local applyBtn = CreateButton("polarUiApplySettings", SettingsPage.window, "Apply", 185, 370)

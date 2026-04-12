@@ -85,7 +85,7 @@ local DEFAULT_SETTINGS = {
     update_interval_ms = 100,
     frame_scale = 1,
     alignment_grid_enabled = false,
-    dailyage = {
+    dailies = {
         enabled = false,
         hidden = {}
     },
@@ -400,18 +400,41 @@ local function EnsureCooldownTrackerDefaults(s)
     ensureUnit("target_of_target")
 end
 
-local function EnsureDailyAgeDefaults(s)
+local function EnsureDailiesDefaults(s)
     if type(s) ~= "table" then
         return
     end
-    if type(s.dailyage) ~= "table" then
-        s.dailyage = {}
+    if type(s.dailies) ~= "table" then
+        if type(s.dailyage) == "table" then
+            s.dailies = DeepCopyTable(s.dailyage)
+        else
+            s.dailies = {}
+        end
     end
-    if s.dailyage.enabled == nil then
-        s.dailyage.enabled = false
+    if s.dailies.enabled == nil then
+        s.dailies.enabled = false
     end
-    if type(s.dailyage.hidden) ~= "table" then
-        s.dailyage.hidden = {}
+    if type(s.dailies.hidden) ~= "table" then
+        s.dailies.hidden = {}
+    end
+    local normalizedHidden = {}
+    for k, v in pairs(s.dailies.hidden) do
+        local id = nil
+        if type(k) == "number" then
+            id = math.floor(k + 0.5)
+        else
+            local parsed = tonumber(k)
+            if parsed ~= nil then
+                id = math.floor(parsed + 0.5)
+            end
+        end
+        if id ~= nil and v then
+            normalizedHidden[tostring(id)] = true
+        end
+    end
+    s.dailies.hidden = normalizedHidden
+    if s.dailyage ~= nil then
+        s.dailyage = nil
     end
 end
 
@@ -530,7 +553,10 @@ local function EnsureSettingsDefaultsAndMigrations(s)
         forceWrite = true
     end
 
-    EnsureDailyAgeDefaults(s)
+    if s.dailyage ~= nil or s.dailies == nil then
+        forceWrite = true
+    end
+    EnsureDailiesDefaults(s)
 
     for k, v in pairs(DEFAULT_SETTINGS.nameplates) do
         if s.nameplates[k] == nil then

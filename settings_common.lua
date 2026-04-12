@@ -1,5 +1,27 @@
 local SettingsCommon = {}
 
+local function NormalizeDailiesHiddenTable(hidden)
+    if type(hidden) ~= "table" then
+        return {}
+    end
+    local out = {}
+    for k, v in pairs(hidden) do
+        local id = nil
+        if type(k) == "number" then
+            id = math.floor(k + 0.5)
+        else
+            local parsed = tonumber(k)
+            if parsed ~= nil then
+                id = math.floor(parsed + 0.5)
+            end
+        end
+        if id ~= nil and v then
+            out[tostring(id)] = true
+        end
+    end
+    return out
+end
+
 function SettingsCommon.ClampInt(v, min_v, max_v, fallback)
     local n = tonumber(v)
     if n == nil then
@@ -22,19 +44,28 @@ function SettingsCommon.FormatBuffId(buff_id)
     return tostring(buff_id)
 end
 
-function SettingsCommon.EnsureDailyAgeTables(s)
+function SettingsCommon.EnsureDailiesTables(s)
     if type(s) ~= "table" then
         return
     end
-    if type(s.dailyage) ~= "table" then
-        s.dailyage = {}
+    if type(s.dailies) ~= "table" then
+        if type(s.dailyage) == "table" then
+            s.dailies = s.dailyage
+        else
+            s.dailies = {}
+        end
     end
-    if s.dailyage.enabled == nil then
-        s.dailyage.enabled = false
+    if s.dailies.enabled == nil then
+        s.dailies.enabled = false
     end
-    if type(s.dailyage.hidden) ~= "table" then
-        s.dailyage.hidden = {}
+    s.dailies.hidden = NormalizeDailiesHiddenTable(s.dailies.hidden)
+    if s.dailyage ~= nil then
+        s.dailyage = nil
     end
+end
+
+function SettingsCommon.EnsureDailyAgeTables(s)
+    SettingsCommon.EnsureDailiesTables(s)
 end
 
 function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)

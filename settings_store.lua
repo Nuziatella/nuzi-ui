@@ -67,6 +67,52 @@ local function ReadRawFileFallback(path)
     return contents, true, true
 end
 
+local function ParseSettingsText(raw)
+    if type(raw) ~= "string" then
+        return nil, "not a string"
+    end
+
+    local text = tostring(raw or "")
+    text = string.match(text, "^%s*(.-)%s*$") or text
+    if text == "" then
+        return nil, "empty settings text"
+    end
+
+    local sourceText = text
+    if not string.match(sourceText, "^return[%s{]") then
+        sourceText = "return " .. sourceText
+    end
+
+    local chunk = nil
+    local err = nil
+
+    if type(load) == "function" then
+        chunk, err = load(sourceText, "=(nuzi-ui settings)", "t", {})
+    elseif type(loadstring) == "function" then
+        chunk, err = loadstring(sourceText, "=(nuzi-ui settings)")
+        if chunk ~= nil and type(setfenv) == "function" then
+            pcall(function()
+                setfenv(chunk, {})
+            end)
+        end
+    else
+        return nil, "no Lua loader available"
+    end
+
+    if chunk == nil then
+        return nil, tostring(err or "failed to compile settings text")
+    end
+
+    local ok, parsed = pcall(chunk)
+    if not ok then
+        return nil, tostring(parsed)
+    end
+    if type(parsed) ~= "table" then
+        return nil, "settings text did not evaluate to a table"
+    end
+    return parsed, ""
+end
+
 function Store.ReadSettingsFromFile(path)
     if api.File == nil or api.File.Read == nil then
         return nil, "file:unavailable", ""
@@ -82,7 +128,11 @@ function Store.ReadSettingsFromFile(path)
     if res == nil then
         local raw, exists, probed = ReadRawFileFallback(path)
         if type(raw) == "string" then
-            return nil, "file:legacy_text", "legacy text settings are no longer executed; resave via api.File:Write"
+            local parsed, parseErr = ParseSettingsText(raw)
+            if type(parsed) == "table" then
+                return parsed, "file:raw_table", ""
+            end
+            return nil, "file:legacy_text", tostring(parseErr or "failed to parse raw settings text")
         elseif probed and exists then
             return nil, "file:unreadable", ""
         elseif probed then
@@ -94,10 +144,88 @@ function Store.ReadSettingsFromFile(path)
     if type(res) == "table" then
         return res, "file:table", ""
     end
+    if type(res) == "string" then
+        local parsed, parseErr = ParseSettingsText(res)
+        if type(parsed) == "table" then
+            return parsed, "file:string_table", ""
+        end
+        return nil, "file:string", tostring(parseErr or "string settings are unsupported")
+    end
     if type(res) ~= "string" then
         return nil, "file:unknown_type", ""
     end
     return nil, "file:string", "string settings are unsupported; expected api.File:Read to deserialize a table"
+end
+
+local function TryReadSettingsCandidates(paths)
+    for _, path in ipairs(paths or {}) do
+        local parsed, source, err = Store.ReadSettingsFromFile(path)
+        if type(parsed) == "table" then
+            return parsed, path, source, err
+        end
+    end
+    return nil, nil, "", ""
+end
+
+local function ScoreSettingsTree(value, seen)
+    if type(value) ~= "table" then
+        if value == nil then
+            return 0
+        end
+        return 1
+    end
+
+    seen = seen or {}
+    if seen[value] then
+        return 0
+    end
+    seen[value] = true
+
+    local score = 1
+    for k, v in pairs(value) do
+        score = score + 1
+        score = score + ScoreSettingsTree(k, seen)
+        score = score + ScoreSettingsTree(v, seen)
+    end
+    return score
+end
+
+local function CountTableEntries(tbl)
+    if type(tbl) ~= "table" then
+        return 0
+    end
+    local n = 0
+    for _ in pairs(tbl) do
+        n = n + 1
+    end
+    return n
+end
+
+local function ShouldPreferBackupOverPrimary(primary, backup)
+    if type(primary) ~= "table" or type(backup) ~= "table" then
+        return false, ""
+    end
+
+    local primaryScore = ScoreSettingsTree(primary)
+    local backupScore = ScoreSettingsTree(backup)
+    local primaryHidden = CountTableEntries(primary.dailies and primary.dailies.hidden)
+    local backupHidden = CountTableEntries(backup.dailies and backup.dailies.hidden)
+    local primaryGuildColors = CountTableEntries(primary.nameplates and primary.nameplates.guild_colors)
+    local backupGuildColors = CountTableEntries(backup.nameplates and backup.nameplates.guild_colors)
+
+    if backupScore >= math.max(primaryScore + 40, math.floor(primaryScore * 1.35)) then
+        return true, string.format("backup snapshot is richer (%d > %d)", backupScore, primaryScore)
+    end
+
+    if backupHidden > primaryHidden and backupScore >= math.max(primaryScore + 20, math.floor(primaryScore * 1.10)) then
+        return true, string.format("backup preserved more tracked dailies (%d > %d)", backupHidden, primaryHidden)
+    end
+
+    if backupGuildColors > primaryGuildColors and backupScore >= math.max(primaryScore + 20, math.floor(primaryScore * 1.10)) then
+        return true, string.format("backup preserved more guild color entries (%d > %d)", backupGuildColors, primaryGuildColors)
+    end
+
+    return false, ""
 end
 
 function Store.LoadSettings()
@@ -120,36 +248,75 @@ function Store.LoadSettings()
 
     local fileSettings = nil
     do
+        local fallbackPaths = {
+            Store.SETTINGS_BACKUP_FILE_PATH,
+            Store.LEGACY_LOCAL_SETTINGS_FILE_PATH,
+            Store.LEGACY_LOCAL_SETTINGS_BACKUP_FILE_PATH,
+            Store.LEGACY_SETTINGS_FILE_PATH,
+            Store.LEGACY_SETTINGS_BACKUP_FILE_PATH
+        }
         local parsed, source, err = Store.ReadSettingsFromFile(Store.SETTINGS_FILE_PATH)
         meta.last_source = source
         meta.last_error = err
         if parsed == nil then
+            local fallbackParsed, fallbackPath, fallbackSource, fallbackErr = TryReadSettingsCandidates(fallbackPaths)
+            local recovered = type(fallbackParsed) == "table"
+            if recovered then
+                fileSettings = fallbackParsed
+                meta.loaded_legacy_file = true
+                meta.last_source = fallbackSource
+                meta.last_error = fallbackErr
+                meta.file_unreadable = false
+                pcall(function()
+                    api.Log:Info("[Nuzi UI] Recovered settings from " .. tostring(fallbackPath))
+                end)
+            end
+
             if source == "file:missing" then
                 meta.file_missing = true
-                local legacyParsed, legacySource, legacyErr = Store.ReadSettingsFromFile(Store.LEGACY_LOCAL_SETTINGS_FILE_PATH)
-                if type(legacyParsed) ~= "table" then
-                    legacyParsed, legacySource, legacyErr = Store.ReadSettingsFromFile(Store.LEGACY_SETTINGS_FILE_PATH)
-                end
-                if type(legacyParsed) == "table" then
-                    fileSettings = legacyParsed
-                    meta.loaded_legacy_file = true
-                    meta.last_source = legacySource
-                    meta.last_error = legacyErr
-                end
             elseif source == "file:unreadable" then
-                meta.file_unreadable = true
-                api.Log:Err("[Nuzi UI] Failed to deserialize " .. Store.SETTINGS_FILE_PATH .. " (file exists but was not readable)")
+                meta.file_unreadable = not recovered
+                if not recovered then
+                    api.Log:Err("[Nuzi UI] Failed to deserialize " .. Store.SETTINGS_FILE_PATH .. " (file exists but was not readable)")
+                end
             elseif source == "file:read_error" then
-                api.Log:Err("[Nuzi UI] Failed to read " .. Store.SETTINGS_FILE_PATH .. ": " .. tostring(err))
+                if not recovered then
+                    api.Log:Err("[Nuzi UI] Failed to read " .. Store.SETTINGS_FILE_PATH .. ": " .. tostring(err))
+                end
             elseif source == "file:nil" then
-                api.Log:Err("[Nuzi UI] Failed to read " .. Store.SETTINGS_FILE_PATH .. " (api.File:Read returned nil and raw fallback unavailable)")
+                if not recovered then
+                    api.Log:Err("[Nuzi UI] Failed to read " .. Store.SETTINGS_FILE_PATH .. " (api.File:Read returned nil and raw fallback unavailable)")
+                end
             elseif source == "file:legacy_text" or source == "file:string" then
-                api.Log:Err("[Nuzi UI] Failed to load " .. Store.SETTINGS_FILE_PATH .. " because it was a raw string file; Nuzi UI now expects api.File:Read to deserialize a table")
+                if not recovered then
+                    api.Log:Err("[Nuzi UI] Failed to load " .. Store.SETTINGS_FILE_PATH .. ": " .. tostring(err))
+                end
             elseif source == "file:raw" then
-                api.Log:Err("[Nuzi UI] Failed to parse " .. Store.SETTINGS_FILE_PATH .. " (error=" .. tostring(err) .. ")")
+                if not recovered then
+                    api.Log:Err("[Nuzi UI] Failed to parse " .. Store.SETTINGS_FILE_PATH .. " (error=" .. tostring(err) .. ")")
+                end
             end
         else
             fileSettings = parsed
+        end
+    end
+
+    if type(fileSettings) == "table" then
+        local backupParsed = nil
+        local backupSource = ""
+        local backupErr = ""
+        if Store.SETTINGS_BACKUP_FILE_PATH ~= Store.SETTINGS_FILE_PATH then
+            backupParsed, backupSource, backupErr = Store.ReadSettingsFromFile(Store.SETTINGS_BACKUP_FILE_PATH)
+        end
+        local preferBackup, reason = ShouldPreferBackupOverPrimary(fileSettings, backupParsed)
+        if preferBackup then
+            fileSettings = backupParsed
+            meta.loaded_legacy_file = true
+            meta.last_source = backupSource
+            meta.last_error = backupErr
+            pcall(function()
+                api.Log:Info("[Nuzi UI] Recovered settings from mirror backup because " .. tostring(reason))
+            end)
         end
     end
 
@@ -176,9 +343,22 @@ function Store.SaveSettingsFile(settings)
     api.SaveSettings()
     if api.File ~= nil and api.File.Write ~= nil and type(settings) == "table" then
         SettingsDefaults.EnsureSettingsDefaultsAndMigrations(settings)
-        pcall(function()
+        local okPrimary, errPrimary = pcall(function()
             api.File:Write(Store.SETTINGS_FILE_PATH, settings)
         end)
+        local okMirror, errMirror = pcall(function()
+            api.File:Write(Store.SETTINGS_BACKUP_FILE_PATH, settings)
+        end)
+        if not okPrimary then
+            pcall(function()
+                api.Log:Err("[Nuzi UI] Failed to write " .. Store.SETTINGS_FILE_PATH .. ": " .. tostring(errPrimary))
+            end)
+        end
+        if not okMirror then
+            pcall(function()
+                api.Log:Err("[Nuzi UI] Failed to write " .. Store.SETTINGS_BACKUP_FILE_PATH .. ": " .. tostring(errMirror))
+            end)
+        end
     end
 end
 

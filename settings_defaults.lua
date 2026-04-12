@@ -8,98 +8,6 @@ SettingsDefaults.DEFAULT_SETTINGS = {
     update_interval_ms = 100,
     frame_scale = 1,
     alignment_grid_enabled = false,
-    dailyage = {
-        enabled = false,
-        hidden = {}
-    },
-    cooldown_tracker = {
-        enabled = false,
-        update_interval_ms = 50,
-        migrated_from_cbt = false,
-        units = {
-            player = {
-                enabled = false,
-                pos_x = 330,
-                pos_y = 100,
-                icon_size = 40,
-                icon_spacing = 5,
-                max_icons = 10,
-                lock_position = false,
-                show_timer = true,
-                timer_font_size = 16,
-                timer_color = { 1, 1, 1, 1 },
-                show_label = false,
-                label_font_size = 14,
-                label_color = { 1, 1, 1, 1 },
-                tracked_buffs = {}
-            },
-            target = {
-                enabled = false,
-                pos_x = 330,
-                pos_y = 170,
-                icon_size = 40,
-                icon_spacing = 5,
-                max_icons = 10,
-                lock_position = false,
-                show_timer = true,
-                timer_font_size = 16,
-                timer_color = { 1, 1, 1, 1 },
-                show_label = false,
-                label_font_size = 14,
-                label_color = { 1, 1, 1, 1 },
-                cache_timeout_s = 300,
-                tracked_buffs = {}
-            },
-            playerpet = {
-                enabled = false,
-                pos_x = 330,
-                pos_y = 30,
-                icon_size = 40,
-                icon_spacing = 5,
-                max_icons = 10,
-                lock_position = false,
-                show_timer = true,
-                timer_font_size = 16,
-                timer_color = { 1, 1, 1, 1 },
-                show_label = false,
-                label_font_size = 14,
-                label_color = { 1, 1, 1, 1 },
-                tracked_buffs = {}
-            },
-            watchtarget = {
-                enabled = false,
-                pos_x = 330,
-                pos_y = 240,
-                icon_size = 40,
-                icon_spacing = 5,
-                max_icons = 10,
-                lock_position = false,
-                show_timer = true,
-                timer_font_size = 16,
-                timer_color = { 1, 1, 1, 1 },
-                show_label = false,
-                label_font_size = 14,
-                label_color = { 1, 1, 1, 1 },
-                tracked_buffs = {}
-            },
-            target_of_target = {
-                enabled = false,
-                pos_x = 330,
-                pos_y = 310,
-                icon_size = 40,
-                icon_spacing = 5,
-                max_icons = 10,
-                lock_position = false,
-                show_timer = true,
-                timer_font_size = 16,
-                timer_color = { 1, 1, 1, 1 },
-                show_label = false,
-                label_font_size = 14,
-                label_color = { 1, 1, 1, 1 },
-                tracked_buffs = {}
-            }
-        }
-    },
     nameplates = {
         enabled = false,
         guild_only = false,
@@ -318,19 +226,51 @@ function SettingsDefaults.EnsureCooldownTrackerDefaults(s)
     ensureUnit("target_of_target")
 end
 
-function SettingsDefaults.EnsureDailyAgeDefaults(s)
+function SettingsDefaults.EnsureDailiesDefaults(s)
     if type(s) ~= "table" then
         return
     end
-    if type(s.dailyage) ~= "table" then
-        s.dailyage = {}
+    if type(s.dailies) ~= "table" then
+        if type(s.dailyage) == "table" then
+            s.dailies = SettingsDefaults.DeepCopyTable(s.dailyage)
+        else
+            s.dailies = {}
+        end
     end
-    if s.dailyage.enabled == nil then
-        s.dailyage.enabled = false
+    if s.dailies.enabled == nil then
+        s.dailies.enabled = false
     end
-    if type(s.dailyage.hidden) ~= "table" then
-        s.dailyage.hidden = {}
+    if type(s.dailies.hidden) ~= "table" then
+        s.dailies.hidden = {}
     end
+
+    local normalizedHidden = {}
+    for k, v in pairs(s.dailies.hidden) do
+        local id = nil
+        if type(k) == "number" then
+            id = math.floor(k + 0.5)
+        else
+            local parsed = tonumber(k)
+            if parsed ~= nil then
+                id = math.floor(parsed + 0.5)
+            end
+        end
+        if id ~= nil and v then
+            normalizedHidden[tostring(id)] = true
+        end
+    end
+    s.dailies.hidden = normalizedHidden
+
+    if s.dailyage ~= nil then
+        s.dailyage = nil
+    end
+end
+
+function SettingsDefaults.EnsureDailyAgeDefaults(s)
+    if s.dailyage ~= nil or s.dailies == nil then
+        forceWrite = true
+    end
+    SettingsDefaults.EnsureDailiesDefaults(s)
 end
 
 function SettingsDefaults.TryMigrateCooldownTrackerFromCbt(s)
@@ -498,13 +438,18 @@ function SettingsDefaults.EnsureSettingsDefaultsAndMigrations(s)
 
     MigrateLegacyTargetOverlayLayout(s.style)
 
-    SettingsDefaults.EnsureCooldownTrackerDefaults(s)
-    if SettingsDefaults.TryMigrateCooldownTrackerFromCbt(s) then
-        SettingsDefaults.EnsureCooldownTrackerDefaults(s)
+    if s.cooldown_tracker ~= nil then
+        s.cooldown_tracker = nil
         forceWrite = true
     end
-
-    SettingsDefaults.EnsureDailyAgeDefaults(s)
+    if s.dailies ~= nil then
+        s.dailies = nil
+        forceWrite = true
+    end
+    if s.dailyage ~= nil then
+        s.dailyage = nil
+        forceWrite = true
+    end
 
     for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS.nameplates) do
         if s.nameplates[k] == nil then

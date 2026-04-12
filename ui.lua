@@ -1,11 +1,11 @@
 local api = require("api")
 local SafeRequire = require("nuzi-ui/safe_require")
 
-local SETTINGS_FILE_PATH = "nuzi-ui/.data/settings.txt"
 local Nameplates = SafeRequire("nuzi-ui/nameplates", "nuzi-ui.nameplates")
 local Runtime = SafeRequire("nuzi-ui/runtime", "nuzi-ui.runtime")
 local AlignmentModule = SafeRequire("nuzi-ui/ui_alignment", "nuzi-ui.ui_alignment")
 local TargetExtrasModule = SafeRequire("nuzi-ui/ui_target_extras", "nuzi-ui.ui_target_extras")
+local SettingsStore = SafeRequire("nuzi-ui/settings_store", "nuzi-ui.settings_store")
 
 local function AnchorTopLeft(wnd, x, y)
     if wnd == nil or wnd.AddAnchor == nil then
@@ -34,16 +34,6 @@ local function AnchorTopLeft(wnd, x, y)
     end)
     anchored = ok and true or false
     return anchored
-end
-
-local DailyAge = nil
-do
-    DailyAge = SafeRequire("nuzi-ui/dailyage", "nuzi-ui.dailyage")
-end
-
-local CooldownTracker = nil
-do
-    CooldownTracker = SafeRequire("nuzi-ui/cooldown_tracker", "nuzi-ui.cooldown_tracker")
 end
 
 local UI = {
@@ -341,10 +331,15 @@ local function SaveSettingsToFile(settings)
         end
     end)
 
+    if SettingsStore ~= nil and type(SettingsStore.SaveSettingsFile) == "function" then
+        SettingsStore.SaveSettingsFile(settings)
+        return
+    end
+
     api.SaveSettings()
     if api.File ~= nil and api.File.Write ~= nil then
         pcall(function()
-            api.File:Write(SETTINGS_FILE_PATH, settings)
+            api.File:Write("nuzi-ui/.data/settings.txt", settings)
         end)
     end
 end
@@ -2350,16 +2345,6 @@ UI.Init = function(settings)
     UI.stock_refreshed = false
     UI.last_large_hpmp = nil
     UI.last_aura_enabled = nil
-    if CooldownTracker ~= nil and CooldownTracker.Init ~= nil then
-        pcall(function()
-            CooldownTracker.Init(settings)
-        end)
-    end
-    if DailyAge ~= nil and DailyAge.Init ~= nil then
-        pcall(function()
-            DailyAge.Init(settings)
-        end)
-    end
     EnsureAlignmentGrid(settings)
     EnsureUi(settings)
     if Nameplates ~= nil and Nameplates.Init ~= nil then
@@ -2374,16 +2359,6 @@ UI.UnLoad = function()
     if Nameplates ~= nil and Nameplates.Unload ~= nil then
         pcall(function()
             Nameplates.Unload()
-        end)
-    end
-    if CooldownTracker ~= nil and CooldownTracker.Unload ~= nil then
-        pcall(function()
-            CooldownTracker.Unload()
-        end)
-    end
-    if DailyAge ~= nil and DailyAge.Unload ~= nil then
-        pcall(function()
-            DailyAge.Unload()
         end)
     end
     if AlignmentModule ~= nil and AlignmentModule.Reset ~= nil then
@@ -2539,18 +2514,6 @@ UI.OnUpdate = function(dt)
     end
 
     UI.accum_ms = 0
-
-    if CooldownTracker ~= nil and CooldownTracker.OnUpdate ~= nil then
-        pcall(function()
-            CooldownTracker.OnUpdate(UI.settings, interval)
-        end)
-    end
-
-    if DailyAge ~= nil and DailyAge.OnUpdate ~= nil then
-        pcall(function()
-            DailyAge.OnUpdate(UI.settings, interval)
-        end)
-    end
 
     if UI.enabled and UI.target.wnd ~= nil then
         local tid = api.Unit:GetUnitId("target")
