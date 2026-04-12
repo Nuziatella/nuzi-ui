@@ -1,6 +1,6 @@
 local api = require("api")
 
-local SETTINGS_FILE_PATH = "nuzi-ui/settings.txt"
+local SETTINGS_FILE_PATH = "nuzi-ui/.data/settings.txt"
 
 local CooldownTracker = {
     settings = nil,

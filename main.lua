@@ -59,15 +59,19 @@ end
 local PolarUiAddon = {
     name = "Nuzi UI",
     author = "Nuzi",
-    version = "1.0.2",
+    version = "1.0.13",
     desc = "Interface overhaul"
 }
 
-local SETTINGS_FILE_PATH = "nuzi-ui/settings.txt"
-local SETTINGS_BACKUP_FILE_PATH = "nuzi-ui/settings_backup.txt"
-local SETTINGS_BACKUP_INDEX_FILE_PATH = "nuzi-ui/backups/index.txt"
-local SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH = "nuzi-ui/settings_backup_index.txt"
-local SETTINGS_BACKUP_DIR = "nuzi-ui/backups"
+local SETTINGS_FILE_PATH = "nuzi-ui/.data/settings.txt"
+local SETTINGS_BACKUP_FILE_PATH = "nuzi-ui/.data/settings_backup.txt"
+local SETTINGS_BACKUP_INDEX_FILE_PATH = "nuzi-ui/.data/backups/index.txt"
+local SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH = "nuzi-ui/.data/settings_backup_index.txt"
+local SETTINGS_BACKUP_DIR = "nuzi-ui/.data/backups"
+local LEGACY_LOCAL_SETTINGS_FILE_PATH = "nuzi-ui/settings.txt"
+local LEGACY_LOCAL_SETTINGS_BACKUP_FILE_PATH = "nuzi-ui/settings_backup.txt"
+local LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FILE_PATH = "nuzi-ui/backups/index.txt"
+local LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH = "nuzi-ui/settings_backup_index.txt"
 local LEGACY_ADDON_ID = "polar-ui"
 local LEGACY_SETTINGS_FILE_PATH = "polar-ui/settings.txt"
 local LEGACY_SETTINGS_BACKUP_FILE_PATH = "polar-ui/settings_backup.txt"
@@ -787,7 +791,10 @@ local function EnsureSettings()
         if parsed == nil then
             if source == "file:missing" then
                 fileMissing = true
-                local legacyParsed, legacySource, legacyErr = ReadSettingsFromFile(LEGACY_SETTINGS_FILE_PATH)
+                local legacyParsed, legacySource, legacyErr = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_FILE_PATH)
+                if type(legacyParsed) ~= "table" then
+                    legacyParsed, legacySource, legacyErr = ReadSettingsFromFile(LEGACY_SETTINGS_FILE_PATH)
+                end
                 if type(legacyParsed) == "table" then
                     fileSettings = legacyParsed
                     loadedLegacyFile = true
@@ -868,7 +875,7 @@ local function SaveSettingsBackupFile()
         api.File:Write(backupPath, settings)
     end)
     if not ok then
-        backupPath = string.format("nuzi-ui/settings_backup_%s.txt", ts)
+        backupPath = string.format("nuzi-ui/.data/settings_backup_%s.txt", ts)
         ok, err = pcall(function()
             api.File:Write(backupPath, settings)
         end)
@@ -887,8 +894,19 @@ local function SaveSettingsBackupFile()
         end)
     end
     if type(idx) ~= "table" then
+        pcall(function()
+            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FILE_PATH)
+        end)
+    end
+    if type(idx) ~= "table" then
+        pcall(function()
+            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
+        end)
+    end
+    if type(idx) ~= "table" then
         idx = { version = 1, backups = {} }
     end
+
     if type(idx.backups) ~= "table" then
         idx.backups = {}
     end
@@ -909,9 +927,9 @@ local function SaveSettingsBackupFile()
     end)
 
     pcall(function()
-        local legacyParsed, legacySource = ReadSettingsFromFile(SETTINGS_BACKUP_FILE_PATH)
+        local legacyParsed, legacySource = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_FILE_PATH)
         if legacyParsed == nil and tostring(legacySource) == "file:missing" then
-            api.File:Write(SETTINGS_BACKUP_FILE_PATH, settings)
+            api.File:Write(LEGACY_LOCAL_SETTINGS_BACKUP_FILE_PATH, settings)
         end
     end)
 
@@ -927,6 +945,16 @@ local function ResolveBackupPathFromArg(arg)
     if type(idx) ~= "table" then
         pcall(function()
             idx = ReadSettingsFromFile(SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
+        end)
+    end
+    if type(idx) ~= "table" then
+        pcall(function()
+            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FILE_PATH)
+        end)
+    end
+    if type(idx) ~= "table" then
+        pcall(function()
+            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
         end)
     end
     if type(idx) ~= "table" then
@@ -950,7 +978,7 @@ local function ResolveBackupPathFromArg(arg)
         if idx ~= nil and idx.backups[1] ~= nil and type(idx.backups[1].path) == "string" then
             return idx.backups[1].path
         end
-        return SETTINGS_BACKUP_FILE_PATH or LEGACY_SETTINGS_BACKUP_FILE_PATH
+        return SETTINGS_BACKUP_FILE_PATH or LEGACY_LOCAL_SETTINGS_BACKUP_FILE_PATH or LEGACY_SETTINGS_BACKUP_FILE_PATH
     end
 
     local n = tonumber(raw)
@@ -989,6 +1017,16 @@ local function LogBackupList(maxN)
     if type(idx) ~= "table" then
         pcall(function()
             idx = ReadSettingsFromFile(SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
+        end)
+    end
+    if type(idx) ~= "table" then
+        pcall(function()
+            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FILE_PATH)
+        end)
+    end
+    if type(idx) ~= "table" then
+        pcall(function()
+            idx = ReadSettingsFromFile(LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH)
         end)
     end
     if type(idx) ~= "table" then

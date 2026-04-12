@@ -1,6 +1,6 @@
 local api = require("api")
 
-local SETTINGS_FILE_PATH = "nuzi-ui/settings.txt"
+local SETTINGS_FILE_PATH = "nuzi-ui/.data/settings.txt"
 local Nameplates = nil
 local Runtime = nil
 do
@@ -107,6 +107,14 @@ local UI = {
         role = nil,
         class_name = nil,
         gearscore = nil,
+        glider_icon = nil,
+        glider = nil,
+        current_target_id = nil,
+        glider_target_id = nil,
+        glider_name = "",
+        glider_icon_path = "",
+        glider_tooltip_text = "",
+        glider_last_refresh_ms = 0,
         guild = nil,
         pdef = nil,
         mdef = nil
@@ -119,6 +127,9 @@ local UI = {
         last_h = nil
     }
 }
+
+local TARGET_FLIGHT_GEAR_SLOT = 9 -- ES_BACK
+local TARGET_GLIDER_REFRESH_MS = 0
 
 local function NormalizeUnitId(unitId)
     if unitId == nil then
@@ -151,6 +162,444 @@ local function SafeGetUnitInfoById(unitId)
         return info
     end
     return nil
+end
+
+local function SafeGetUiMsec()
+    if api == nil or api.Time == nil or api.Time.GetUiMsec == nil then
+        return 0
+    end
+    local value = nil
+    pcall(function()
+        value = api.Time:GetUiMsec()
+    end)
+    return tonumber(value) or 0
+end
+
+local function GetTargetGliderCacheKey(targetId)
+    local normalizedTargetId = NormalizeUnitId(targetId) or ""
+    local targetName = ""
+    pcall(function()
+        if api ~= nil and api.Unit ~= nil and api.Unit.UnitInfo ~= nil then
+            local info = api.Unit:UnitInfo("target")
+            if type(info) == "table" then
+                targetName = TrimText(info.name or info.unitName or info.family_name or "")
+            end
+        end
+    end)
+    return normalizedTargetId .. "|" .. tostring(targetName or "")
+end
+
+local function TrimText(value)
+    local text = tostring(value or "")
+    text = string.match(text, "^%s*(.-)%s*$") or text
+    return text
+end
+
+local function StripTooltipMarkup(text)
+    if type(text) ~= "string" then
+        return ""
+    end
+    local value = text
+    value = string.gsub(value, "|c%x%x%x%x%x%x%x%x", "")
+    value = string.gsub(value, "|r", "")
+    value = string.gsub(value, "|H.-|h", "")
+    value = string.gsub(value, "|h", "")
+    value = string.gsub(value, "\r", "\n")
+    return value
+end
+
+local function GetFirstTooltipLine(text)
+    local cleaned = StripTooltipMarkup(text)
+    for line in string.gmatch(cleaned, "([^\n]+)") do
+        local trimmed = TrimText(line)
+        if trimmed ~= "" then
+            return trimmed
+        end
+    end
+    return ""
+end
+
+local function NormalizeTooltipText(value, visited)
+    local valueType = type(value)
+    if valueType == "string" then
+        local text = StripTooltipMarkup(value)
+        text = string.gsub(text, "\r", "\n")
+        text = string.gsub(text, "\n%s*\n+", "\n")
+        return TrimText(text)
+    end
+    if valueType ~= "table" then
+        return ""
+    end
+
+    visited = visited or {}
+    if visited[value] then
+        return ""
+    end
+    visited[value] = true
+
+    local directKeys = {
+        "tooltipText",
+        "tooltip_text",
+        "text",
+        "description",
+        "desc",
+        "linkText",
+        "name",
+        "item_name",
+        "title"
+    }
+    for _, key in ipairs(directKeys) do
+        local text = NormalizeTooltipText(value[key], visited)
+        if text ~= "" then
+            return text
+        end
+    end
+
+    local lines = {}
+    for _, nested in ipairs(value) do
+        local text = NormalizeTooltipText(nested, visited)
+        if text ~= "" then
+            table.insert(lines, text)
+        end
+    end
+    if #lines > 0 then
+        return table.concat(lines, "\n")
+    end
+
+    return ""
+end
+
+local function ExtractItemType(value, visited)
+    if type(value) ~= "table" then
+        return nil
+    end
+    visited = visited or {}
+    if visited[value] then
+        return nil
+    end
+    visited[value] = true
+
+    local directKeys = {
+        "itemType",
+        "item_type",
+        "type",
+        "itemId",
+        "item_id"
+    }
+    for _, key in ipairs(directKeys) do
+        local num = tonumber(value[key])
+        if num ~= nil and num > 0 then
+            return num
+        end
+    end
+
+    for _, nested in ipairs(value) do
+        local num = ExtractItemType(nested, visited)
+        if num ~= nil then
+            return num
+        end
+    end
+
+    return nil
+end
+
+local function SafeGetItemInfoByType(itemType)
+    local itemId = tonumber(itemType)
+    if itemId == nil or itemId <= 0 or api == nil or api.Item == nil or api.Item.GetItemInfoByType == nil then
+        return nil
+    end
+    local info = nil
+    pcall(function()
+        info = api.Item:GetItemInfoByType(itemId)
+    end)
+    if type(info) == "table" then
+        return info
+    end
+    return nil
+end
+
+local function ContainsFlightGearKeywords(text)
+    local haystack = string.lower(tostring(text or ""))
+    if haystack == "" then
+        return false
+    end
+    local patterns = {
+        "glider",
+        "magithopter",
+        "magi thopter",
+        "thopter",
+        "wings",
+        "wing",
+        "gliding ability",
+        "flight speed",
+        "launch height",
+        "turning speed",
+        "crystal wings"
+    }
+    for _, pattern in ipairs(patterns) do
+        if string.find(haystack, pattern, 1, true) ~= nil then
+            return true
+        end
+    end
+    return false
+end
+
+local function ContainsFlightGearInfoKeywords(value)
+    if type(value) ~= "table" then
+        return false
+    end
+
+    local candidates = {
+        value.category,
+        value.categoryName,
+        value.description,
+        value.itemUsage,
+        value.icon,
+        value.iconPath,
+        value.path,
+        value.name,
+        value.item_name,
+        value.title
+    }
+    for _, candidate in ipairs(candidates) do
+        if ContainsFlightGearKeywords(candidate) then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function ExtractIconPath(value)
+    if type(value) ~= "table" then
+        return ""
+    end
+
+    local candidates = {
+        value.iconPath,
+        value.icon,
+        value.path
+    }
+    for _, candidate in ipairs(candidates) do
+        local text = TrimText(candidate or "")
+        if text ~= "" then
+            return text
+        end
+    end
+
+    return ""
+end
+
+local function ResolveUnitDisplayName(info)
+    if type(info) ~= "table" then
+        return ""
+    end
+    return TrimText(info.name or info.unitName or info.family_name or "")
+end
+
+local function ResolveUnitLevel(info)
+    if type(info) ~= "table" then
+        return nil
+    end
+    local candidates = {
+        info.level,
+        info.unitLevel,
+        info.grade,
+        info.lv
+    }
+    for _, value in ipairs(candidates) do
+        local num = tonumber(value)
+        if num ~= nil and num > 0 then
+            return math.floor(num + 0.5)
+        end
+    end
+    return nil
+end
+
+local function ApplyTargetNameLevel(targetName, targetLevel)
+    if UI == nil or UI.target == nil or UI.target.wnd == nil then
+        return
+    end
+    pcall(function()
+        if UI.target.wnd.name ~= nil then
+            if UI.target.wnd.name.SetText ~= nil and type(targetName) == "string" and targetName ~= "" then
+                UI.target.wnd.name:SetText(targetName)
+            end
+            if UI.target.wnd.name.Show ~= nil then
+                UI.target.wnd.name:Show(type(targetName) == "string" and targetName ~= "")
+            end
+        end
+    end)
+    pcall(function()
+        local levelLabel = (UI.target.wnd.level ~= nil and UI.target.wnd.level.label ~= nil) and UI.target.wnd.level.label or nil
+        if levelLabel == nil then
+            return
+        end
+        if levelLabel.SetText ~= nil then
+            if type(targetLevel) == "number" and targetLevel > 0 then
+                levelLabel:SetText(tostring(targetLevel))
+            else
+                levelLabel:SetText("")
+            end
+        end
+        if levelLabel.Show ~= nil then
+            levelLabel:Show(type(targetLevel) == "number" and targetLevel > 0)
+        end
+    end)
+end
+
+local function ExtractNamedText(value, visited)
+    local valueType = type(value)
+    if valueType == "string" then
+        return GetFirstTooltipLine(value)
+    end
+    if valueType ~= "table" then
+        return ""
+    end
+
+    visited = visited or {}
+    if visited[value] then
+        return ""
+    end
+    visited[value] = true
+
+    local directKeys = {
+        "name",
+        "item_name",
+        "title",
+        "text",
+        "linkText",
+        "tooltipText",
+        "tooltip_text",
+        "buffName"
+    }
+    for _, key in ipairs(directKeys) do
+        local text = ExtractNamedText(value[key], visited)
+        if text ~= "" then
+            return text
+        end
+    end
+
+    for _, nested in ipairs(value) do
+        local text = ExtractNamedText(nested, visited)
+        if text ~= "" then
+            return text
+        end
+    end
+
+    return ""
+end
+
+local function GetTargetGliderName(targetId)
+    if api == nil or api.Equipment == nil then
+        return ""
+    end
+
+    local targetCacheKey = GetTargetGliderCacheKey(targetId)
+    local nowMs = SafeGetUiMsec()
+    if TARGET_GLIDER_REFRESH_MS > 0
+        and UI.target.glider_target_id == targetCacheKey
+        and targetCacheKey ~= "|"
+        and (nowMs - (tonumber(UI.target.glider_last_refresh_ms) or 0)) < TARGET_GLIDER_REFRESH_MS
+    then
+        return tostring(UI.target.glider_name or "")
+    end
+
+    local function storeResolved(nameText, iconPath, tooltipText)
+        UI.target.glider_target_id = targetCacheKey
+        UI.target.glider_name = tostring(nameText or "")
+        UI.target.glider_icon_path = tostring(iconPath or "")
+        UI.target.glider_tooltip_text = tostring(tooltipText or "")
+        UI.target.glider_last_refresh_ms = nowMs
+        return UI.target.glider_name
+    end
+
+    local function scanSlot(slotIdx)
+        local rawTooltip = nil
+        local tooltipName = ""
+        local tooltipText = ""
+        if api.Equipment.GetEquippedItemTooltipText ~= nil then
+            pcall(function()
+                rawTooltip = api.Equipment:GetEquippedItemTooltipText("target", slotIdx)
+                tooltipName = ExtractNamedText(rawTooltip)
+                tooltipText = NormalizeTooltipText(rawTooltip)
+            end)
+        end
+
+        local info = nil
+        if api.Equipment.GetEquippedItemTooltipInfo ~= nil then
+            pcall(function()
+                info = api.Equipment:GetEquippedItemTooltipInfo(slotIdx, true)
+            end)
+        end
+
+        local itemType = ExtractItemType(info)
+        local itemInfo = SafeGetItemInfoByType(itemType)
+        local itemName = ExtractNamedText(itemInfo)
+        local infoName = ExtractNamedText(info)
+        local resolvedName = itemName
+        if resolvedName == "" then
+            resolvedName = infoName
+        end
+        if resolvedName == "" then
+            resolvedName = tooltipName
+        end
+
+        local resolvedTooltip = tooltipText
+        if resolvedTooltip == "" then
+            resolvedTooltip = NormalizeTooltipText(info)
+        end
+        if resolvedTooltip == "" then
+            resolvedTooltip = NormalizeTooltipText(itemInfo)
+        end
+
+        local resolvedIconPath = ExtractIconPath(itemInfo)
+        if resolvedIconPath == "" then
+            resolvedIconPath = ExtractIconPath(info)
+        end
+
+        local looksLikeFlightGear =
+            ContainsFlightGearKeywords(resolvedName)
+            or ContainsFlightGearKeywords(resolvedTooltip)
+            or ContainsFlightGearKeywords(tooltipName)
+            or ContainsFlightGearInfoKeywords(info)
+            or ContainsFlightGearInfoKeywords(itemInfo)
+
+        local score = 0
+        if resolvedName ~= "" then
+            score = score + 10
+        end
+        if itemType ~= nil then
+            score = score + 5
+        end
+        if resolvedIconPath ~= "" then
+            score = score + 2
+        end
+        if looksLikeFlightGear then
+            score = score + 100
+        end
+
+        return {
+            slot = slotIdx,
+            name = resolvedName,
+            iconPath = resolvedIconPath,
+            tooltipText = resolvedTooltip,
+            score = score,
+            looksLikeFlightGear = looksLikeFlightGear
+        }
+    end
+
+    local best = scanSlot(TARGET_FLIGHT_GEAR_SLOT)
+
+    if type(best) == "table"
+        and best.looksLikeFlightGear
+        and tostring(best.name or "") ~= ""
+    then
+        return storeResolved(best.name, best.iconPath, best.tooltipText)
+    end
+
+    storeResolved("", "", "")
+    return ""
 end
 
 local function ClampNumber(v, minV, maxV, fallback)
@@ -2491,6 +2940,82 @@ local function EnsureUi(settings)
         UI.target.gearscore.style:SetFontSize(gsFontSize)
     end
 
+    if UI.target.glider == nil then
+        UI.target.glider = UI.target.wnd:CreateChildWidget("label", "polarUiTargetGlider", 0, true)
+        table.insert(UI.created, UI.target.glider)
+        SetNotClickable(UI.target.glider)
+        UI.target.glider.style:SetAlign(ALIGN.LEFT)
+        UI.target.glider.style:SetShadow(overlayShadow)
+        ApplyTextColor(UI.target.glider, FONT_COLOR.WHITE)
+        if UI.target.glider.SetAutoResize ~= nil then
+            UI.target.glider:SetAutoResize(true)
+        end
+        UI.target.glider.style:SetFontSize(classFontSize)
+        UI.target.glider:Show(false)
+    end
+
+    if UI.target.glider_icon == nil and type(CreateItemIconButton) == "function" then
+        local ok, icon = pcall(function()
+            return CreateItemIconButton("polarUiTargetGliderIcon", UI.target.wnd)
+        end)
+        if ok and icon ~= nil then
+            table.insert(UI.created, icon)
+            UI.target.glider_icon = icon
+            pcall(function()
+                if icon.SetExtent ~= nil then
+                    icon:SetExtent(24, 24)
+                end
+                if icon.Clickable ~= nil then
+                    icon:Clickable(true)
+                end
+            end)
+            pcall(function()
+                if F_SLOT ~= nil and F_SLOT.ApplySlotSkin ~= nil and icon.back ~= nil and SLOT_STYLE ~= nil then
+                    local style = SLOT_STYLE.DEFAULT or SLOT_STYLE.BUFF or SLOT_STYLE.ITEM
+                    if style ~= nil then
+                        F_SLOT.ApplySlotSkin(icon, icon.back, style)
+                    end
+                end
+            end)
+            icon.__polar_tooltip_text = ""
+            icon.OnEnter = function(self)
+                local tooltipText = tostring(self.__polar_tooltip_text or "")
+                if tooltipText == "" or api == nil or api.Interface == nil or api.Interface.SetTooltipOnPos == nil then
+                    return
+                end
+                local posX, posY = 0, 0
+                pcall(function()
+                    if self.GetOffset ~= nil then
+                        posX, posY = self:GetOffset()
+                    end
+                end)
+                pcall(function()
+                    api.Interface:SetTooltipOnPos(tooltipText, self, posX, posY + 6)
+                end)
+            end
+            icon.OnLeave = function(self)
+                if api == nil or api.Interface == nil or api.Interface.SetTooltipOnPos == nil then
+                    return
+                end
+                local posX, posY = 0, 0
+                pcall(function()
+                    if self.GetOffset ~= nil then
+                        posX, posY = self:GetOffset()
+                    end
+                end)
+                pcall(function()
+                    api.Interface:SetTooltipOnPos(nil, self, posX, posY + 6)
+                end)
+            end
+            if icon.SetHandler ~= nil then
+                pcall(function()
+                    icon:SetHandler("OnEnter", icon.OnEnter)
+                    icon:SetHandler("OnLeave", icon.OnLeave)
+                end)
+            end
+        end
+    end
+
     if UI.target.pdef == nil then
         UI.target.pdef = UI.target.wnd:CreateChildWidget("label", "polarUiTargetPdef", 0, true)
         table.insert(UI.created, UI.target.pdef)
@@ -2536,6 +3061,10 @@ local function EnsureUi(settings)
             UI.target.gearscore.style:SetFontSize(gsFontSize)
             UI.target.gearscore.style:SetShadow(overlayShadow)
         end
+        if UI.target.glider ~= nil and UI.target.glider.style ~= nil then
+            UI.target.glider.style:SetFontSize(classFontSize)
+            UI.target.glider.style:SetShadow(overlayShadow)
+        end
         if UI.target.pdef ~= nil and UI.target.pdef.style ~= nil then
             UI.target.pdef.style:SetFontSize(gsFontSize)
             UI.target.pdef.style:SetShadow(overlayShadow)
@@ -2570,6 +3099,23 @@ local function EnsureUi(settings)
             end
             UI.target.gearscore:AddAnchor("TOPLEFT", UI.target.wnd, 10, -36)
 
+            if UI.target.glider ~= nil and UI.target.glider.RemoveAllAnchors ~= nil then
+                UI.target.glider:RemoveAllAnchors()
+            end
+            if UI.target.glider_icon ~= nil and UI.target.glider_icon.RemoveAllAnchors ~= nil then
+                UI.target.glider_icon:RemoveAllAnchors()
+            end
+            if UI.target.glider_icon ~= nil then
+                UI.target.glider_icon:AddAnchor("TOPLEFT", UI.target.wnd, "TOPRIGHT", 12, -18)
+            end
+            if UI.target.glider ~= nil then
+                if UI.target.glider_icon ~= nil then
+                    UI.target.glider:AddAnchor("LEFT", UI.target.glider_icon, "RIGHT", 6, 0)
+                else
+                    UI.target.glider:AddAnchor("TOPLEFT", UI.target.wnd, "TOPRIGHT", 12, -18)
+                end
+            end
+
             if UI.target.pdef ~= nil and UI.target.pdef.RemoveAllAnchors ~= nil then
                 UI.target.pdef:RemoveAllAnchors()
             end
@@ -2595,15 +3141,41 @@ local function UpdateTargetExtras(settings)
         return
     end
 
-    local isCharacter = true
+    local targetUnitInfo = nil
     pcall(function()
-        if api.Unit ~= nil and api.Unit.GetUnitInfoById ~= nil then
-            local ti = SafeGetUnitInfoById(targetId)
-            if type(ti) == "table" and ti.type ~= nil then
-                isCharacter = (ti.type == "character")
+        if api.Unit ~= nil and api.Unit.UnitInfo ~= nil then
+            local info = api.Unit:UnitInfo("target")
+            if type(info) == "table" then
+                targetUnitInfo = info
             end
         end
     end)
+    local targetDisplayName = ResolveUnitDisplayName(targetUnitInfo)
+    if targetDisplayName == "" and Runtime ~= nil and Runtime.GetUnitName ~= nil then
+        targetDisplayName = TrimText(Runtime.GetUnitName("target"))
+    end
+    local targetLevel = ResolveUnitLevel(targetUnitInfo)
+
+    local isCharacter = true
+    if type(targetUnitInfo) == "table" and targetUnitInfo.type ~= nil then
+        isCharacter = (targetUnitInfo.type == "character")
+    else
+        pcall(function()
+            if api.Unit ~= nil and api.Unit.GetUnitInfoById ~= nil then
+                local ti = SafeGetUnitInfoById(targetId)
+                if type(ti) == "table" and ti.type ~= nil then
+                    isCharacter = (ti.type == "character")
+                end
+                if targetLevel == nil then
+                    targetLevel = ResolveUnitLevel(ti)
+                end
+                if targetDisplayName == "" then
+                    targetDisplayName = ResolveUnitDisplayName(ti)
+                end
+            end
+        end)
+    end
+    ApplyTargetNameLevel(targetDisplayName, targetLevel)
 
     local gs = nil
     pcall(function()
@@ -2613,14 +3185,9 @@ local function UpdateTargetExtras(settings)
     end)
 
     if gs == nil then
-        pcall(function()
-            if api.Unit ~= nil then
-                local info = api.Unit:UnitInfo("target")
-                if type(info) == "table" then
-                    gs = info.gearScore or info.gearscore or info.gear_score or info.gs
-                end
-            end
-        end)
+        if type(targetUnitInfo) == "table" then
+            gs = targetUnitInfo.gearScore or targetUnitInfo.gearscore or targetUnitInfo.gear_score or targetUnitInfo.gs
+        end
     end
 
     if gs == nil then
@@ -2680,29 +3247,36 @@ local function UpdateTargetExtras(settings)
         end
     end)
 
-    local unitInfo = nil
-    pcall(function()
-        if api.Unit ~= nil and api.Unit.UnitInfo ~= nil then
-            unitInfo = api.Unit:UnitInfo("target")
-        end
-    end)
-
     local pdef = nil
     local mdef = nil
-    if isCharacter and type(unitInfo) == "table" then
-        pdef = unitInfo.armor
-        mdef = unitInfo.magic_resist
+    if isCharacter and type(targetUnitInfo) == "table" then
+        pdef = targetUnitInfo.armor
+        mdef = targetUnitInfo.magic_resist
     end
 
     local guild = ""
-    pcall(function()
-        if api.Unit ~= nil and api.Unit.GetUnitInfoById ~= nil then
-            local info = SafeGetUnitInfoById(targetId)
-            if type(info) == "table" and info.expeditionName ~= nil then
-                guild = tostring(info.expeditionName or "")
-            end
+    if isCharacter and type(targetUnitInfo) == "table" then
+        guild = TrimText(
+            targetUnitInfo.expeditionName
+            or targetUnitInfo.guildName
+            or targetUnitInfo.guild
+            or ""
+        )
+    end
+    if guild == "" and isCharacter then
+        local fallbackInfo = SafeGetUnitInfoById(targetId)
+        local fallbackName = ResolveUnitDisplayName(fallbackInfo)
+        local namesMatch = targetDisplayName ~= "" and fallbackName ~= ""
+            and string.lower(targetDisplayName) == string.lower(fallbackName)
+        if namesMatch and type(fallbackInfo) == "table" then
+            guild = TrimText(
+                fallbackInfo.expeditionName
+                or fallbackInfo.guildName
+                or fallbackInfo.guild
+                or ""
+            )
         end
-    end)
+    end
 
     if UI.target.guild ~= nil and UI.target.guild.SetText ~= nil then
         if guild ~= "" then
@@ -2713,6 +3287,34 @@ local function UpdateTargetExtras(settings)
     end
     if UI.target.guild ~= nil and UI.target.guild.Show ~= nil then
         UI.target.guild:Show(guild ~= "")
+    end
+
+    local gliderName = GetTargetGliderName(targetId)
+    local gliderTooltipText = tostring(UI.target.glider_tooltip_text or "")
+    local gliderIconPath = tostring(UI.target.glider_icon_path or "")
+    if UI.target.glider ~= nil and UI.target.glider.SetText ~= nil then
+        if gliderName ~= "" then
+            UI.target.glider:SetText("Flight Gear: " .. gliderName)
+        else
+            UI.target.glider:SetText("")
+        end
+    end
+    if UI.target.glider ~= nil and UI.target.glider.Show ~= nil then
+        UI.target.glider:Show(gliderName ~= "")
+    end
+    if UI.target.glider_icon ~= nil and UI.target.glider_icon.Show ~= nil then
+        if gliderName ~= "" then
+            if gliderIconPath ~= "" and F_SLOT ~= nil and F_SLOT.SetIconBackGround ~= nil then
+                pcall(function()
+                    F_SLOT.SetIconBackGround(UI.target.glider_icon, gliderIconPath)
+                end)
+            end
+            UI.target.glider_icon.__polar_tooltip_text = gliderTooltipText ~= "" and gliderTooltipText or gliderName
+            UI.target.glider_icon:Show(true)
+        else
+            UI.target.glider_icon.__polar_tooltip_text = ""
+            UI.target.glider_icon:Show(false)
+        end
     end
 
     if UI.target.pdef ~= nil and UI.target.pdef.SetText ~= nil then
@@ -2823,6 +3425,14 @@ UI.UnLoad = function()
     UI.target.guild = nil
     UI.target.class_name = nil
     UI.target.gearscore = nil
+    UI.target.glider_icon = nil
+    UI.target.glider = nil
+    UI.target.current_target_id = nil
+    UI.target.glider_target_id = nil
+    UI.target.glider_name = ""
+    UI.target.glider_icon_path = ""
+    UI.target.glider_tooltip_text = ""
+    UI.target.glider_last_refresh_ms = 0
     UI.target.pdef = nil
     UI.target.mdef = nil
 end
@@ -2883,6 +3493,22 @@ UI.SetEnabled = function(enabled)
         else
             local tid = api.Unit:GetUnitId("target")
             UI.target.gearscore:Show(tid ~= nil)
+        end
+    end
+    if UI.target.glider ~= nil and UI.target.glider.Show ~= nil then
+        if not UI.enabled then
+            UI.target.glider:Show(false)
+        else
+            local tid = api.Unit:GetUnitId("target")
+            UI.target.glider:Show(tid ~= nil)
+        end
+    end
+    if UI.target.glider_icon ~= nil and UI.target.glider_icon.Show ~= nil then
+        if not UI.enabled then
+            UI.target.glider_icon:Show(false)
+        else
+            local tid = api.Unit:GetUnitId("target")
+            UI.target.glider_icon:Show(tid ~= nil and tostring(UI.target.glider_name or "") ~= "")
         end
     end
 
@@ -2954,6 +3580,18 @@ UI.OnUpdate = function(dt)
     if UI.enabled and UI.target.wnd ~= nil and UI.target.role ~= nil then
         local tid = api.Unit:GetUnitId("target")
         if tid == nil then
+            UI.target.current_target_id = nil
+            UI.target.glider_target_id = nil
+            UI.target.glider_name = ""
+            UI.target.glider_icon_path = ""
+            UI.target.glider_tooltip_text = ""
+            UI.target.glider_last_refresh_ms = 0
+            if UI.target.guild ~= nil and UI.target.guild.SetText ~= nil then
+                UI.target.guild:SetText("")
+            end
+            if UI.target.guild ~= nil and UI.target.guild.Show ~= nil then
+                UI.target.guild:Show(false)
+            end
             if UI.target.role ~= nil and UI.target.role.Show ~= nil then
                 UI.target.role:Show(false)
             end
@@ -2963,7 +3601,28 @@ UI.OnUpdate = function(dt)
             if UI.target.gearscore ~= nil and UI.target.gearscore.Show ~= nil then
                 UI.target.gearscore:Show(false)
             end
+            if UI.target.glider ~= nil and UI.target.glider.Show ~= nil then
+                UI.target.glider:Show(false)
+            end
+            if UI.target.glider_icon ~= nil and UI.target.glider_icon.Show ~= nil then
+                UI.target.glider_icon:Show(false)
+            end
         else
+            local normalizedTid = NormalizeUnitId(tid)
+            if UI.target.current_target_id ~= normalizedTid then
+                UI.target.current_target_id = normalizedTid
+                UI.target.glider_target_id = nil
+                UI.target.glider_name = ""
+                UI.target.glider_icon_path = ""
+                UI.target.glider_tooltip_text = ""
+                UI.target.glider_last_refresh_ms = 0
+                if UI.target.guild ~= nil and UI.target.guild.SetText ~= nil then
+                    UI.target.guild:SetText("")
+                end
+                if UI.target.guild ~= nil and UI.target.guild.Show ~= nil then
+                    UI.target.guild:Show(false)
+                end
+            end
             if UI.target.role ~= nil and UI.target.role.Show ~= nil then
                 UI.target.role:Show(true)
             end
