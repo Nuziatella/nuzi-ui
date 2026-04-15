@@ -29,8 +29,21 @@ local Nameplates = {
     enabled = false,
     frames = {},
     unit_keys = {},
-    target_unitframe = nil
+    unit_state = {},
+    target_unitframe = nil,
+    tick = 0,
+    discovery_index = 1
 }
+
+local FAST_UNITS = {
+    player = true,
+    target = true,
+    watchtarget = true,
+    playerpet1 = true
+}
+
+local DISCOVERY_BATCH_SIZE = 10
+local STATIC_INFO_RETRY_TICKS = 30
 
 local function NormalizeUnitToken(unit)
     if type(unit) ~= "string" then
@@ -183,6 +196,44 @@ local function Clamp01(v, default)
         return 1
     end
     return n
+end
+
+local function RoundPixel(value)
+    local n = tonumber(value)
+    if n == nil then
+        return 0
+    end
+    if n >= 0 then
+        return math.floor(n + 0.5)
+    end
+    return math.ceil(n - 0.5)
+end
+
+local function GetUnitState(unit)
+    local state = Nameplates.unit_state[unit]
+    if state ~= nil then
+        return state
+    end
+    state = {
+        unit_id = nil,
+        name = "",
+        guild = "",
+        is_character = true,
+        next_info_retry_tick = 0,
+        visible = false
+    }
+    Nameplates.unit_state[unit] = state
+    return state
+end
+
+local function HideUnit(unit, state)
+    local frame = Nameplates.frames[unit]
+    if frame ~= nil then
+        SafeShow(frame, false)
+    end
+    if type(state) == "table" then
+        state.visible = false
+    end
 end
 
 local function ApplyGuildTextColor(lbl, cfg, guild)
@@ -583,31 +634,71 @@ local function GetCfg(settings)
     return settings.nameplates
 end
 
+local function RefreshStaticState(state, id, unit, cfg)
+    if type(state) ~= "table" then
+        return
+    end
+
+    if state.unit_id ~= id then
+        state.unit_id = id
+        state.name = ""
+        state.guild = ""
+        state.is_character = true
+        state.next_info_retry_tick = 0
+    end
+
+    if state.name == "" and Runtime ~= nil and Runtime.GetUnitNameById ~= nil then
+        state.name = tostring(Runtime.GetUnitNameById(id) or "")
+    end
+
+    local needInfo = cfg.guild_only or cfg.show_guild
+    local shouldProbeInfo = needInfo or state.name == ""
+    if not shouldProbeInfo then
+        return
+    end
+
+    if (tonumber(state.next_info_retry_tick) or 0) > (tonumber(Nameplates.tick) or 0) then
+        return
+    end
+
+    local info = SafeGetUnitInfoById(id)
+    if type(info) ~= "table" then
+        state.next_info_retry_tick = (tonumber(Nameplates.tick) or 0) + STATIC_INFO_RETRY_TICKS
+        return
+    end
+
+    local infoName = tostring(info.name or info.unitName or info.family_name or "")
+    if infoName ~= "" then
+        state.name = infoName
+    end
+    state.guild = tostring(info.expeditionName or "")
+    if info.type ~= nil then
+        state.is_character = (tostring(info.type) == "character")
+    end
+    state.next_info_retry_tick = math.huge
+end
+
 local function UpdateOne(unit, settings)
     unit = NormalizeUnitToken(unit)
     if unit == nil then
         return
     end
+    local state = GetUnitState(unit)
     local cfg = GetCfg(settings)
     if Compat ~= nil and not Compat.NameplatesSupported() then
-        SafeShow(Nameplates.frames[unit], false)
+        HideUnit(unit, state)
         return
     end
 
     local guildOnly = cfg.guild_only and true or false
 
     if not (Nameplates.enabled and cfg.enabled) then
-        SafeShow(Nameplates.frames[unit], false)
+        HideUnit(unit, state)
         return
     end
 
     if not ShouldShowUnit(unit, cfg) then
-        SafeShow(Nameplates.frames[unit], false)
-        return
-    end
-
-    local frame = EnsureFrame(unit)
-    if frame == nil then
+        HideUnit(unit, state)
         return
     end
 
@@ -617,7 +708,7 @@ local function UpdateOne(unit, settings)
     end)
     id = NormalizeUnitId(id)
     if id == nil then
-        SafeShow(frame, false)
+        HideUnit(unit, state)
         return
     end
 
@@ -636,7 +727,7 @@ local function UpdateOne(unit, settings)
     end
 
     if offsetX == nil or offsetY == nil or offsetZ == nil or offsetZ < 0 then
-        SafeShow(frame, false)
+        HideUnit(unit, state)
         return
     end
 
@@ -648,7 +739,12 @@ local function UpdateOne(unit, settings)
     end)
     local maxDist = ClampNumber(cfg.max_distance, 1, 500, 130)
     if type(dist) == "number" and dist > maxDist then
-        SafeShow(frame, false)
+        HideUnit(unit, state)
+        return
+    end
+
+    local frame = EnsureFrame(unit)
+    if frame == nil then
         return
     end
 
@@ -673,44 +769,23 @@ local function UpdateOne(unit, settings)
         totalHeight = guildFs + 8
     end
 
-    offsetX = math.ceil(offsetX) + ClampNumber(cfg.x_offset, -500, 500, 0)
-    offsetY = math.ceil(offsetY) - ClampNumber(cfg.y_offset, -200, 200, 22)
+    offsetX = RoundPixel(offsetX) + ClampNumber(cfg.x_offset, -500, 500, 0)
+    offsetY = RoundPixel(offsetY) - ClampNumber(cfg.y_offset, -200, 200, 22)
 
-    local posX = offsetX - math.ceil(width / 2)
-    local posY = offsetY - math.ceil(totalHeight / 2)
+    local posX = offsetX - RoundPixel(width / 2)
+    local posY = offsetY - RoundPixel(totalHeight / 2)
 
     SafeSetAnchorTopLeft(frame, posX, posY)
 
     ApplyGuildMode(frame, guildOnly, mpHeight > 0)
 
-    local info = nil
-    local isCharacter = true
-    if guildOnly or cfg.show_guild then
-        info = SafeGetUnitInfoById(id)
-        if type(info) == "table" and info.type ~= nil then
-            isCharacter = (tostring(info.type) == "character")
-        end
-    end
+    RefreshStaticState(state, id, unit, cfg)
+    SafeSetText(frame.nameLabel, state.name or "")
 
-    local name = ""
-    if type(info) == "table" then
-        name = tostring(info.name or info.unitName or info.family_name or "")
-    end
-    if name == "" and Runtime ~= nil and Runtime.GetUnitNameById ~= nil then
-        name = Runtime.GetUnitNameById(id)
-    end
-    SafeSetText(frame.nameLabel, name or "")
-
-    local guild = nil
-    if type(info) == "table" then
-        guild = info.expeditionName
-    end
-    guild = tostring(guild or "")
-
-    if cfg.show_guild and isCharacter and guild ~= "" then
-        ApplyGuildTextColor(frame.guildLabel, cfg, guild)
+    if cfg.show_guild and state.is_character and state.guild ~= "" then
+        ApplyGuildTextColor(frame.guildLabel, cfg, state.guild)
         SafeShow(frame.guildLabel, true)
-        SafeSetText(frame.guildLabel, "<" .. guild .. ">")
+        SafeSetText(frame.guildLabel, "<" .. state.guild .. ">")
     else
         ApplyGuildTextColor(frame.guildLabel, cfg, nil)
         SafeSetText(frame.guildLabel, "")
@@ -736,6 +811,7 @@ local function UpdateOne(unit, settings)
     end
 
     SafeShow(frame, true)
+    state.visible = true
 end
 
 local function EnsureUnitKeys()
@@ -754,6 +830,8 @@ end
 
 Nameplates.Init = function(settings)
     Nameplates.settings = settings
+    Nameplates.tick = 0
+    Nameplates.discovery_index = 1
     if Compat ~= nil then
         Compat.Probe(false)
     end
@@ -762,6 +840,10 @@ Nameplates.Init = function(settings)
     if Runtime ~= nil and UIC ~= nil then
         Nameplates.target_unitframe = Runtime.GetStockContent(UIC.TARGET_UNITFRAME)
     end
+end
+
+Nameplates.ApplySettings = function(settings)
+    Nameplates.settings = settings
 end
 
 Nameplates.SetEnabled = function(enabled)
@@ -792,9 +874,43 @@ Nameplates.OnUpdate = function(settings)
         return
     end
 
+    Nameplates.tick = (tonumber(Nameplates.tick) or 0) + 1
+
+    local processed = {}
     for _, unit in ipairs(Nameplates.unit_keys) do
-        UpdateOne(unit, settings)
+        local state = GetUnitState(unit)
+        if FAST_UNITS[unit] or state.visible then
+            UpdateOne(unit, settings)
+            processed[unit] = true
+        end
     end
+
+    local totalUnits = #Nameplates.unit_keys
+    if totalUnits < 1 then
+        return
+    end
+
+    local attempts = 0
+    local processedHidden = 0
+    local idx = tonumber(Nameplates.discovery_index) or 1
+    while attempts < totalUnits and processedHidden < DISCOVERY_BATCH_SIZE do
+        if idx > totalUnits then
+            idx = 1
+        end
+        local unit = Nameplates.unit_keys[idx]
+        idx = idx + 1
+        attempts = attempts + 1
+
+        if not processed[unit] then
+            local state = GetUnitState(unit)
+            if not state.visible then
+                UpdateOne(unit, settings)
+                processedHidden = processedHidden + 1
+            end
+        end
+    end
+
+    Nameplates.discovery_index = idx
 end
 
 Nameplates.Unload = function()
@@ -810,6 +926,9 @@ Nameplates.Unload = function()
     Nameplates.settings = nil
     Nameplates.target_unitframe = nil
     Nameplates.unit_keys = {}
+    Nameplates.unit_state = {}
+    Nameplates.tick = 0
+    Nameplates.discovery_index = 1
 end
 
 return Nameplates

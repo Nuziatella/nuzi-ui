@@ -1,4 +1,5 @@
 local api = require("api")
+local SettingsCommon = require("nuzi-ui/settings_common")
 
 local SettingsDefaults = {}
 
@@ -8,6 +9,105 @@ SettingsDefaults.DEFAULT_SETTINGS = {
     update_interval_ms = 100,
     frame_scale = 1,
     alignment_grid_enabled = false,
+    settings_button = {
+        x = 10,
+        y = 200,
+        size = 48
+    },
+    cooldown_tracker = {
+        enabled = false,
+        update_interval_ms = 50,
+        migrated_from_cbt = false,
+        anchor_layout_version = 2,
+        units = {
+            player = {
+                enabled = false,
+                pos_x = 330,
+                pos_y = 100,
+                icon_size = 40,
+                icon_spacing = 5,
+                max_icons = 10,
+                lock_position = false,
+                show_timer = true,
+                timer_font_size = 16,
+                timer_color = { 255, 255, 255, 255 },
+                show_label = false,
+                label_font_size = 14,
+                label_color = { 255, 255, 255, 255 },
+                display_mode = "both",
+                tracked_buffs = {}
+            },
+            target = {
+                enabled = false,
+                pos_x = 0,
+                pos_y = -8,
+                icon_size = 40,
+                icon_spacing = 5,
+                max_icons = 10,
+                lock_position = false,
+                show_timer = true,
+                timer_font_size = 16,
+                timer_color = { 255, 255, 255, 255 },
+                show_label = false,
+                label_font_size = 14,
+                label_color = { 255, 255, 255, 255 },
+                display_mode = "both",
+                cache_timeout_s = 300,
+                tracked_buffs = {}
+            },
+            playerpet = {
+                enabled = false,
+                pos_x = 0,
+                pos_y = -8,
+                icon_size = 40,
+                icon_spacing = 5,
+                max_icons = 10,
+                lock_position = false,
+                show_timer = true,
+                timer_font_size = 16,
+                timer_color = { 255, 255, 255, 255 },
+                show_label = false,
+                label_font_size = 14,
+                label_color = { 255, 255, 255, 255 },
+                display_mode = "both",
+                tracked_buffs = {}
+            },
+            watchtarget = {
+                enabled = false,
+                pos_x = 0,
+                pos_y = -8,
+                icon_size = 40,
+                icon_spacing = 5,
+                max_icons = 10,
+                lock_position = false,
+                show_timer = true,
+                timer_font_size = 16,
+                timer_color = { 255, 255, 255, 255 },
+                show_label = false,
+                label_font_size = 14,
+                label_color = { 255, 255, 255, 255 },
+                display_mode = "both",
+                tracked_buffs = {}
+            },
+            target_of_target = {
+                enabled = false,
+                pos_x = 0,
+                pos_y = -8,
+                icon_size = 40,
+                icon_spacing = 5,
+                max_icons = 10,
+                lock_position = false,
+                show_timer = true,
+                timer_font_size = 16,
+                timer_color = { 255, 255, 255, 255 },
+                show_label = false,
+                label_font_size = 14,
+                label_color = { 255, 255, 255, 255 },
+                display_mode = "both",
+                tracked_buffs = {}
+            }
+        }
+    },
     nameplates = {
         enabled = false,
         guild_only = false,
@@ -121,7 +221,10 @@ SettingsDefaults.DEFAULT_SETTINGS = {
             player = {},
             target = {},
             watchtarget = {},
-            target_of_target = {}
+            target_of_target = {},
+            party = {
+                frame_scale = 0.55
+            }
         }
     },
     player = {
@@ -131,6 +234,14 @@ SettingsDefaults.DEFAULT_SETTINGS = {
     target = {
         x = 10,
         y = 380
+    },
+    watchtarget = {
+        x = 10,
+        y = 460
+    },
+    target_of_target = {
+        x = 10,
+        y = 540
     },
     frame_width = 320,
     frame_height = 64,
@@ -187,6 +298,66 @@ function SettingsDefaults.MergeInto(dst, src)
     end
 end
 
+local function NormalizeGuildKey(raw)
+    local k = tostring(raw or "")
+    k = string.match(k, "^%s*(.-)%s*$") or k
+    k = string.lower(k)
+    k = string.gsub(k, "%s+", "_")
+    k = string.gsub(k, "[^%w_]", "")
+    if k ~= "" and string.match(k, "^%d") ~= nil then
+        k = "_" .. k
+    end
+    return k
+end
+
+local function EnsureTableDefault(parent, key, defaultValue)
+    if type(parent) ~= "table" then
+        return
+    end
+    if type(defaultValue) == "table" then
+        if type(parent[key]) ~= "table" then
+            parent[key] = SettingsDefaults.DeepCopyTable(defaultValue)
+        end
+        for childKey, childValue in pairs(defaultValue) do
+            EnsureTableDefault(parent[key], childKey, childValue)
+        end
+        return
+    end
+    if parent[key] == nil then
+        parent[key] = defaultValue
+    end
+end
+
+local function MigrateLegacyTargetOverlayLayout(styleTable)
+    local changed = false
+    if type(styleTable) ~= "table" then
+        return changed
+    end
+
+    local legacyTogglesMissing =
+        styleTable.target_guild_visible == nil
+        and styleTable.target_class_visible == nil
+        and styleTable.target_gearscore_visible == nil
+        and styleTable.target_pdef_visible == nil
+        and styleTable.target_mdef_visible == nil
+
+    if legacyTogglesMissing and tonumber(styleTable.target_guild_offset_y) == -54 then
+        styleTable.target_guild_offset_y = -18
+        changed = true
+    end
+
+    if styleTable.target_glider_visible ~= nil then
+        styleTable.target_glider_visible = nil
+        changed = true
+    end
+    if styleTable.target_glider_color ~= nil then
+        styleTable.target_glider_color = nil
+        changed = true
+    end
+
+    return changed
+end
+
 function SettingsDefaults.EnsureCooldownTrackerDefaults(s)
     if type(s) ~= "table" then
         return
@@ -226,51 +397,26 @@ function SettingsDefaults.EnsureCooldownTrackerDefaults(s)
     ensureUnit("target_of_target")
 end
 
-function SettingsDefaults.EnsureDailiesDefaults(s)
-    if type(s) ~= "table" then
-        return
+local function NormalizeTrackerColor(raw)
+    if type(raw) ~= "table" then
+        return { 255, 255, 255, 255 }
     end
-    if type(s.dailies) ~= "table" then
-        if type(s.dailyage) == "table" then
-            s.dailies = SettingsDefaults.DeepCopyTable(s.dailyage)
-        else
-            s.dailies = {}
+    local out = {}
+    for i = 1, 4 do
+        local value = tonumber(raw[i])
+        if value == nil then
+            value = 255
+        elseif value <= 1 then
+            value = value * 255
         end
-    end
-    if s.dailies.enabled == nil then
-        s.dailies.enabled = false
-    end
-    if type(s.dailies.hidden) ~= "table" then
-        s.dailies.hidden = {}
-    end
-
-    local normalizedHidden = {}
-    for k, v in pairs(s.dailies.hidden) do
-        local id = nil
-        if type(k) == "number" then
-            id = math.floor(k + 0.5)
-        else
-            local parsed = tonumber(k)
-            if parsed ~= nil then
-                id = math.floor(parsed + 0.5)
-            end
+        if value < 0 then
+            value = 0
+        elseif value > 255 then
+            value = 255
         end
-        if id ~= nil and v then
-            normalizedHidden[tostring(id)] = true
-        end
+        out[i] = math.floor(value + 0.5)
     end
-    s.dailies.hidden = normalizedHidden
-
-    if s.dailyage ~= nil then
-        s.dailyage = nil
-    end
-end
-
-function SettingsDefaults.EnsureDailyAgeDefaults(s)
-    if s.dailyage ~= nil or s.dailies == nil then
-        forceWrite = true
-    end
-    SettingsDefaults.EnsureDailiesDefaults(s)
+    return out
 end
 
 function SettingsDefaults.TryMigrateCooldownTrackerFromCbt(s)
@@ -322,12 +468,12 @@ function SettingsDefaults.TryMigrateCooldownTrackerFromCbt(s)
             dst.timer_font_size = tonumber(src.timerFontSize) or dst.timer_font_size
         end
         if type(src.timerTextColor) == "table" then
-            dst.timer_color = {
-                tonumber(src.timerTextColor.r) or 1,
-                tonumber(src.timerTextColor.g) or 1,
-                tonumber(src.timerTextColor.b) or 1,
-                tonumber(src.timerTextColor.a) or 1
-            }
+            dst.timer_color = NormalizeTrackerColor({
+                src.timerTextColor.r,
+                src.timerTextColor.g,
+                src.timerTextColor.b,
+                src.timerTextColor.a
+            })
         end
         if src.showLabel ~= nil then
             dst.show_label = src.showLabel and true or false
@@ -336,12 +482,12 @@ function SettingsDefaults.TryMigrateCooldownTrackerFromCbt(s)
             dst.label_font_size = tonumber(src.labelFontSize) or dst.label_font_size
         end
         if type(src.labelTextColor) == "table" then
-            dst.label_color = {
-                tonumber(src.labelTextColor.r) or 1,
-                tonumber(src.labelTextColor.g) or 1,
-                tonumber(src.labelTextColor.b) or 1,
-                tonumber(src.labelTextColor.a) or 1
-            }
+            dst.label_color = NormalizeTrackerColor({
+                src.labelTextColor.r,
+                src.labelTextColor.g,
+                src.labelTextColor.b,
+                src.labelTextColor.a
+            })
         end
         if type(src.trackedBuffs) == "table" then
             dst.tracked_buffs = {}
@@ -358,6 +504,8 @@ function SettingsDefaults.TryMigrateCooldownTrackerFromCbt(s)
     migrateUnit("player", "player")
     migrateUnit("target", "target")
     migrateUnit("playerpet", "playerpet")
+    migrateUnit("watchtarget", "watchtarget")
+    migrateUnit("target_of_target", "target_of_target")
 
     if cbt.enabled ~= nil then
         s.cooldown_tracker.enabled = cbt.enabled and true or false
@@ -367,29 +515,57 @@ function SettingsDefaults.TryMigrateCooldownTrackerFromCbt(s)
     return true
 end
 
+local function MigrateCooldownTrackerAnchorOffsets(s)
+    if type(s) ~= "table" or type(s.cooldown_tracker) ~= "table" then
+        return false
+    end
+
+    local tracker = s.cooldown_tracker
+    local version = tonumber(tracker.anchor_layout_version) or 0
+    if version >= 2 then
+        return false
+    end
+
+    local changed = false
+    local units = type(tracker.units) == "table" and tracker.units or {}
+    local legacyDefaults = {
+        target = { x = 330, y = 170 },
+        playerpet = { x = 330, y = 30 },
+        watchtarget = { x = 330, y = 240 },
+        target_of_target = { x = 330, y = 310 }
+    }
+
+    for unitKey, legacy in pairs(legacyDefaults) do
+        local unitCfg = units[unitKey]
+        if type(unitCfg) == "table" then
+            local x = tonumber(unitCfg.pos_x)
+            local y = tonumber(unitCfg.pos_y)
+            if x == legacy.x and y == legacy.y then
+                unitCfg.pos_x = 0
+                unitCfg.pos_y = -8
+                changed = true
+            end
+        end
+    end
+
+    tracker.anchor_layout_version = 2
+    return changed
+end
+
 function SettingsDefaults.EnsureSettingsDefaultsAndMigrations(s)
+    if type(s) ~= "table" then
+        return false
+    end
+
     local forceWrite = false
+    local defaults = SettingsDefaults.DEFAULT_SETTINGS
     local legacyRootKeys = {
         "font_size_name",
         "show_mana"
     }
 
-    local function NormalizeGuildKey(raw)
-        local k = tostring(raw or "")
-        k = string.match(k, "^%s*(.-)%s*$") or k
-        k = string.lower(k)
-        k = string.gsub(k, "%s+", "_")
-        k = string.gsub(k, "[^%w_]", "")
-        if k ~= "" and string.match(k, "^%d") ~= nil then
-            k = "_" .. k
-        end
-        return k
-    end
-
-    for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS) do
-        if s[k] == nil then
-            s[k] = SettingsDefaults.CopyDefaultValue(v)
-        end
+    for k, v in pairs(defaults) do
+        EnsureTableDefault(s, k, v)
     end
 
     for _, key in ipairs(legacyRootKeys) do
@@ -399,47 +575,60 @@ function SettingsDefaults.EnsureSettingsDefaultsAndMigrations(s)
         end
     end
 
-    if type(s.player) ~= "table" then
-        s.player = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.player)
+    if MigrateLegacyTargetOverlayLayout(s.style) then
+        forceWrite = true
     end
-    if type(s.target) ~= "table" then
-        s.target = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.target)
-    end
-    if type(s.nameplates) ~= "table" then
-        s.nameplates = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.nameplates)
-    end
-    if type(s.style) ~= "table" then
-        s.style = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style)
+    if MigrateLegacyTargetOverlayLayout(s.style.frames and s.style.frames.target) then
+        forceWrite = true
     end
 
-    local function MigrateLegacyTargetOverlayLayout(styleTable)
-        if type(styleTable) ~= "table" then
-            return
+    if type(s.nameplates.guild_colors) ~= "table" then
+        s.nameplates.guild_colors = {}
+        forceWrite = true
+    end
+
+    SettingsDefaults.EnsureCooldownTrackerDefaults(s)
+    if SettingsDefaults.TryMigrateCooldownTrackerFromCbt(s) then
+        SettingsDefaults.EnsureCooldownTrackerDefaults(s)
+        forceWrite = true
+    end
+    if MigrateCooldownTrackerAnchorOffsets(s) then
+        forceWrite = true
+    end
+
+    do
+        local guildColors = s.nameplates.guild_colors
+        local migrated = false
+        local moves = {}
+        for k, v in pairs(guildColors) do
+            local kstr = tostring(k or "")
+            local norm = NormalizeGuildKey(kstr)
+            if norm ~= "" and norm ~= kstr then
+                table.insert(moves, { from = k, to = norm, value = v })
+            end
         end
-        local legacyTogglesMissing =
-            styleTable.target_guild_visible == nil
-            and styleTable.target_class_visible == nil
-            and styleTable.target_gearscore_visible == nil
-            and styleTable.target_pdef_visible == nil
-            and styleTable.target_mdef_visible == nil
-        if legacyTogglesMissing and tonumber(styleTable.target_guild_offset_y) == -54 then
-            styleTable.target_guild_offset_y = -18
-            forceWrite = true
+        for _, move in ipairs(moves) do
+            if guildColors[move.to] == nil then
+                guildColors[move.to] = move.value
+            end
+            guildColors[move.from] = nil
+            migrated = true
         end
-        if styleTable.target_glider_visible ~= nil then
-            styleTable.target_glider_visible = nil
-            forceWrite = true
-        end
-        if styleTable.target_glider_color ~= nil then
-            styleTable.target_glider_color = nil
+        if migrated then
             forceWrite = true
         end
     end
 
-    MigrateLegacyTargetOverlayLayout(s.style)
-
-    if s.cooldown_tracker ~= nil then
-        s.cooldown_tracker = nil
+    if s.nameplates.click_through_shift ~= nil then
+        s.nameplates.click_through_shift = nil
+        forceWrite = true
+    end
+    if s.nameplates.click_through_ctrl ~= nil then
+        s.nameplates.click_through_ctrl = nil
+        forceWrite = true
+    end
+    if s.raidframes ~= nil then
+        s.raidframes = nil
         forceWrite = true
     end
     if s.dailies ~= nil then
@@ -450,136 +639,73 @@ function SettingsDefaults.EnsureSettingsDefaultsAndMigrations(s)
         s.dailyage = nil
         forceWrite = true
     end
-
-    for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS.nameplates) do
-        if s.nameplates[k] == nil then
-            s.nameplates[k] = SettingsDefaults.CopyDefaultValue(v)
-        end
-    end
-
-    if type(s.nameplates.guild_colors) ~= "table" then
-        s.nameplates.guild_colors = {}
-    end
-    if s.nameplates.click_through_shift ~= nil then
-        s.nameplates.click_through_shift = nil
-        forceWrite = true
-    end
-    if s.nameplates.click_through_ctrl ~= nil then
-        s.nameplates.click_through_ctrl = nil
+    if s.style.minimal ~= nil then
+        s.style.minimal = nil
         forceWrite = true
     end
 
     do
-        local gc = s.nameplates.guild_colors
-        local migrated = false
-        local moves = {}
-        for k, v in pairs(gc) do
-            local kstr = tostring(k or "")
-            local norm = NormalizeGuildKey(kstr)
-            if norm ~= "" and norm ~= kstr then
-                table.insert(moves, { from = k, to = norm, val = v })
+        local function pruneCastFields(style)
+            if type(style) ~= "table" then
+                return false
             end
-        end
-        for _, m in ipairs(moves) do
-            if gc[m.to] == nil then
-                gc[m.to] = m.val
-                migrated = true
+            local changed = false
+            for _, key in ipairs({
+                "cast_bar_enabled",
+                "cast_bar_height",
+                "cast_font_size",
+                "cast_fill_color",
+                "cast_after_color"
+            }) do
+                if style[key] ~= nil then
+                    style[key] = nil
+                    changed = true
+                end
             end
-            gc[m.from] = nil
+            return changed
         end
-        if migrated then
+
+        local function pruneGradientFields(style)
+            if type(style) ~= "table" then
+                return false
+            end
+            local changed = false
+            for _, key in ipairs({
+                "hp_gradient_enabled",
+                "hp_gradient_end_color",
+                "mp_gradient_enabled",
+                "mp_gradient_end_color"
+            }) do
+                if style[key] ~= nil then
+                    style[key] = nil
+                    changed = true
+                end
+            end
+            return changed
+        end
+
+        if pruneCastFields(s.style) then
             forceWrite = true
+        end
+        if pruneGradientFields(s.style) then
+            forceWrite = true
+        end
+        if type(s.style.frames) == "table" then
+            for _, key in ipairs({ "player", "target", "watchtarget", "target_of_target", "party" }) do
+                if pruneCastFields(s.style.frames[key]) then
+                    forceWrite = true
+                end
+                if pruneGradientFields(s.style.frames[key]) then
+                    forceWrite = true
+                end
+            end
         end
     end
 
-    if s.raidframes ~= nil then
-        s.raidframes = nil
+    if SettingsCommon.PruneStyleFrameOverrides(s, { "player", "target", "watchtarget", "target_of_target", "party" }) then
         forceWrite = true
     end
 
-    for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS.style) do
-        if s.style[k] == nil then
-            s.style[k] = SettingsDefaults.CopyDefaultValue(v)
-        end
-    end
-
-    if type(s.style.buff_windows) ~= "table" then
-        s.style.buff_windows = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows)
-    end
-    if type(s.style.aura) ~= "table" then
-        s.style.aura = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.aura)
-    end
-    for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows) do
-        if s.style.buff_windows[k] == nil then
-            s.style.buff_windows[k] = SettingsDefaults.CopyDefaultValue(v)
-        end
-    end
-    for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS.style.aura) do
-        if s.style.aura[k] == nil then
-            s.style.aura[k] = SettingsDefaults.CopyDefaultValue(v)
-        end
-    end
-    if type(s.style.buff_windows.player) ~= "table" then
-        s.style.buff_windows.player = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows.player)
-    end
-    if type(s.style.buff_windows.target) ~= "table" then
-        s.style.buff_windows.target = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows.target)
-    end
-    if type(s.style.buff_windows.player.buff) ~= "table" then
-        s.style.buff_windows.player.buff = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows.player.buff)
-    end
-    if type(s.style.buff_windows.player.debuff) ~= "table" then
-        s.style.buff_windows.player.debuff = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows.player.debuff)
-    end
-    if type(s.style.buff_windows.target.buff) ~= "table" then
-        s.style.buff_windows.target.buff = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows.target.buff)
-    end
-    if type(s.style.buff_windows.target.debuff) ~= "table" then
-        s.style.buff_windows.target.debuff = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows.target.debuff)
-    end
-
-    if type(s.style.frames) ~= "table" then
-        s.style.frames = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.frames)
-    end
-    if type(s.style.frames.player) ~= "table" then
-        s.style.frames.player = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.frames.player)
-    end
-    if type(s.style.frames.target) ~= "table" then
-        s.style.frames.target = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.frames.target)
-    end
-    if type(s.style.frames.watchtarget) ~= "table" then
-        s.style.frames.watchtarget = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.frames.watchtarget)
-    end
-    if type(s.style.frames.target_of_target) ~= "table" then
-        s.style.frames.target_of_target = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.style.frames.target_of_target)
-    end
-    MigrateLegacyTargetOverlayLayout(s.style.frames.target)
-    for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows.player.buff) do
-        if s.style.buff_windows.player.buff[k] == nil then
-            s.style.buff_windows.player.buff[k] = SettingsDefaults.CopyDefaultValue(v)
-        end
-    end
-    for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows.player.debuff) do
-        if s.style.buff_windows.player.debuff[k] == nil then
-            s.style.buff_windows.player.debuff[k] = SettingsDefaults.CopyDefaultValue(v)
-        end
-    end
-    for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows.target.buff) do
-        if s.style.buff_windows.target.buff[k] == nil then
-            s.style.buff_windows.target.buff[k] = SettingsDefaults.CopyDefaultValue(v)
-        end
-    end
-    for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS.style.buff_windows.target.debuff) do
-        if s.style.buff_windows.target.debuff[k] == nil then
-            s.style.buff_windows.target.debuff[k] = SettingsDefaults.CopyDefaultValue(v)
-        end
-    end
-    s.style.minimal = nil
-    if type(s.role) ~= "table" then
-        s.role = SettingsDefaults.DeepCopyTable(SettingsDefaults.DEFAULT_SETTINGS.role)
-    end
-
-    api.SaveSettings()
     return forceWrite
 end
 

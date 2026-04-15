@@ -30,6 +30,12 @@ SettingsCatalog.PAGES = {
         label = "Nameplates",
         title = "Nameplates",
         summary = "Visibility rules, offsets, colors, and runtime nameplate behavior."
+    },
+    {
+        id = "cooldown",
+        label = "Cooldowns",
+        title = "Cooldown Tracker",
+        summary = "Tracked buff and debuff icons for player, target, pet, watchtarget, and target of target."
     }
 }
 

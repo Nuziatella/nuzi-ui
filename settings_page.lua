@@ -19,20 +19,144 @@ local SettingsPage = {
     active_page = nil,
     nav = {},
     toggle_button = nil,
+    toggle_button_icon = nil,
     toggle_button_dragging = false,
     style_target = "all",
     _refreshing_style_target = false,
     cooldown_unit_key = "player",
+    cooldown_track_kind = "any",
     cooldown_buff_page = 1,
-    cooldown_scan_results = {}
+    cooldown_scan_results = {},
+    cooldown_search_results = {},
+    cooldown_search_query = "",
+    cooldown_search_cursor = 1,
+    cooldown_search_complete = false,
+    cooldown_buff_meta_cache = {}
 }
+
+local detectedAddonDir = nil
+
+local function NormalizePath(path)
+    return string.gsub(tostring(path or ""), "\\", "/")
+end
+
+local function FileExists(path)
+    if type(io) ~= "table" or type(io.open) ~= "function" then
+        return false
+    end
+    local file = nil
+    local ok = pcall(function()
+        file = io.open(path, "rb")
+    end)
+    if ok and file ~= nil then
+        pcall(function()
+            file:close()
+        end)
+        return true
+    end
+    return false
+end
+
+local function AddonDir()
+    if detectedAddonDir ~= nil then
+        return detectedAddonDir or nil
+    end
+    detectedAddonDir = false
+    if type(debug) == "table" and type(debug.getinfo) == "function" then
+        local info = debug.getinfo(1, "S")
+        local source = type(info) == "table" and tostring(info.source or "") or ""
+        if string.sub(source, 1, 1) == "@" then
+            source = NormalizePath(string.sub(source, 2))
+            local folder = string.match(source, "^(.*)/[^/]+$")
+            if type(folder) == "string" and folder ~= "" then
+                detectedAddonDir = folder
+                return folder
+            end
+        end
+    end
+    return nil
+end
+
+local function ResolveAssetPath(relativePath)
+    local rawRelative = NormalizePath(relativePath)
+    local strippedRelative = string.match(rawRelative, "^[^/]+/(.+)$") or rawRelative
+    local candidates = {}
+    local seen = {}
+    local function addCandidate(path)
+        path = NormalizePath(path)
+        if path == "" or seen[path] then
+            return
+        end
+        seen[path] = true
+        candidates[#candidates + 1] = path
+    end
+    local folder = AddonDir()
+    if folder ~= nil then
+        addCandidate(folder .. "/" .. strippedRelative)
+        addCandidate(folder .. "/" .. rawRelative)
+    end
+    local baseDir = NormalizePath(type(api) == "table" and type(api.baseDir) == "string" and api.baseDir or "")
+    if baseDir ~= "" then
+        addCandidate(baseDir .. "/" .. rawRelative)
+        addCandidate(baseDir .. "/" .. strippedRelative)
+    end
+    addCandidate(rawRelative)
+    addCandidate(strippedRelative)
+    for _, candidate in ipairs(candidates) do
+        if FileExists(candidate) then
+            return candidate
+        end
+    end
+    return candidates[1] or rawRelative
+end
+
+local function IsShiftDown()
+    if api ~= nil and api.Input ~= nil and api.Input.IsShiftKeyDown ~= nil then
+        local ok, down = pcall(function()
+            return api.Input:IsShiftKeyDown()
+        end)
+        if ok then
+            return down and true or false
+        end
+    end
+    return false
+end
+
+local function GetSettingsButtonSize()
+    local size = 48
+    if type(SettingsPage.settings) == "table" and type(SettingsPage.settings.settings_button) == "table" then
+        size = tonumber(SettingsPage.settings.settings_button.size) or size
+    end
+    size = math.floor(size + 0.5)
+    if size < 36 then
+        size = 36
+    elseif size > 96 then
+        size = 96
+    end
+    return size
+end
+
+local function ApplySettingsButtonLayout()
+    local size = GetSettingsButtonSize()
+    if SettingsPage.toggle_button ~= nil and SettingsPage.toggle_button.SetExtent ~= nil then
+        pcall(function()
+            SettingsPage.toggle_button:SetExtent(size, size)
+        end)
+    end
+    if SettingsPage.toggle_button_icon ~= nil and SettingsPage.toggle_button_icon.SetExtent ~= nil then
+        pcall(function()
+            SettingsPage.toggle_button_icon:SetExtent(size, size)
+        end)
+    end
+end
 
 local STYLE_TARGET_KEYS = {
     "all",
     "player",
     "target",
     "watchtarget",
-    "target_of_target"
+    "target_of_target",
+    "party"
 }
 
 local COOLDOWN_UNIT_KEYS = {
@@ -51,31 +175,87 @@ local COOLDOWN_UNIT_LABELS = {
     "Target of Target"
 }
 
+local COOLDOWN_DISPLAY_MODE_LABELS = {
+    "Active only",
+    "Missing only",
+    "Both"
+}
+
+local COOLDOWN_TRACK_KIND_LABELS = {
+    "Any",
+    "Buff",
+    "Debuff"
+}
+
 local COOLDOWN_BUFFS_PER_PAGE = 6
 local COOLDOWN_SCAN_ROWS = 10
+local COOLDOWN_SEARCH_ROWS = 8
+local COOLDOWN_SEARCH_BATCH = 1000
+local COOLDOWN_SEARCH_MAX_ID = 250000
 local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAGES) == "table" and SettingsCatalog.PAGES) or {
     { id = "general", label = "General", title = "General", summary = "Core addon toggles and shared runtime behavior." },
     { id = "text", label = "Text", title = "Text", summary = "Name, level, role, guild, and number formatting." },
     { id = "bars", label = "Bars", title = "Bars", summary = "Frame sizing, alpha, bar colors, textures, and value placement." },
     { id = "auras", label = "Auras", title = "Auras", summary = "Aura windows, icon layout, and buff or debuff anchor controls." },
-    { id = "plates", label = "Nameplates", title = "Nameplates", summary = "Visibility rules, offsets, colors, and runtime nameplate behavior." }
+    { id = "plates", label = "Nameplates", title = "Nameplates", summary = "Visibility rules, offsets, colors, and runtime nameplate behavior." },
+    { id = "cooldown", label = "Cooldowns", title = "Cooldown Tracker", summary = "Tracked buff and debuff icons for player, target, pet, watchtarget, and target of target." }
 }
 
 local ClampInt = SettingsCommon.ClampInt
 local FormatBuffId = SettingsCommon.FormatBuffId
+local PruneStyleFrameOverrides = SettingsCommon.PruneStyleFrameOverrides
+local NormalizeCooldownTrackKind = SettingsCommon.NormalizeCooldownTrackKind
+local NormalizeCooldownDisplayMode = SettingsCommon.NormalizeCooldownDisplayMode
+local NormalizeCooldownTrackedEntry = SettingsCommon.NormalizeCooldownTrackedEntry
+
+local function GetCooldownDisplayModeFromIndex(idx)
+    idx = tonumber(idx) or 1
+    if idx == 2 then
+        return "missing"
+    elseif idx == 3 then
+        return "both"
+    end
+    return "active"
+end
+
+local function GetCooldownDisplayModeIndex(mode)
+    mode = NormalizeCooldownDisplayMode(mode)
+    if mode == "missing" then
+        return 2
+    elseif mode == "both" then
+        return 3
+    end
+    return 1
+end
+
+local function GetCooldownTrackKindFromIndex(idx)
+    idx = tonumber(idx) or 1
+    if idx == 2 then
+        return "buff"
+    elseif idx == 3 then
+        return "debuff"
+    end
+    return "any"
+end
+
+local function GetCooldownTrackKindIndex(kind)
+    kind = NormalizeCooldownTrackKind(kind)
+    if kind == "buff" then
+        return 2
+    elseif kind == "debuff" then
+        return 3
+    end
+    return 1
+end
 
 local function ScanTargetEffects()
     local results = {}
+    local seen = {}
     SettingsPage.cooldown_scan_results = results
 
     if api == nil or api.Unit == nil then
         return
     end
-
-    local buff_helper = nil
-    pcall(function()
-        buff_helper = require("CooldawnBuffTracker/buff_helper")
-    end)
 
     local function getName(id, raw)
         local id_str = tostring(id or "")
@@ -103,18 +283,6 @@ local function ScanTargetEffects()
             end
         end
 
-        if type(buff_helper) == "table" and type(buff_helper.GetBuffName) == "function" then
-            local ok, n = pcall(function()
-                return buff_helper.GetBuffName(id_num or id_str)
-            end)
-            if ok and n ~= nil then
-                n = tostring(n)
-                if n ~= "" and n ~= id_str then
-                    return n
-                end
-            end
-        end
-
         if id_str ~= "" then
             return "Buff #" .. id_str
         end
@@ -129,6 +297,11 @@ local function ScanTargetEffects()
         if id == "" then
             return
         end
+        local seenKey = tostring(kind or "buff") .. ":" .. id
+        if seen[seenKey] then
+            return
+        end
+        seen[seenKey] = true
         table.insert(results, {
             kind = kind,
             id = id,
@@ -148,10 +321,23 @@ local function ScanTargetEffects()
     end)
     if not ok then
         SettingsPage.cooldown_scan_results = {}
+        return
     end
-end
 
-local EnsureDailiesTables = SettingsCommon.EnsureDailiesTables or SettingsCommon.EnsureDailyAgeTables
+    table.sort(results, function(a, b)
+        local kindA = tostring(a.kind or "buff")
+        local kindB = tostring(b.kind or "buff")
+        if kindA ~= kindB then
+            return kindA < kindB
+        end
+        local nameA = string.lower(tostring(a.name or ""))
+        local nameB = string.lower(tostring(b.name or ""))
+        if nameA ~= nameB then
+            return nameA < nameB
+        end
+        return tostring(a.id or "") < tostring(b.id or "")
+    end)
+end
 
 local function GetCooldownUnitKeyFromIndex(idx)
     return SettingsCommon.GetKeyFromIndex(COOLDOWN_UNIT_KEYS, idx)
@@ -247,6 +433,8 @@ local function ParseEditNumber(field)
     return n
 end
 
+local GetCooldownBuffMetaById
+
 local function RefreshCooldownBuffRows(unit_cfg)
     if SettingsPage.controls == nil then
         return
@@ -256,12 +444,12 @@ local function RefreshCooldownBuffRows(unit_cfg)
         return
     end
 
-    local buffs = type(unit_cfg) == "table" and unit_cfg.tracked_buffs or nil
-    if type(buffs) ~= "table" then
-        buffs = {}
+    local tracked = type(unit_cfg) == "table" and unit_cfg.tracked_buffs or nil
+    if type(tracked) ~= "table" then
+        tracked = {}
     end
 
-    local total = #buffs
+    local total = #tracked
     local pages = math.max(1, math.ceil(total / COOLDOWN_BUFFS_PER_PAGE))
     if SettingsPage.cooldown_buff_page < 1 then
         SettingsPage.cooldown_buff_page = 1
@@ -274,10 +462,26 @@ local function RefreshCooldownBuffRows(unit_cfg)
         local idx = start_idx + (i - 1)
         local row = rows[i]
         if type(row) == "table" then
-            local id = buffs[idx]
-            local show = id ~= nil
+            local rawEntry = tracked[idx]
+            local entry = NormalizeCooldownTrackedEntry(rawEntry)
+            local show = entry ~= nil
             if row.label ~= nil and row.label.SetText ~= nil then
-                row.label:SetText(show and tostring(id) or "")
+                if show then
+                    local meta = GetCooldownBuffMetaById(entry.id)
+                    local prefix = "[A]"
+                    if entry.kind == "buff" then
+                        prefix = "[B]"
+                    elseif entry.kind == "debuff" then
+                        prefix = "[D]"
+                    end
+                    local text = string.format("%s %s", prefix, tostring(entry.id))
+                    if type(meta) == "table" and tostring(meta.name or "") ~= "" then
+                        text = string.format("%s %s %s", prefix, tostring(entry.id), tostring(meta.name or ""))
+                    end
+                    row.label:SetText(text)
+                else
+                    row.label:SetText("")
+                end
             end
             if row.label ~= nil and row.label.Show ~= nil then
                 row.label:Show(show)
@@ -326,6 +530,8 @@ local function GetStyleTargetDisplayName(key)
         return "Watchtarget"
     elseif key == "target_of_target" then
         return "Target of Target"
+    elseif key == "party" then
+        return "Party"
     end
     return "All frames"
 end
@@ -340,6 +546,8 @@ local function GetStyleTargetKeyFromLabel(text)
         return "watchtarget"
     elseif value == "target of target" then
         return "target_of_target"
+    elseif value == "party" then
+        return "party"
     elseif value == "all frames" then
         return "all"
     end
@@ -399,7 +607,7 @@ local function UpdateStyleTargetHints()
     local targetLabel = GetStyleTargetDisplayName(SettingsPage.style_target)
     local summary = ""
     if SettingsPage.style_target == "all" then
-        summary = "Editing shared defaults for all overlay frames."
+        summary = "Editing shared defaults for all overlay and party frames."
     else
         summary = string.format("Editing only %s overrides. Unchanged values still inherit from All frames.", targetLabel)
     end
@@ -582,6 +790,221 @@ UpdateNavigationState = function(activePageId)
     end
 end
 
+GetCooldownBuffMetaById = function(rawId)
+    local id = tonumber(rawId)
+    if id == nil then
+        return nil
+    end
+    id = math.floor(id + 0.5)
+
+    if SettingsPage.cooldown_buff_meta_cache[id] ~= nil then
+        return SettingsPage.cooldown_buff_meta_cache[id] ~= false and SettingsPage.cooldown_buff_meta_cache[id] or nil
+    end
+
+    if api == nil or api.Ability == nil or type(api.Ability.GetBuffTooltip) ~= "function" then
+        SettingsPage.cooldown_buff_meta_cache[id] = false
+        return nil
+    end
+
+    local ok, tooltip = pcall(function()
+        return api.Ability:GetBuffTooltip(id, 1)
+    end)
+    if not ok or type(tooltip) ~= "table" then
+        SettingsPage.cooldown_buff_meta_cache[id] = false
+        return nil
+    end
+
+    local name = tostring(tooltip.name or tooltip.buffName or tooltip.title or "")
+    if name == "" then
+        SettingsPage.cooldown_buff_meta_cache[id] = false
+        return nil
+    end
+
+    local meta = {
+        id = FormatBuffId(id),
+        name = name
+    }
+    SettingsPage.cooldown_buff_meta_cache[id] = meta
+    return meta
+end
+
+local function AddCooldownTrackedBuffToSelectedUnit(rawId, rawKind)
+    if SettingsPage.settings == nil then
+        return false
+    end
+
+    local normalized = NormalizeCooldownTrackedEntry({
+        id = rawId,
+        kind = rawKind
+    })
+    if normalized == nil then
+        return false
+    end
+    local id = FormatBuffId(normalized.id)
+    local kind = normalized.kind
+
+    EnsureCooldownTrackerTables(SettingsPage.settings)
+    local unit_key = tostring(SettingsPage.cooldown_unit_key or "player")
+    local tracker = SettingsPage.settings.cooldown_tracker
+    local unit_cfg = type(tracker) == "table" and type(tracker.units) == "table" and tracker.units[unit_key] or nil
+    if type(unit_cfg) ~= "table" or type(unit_cfg.tracked_buffs) ~= "table" then
+        return false
+    end
+
+    for _, v in ipairs(unit_cfg.tracked_buffs) do
+        local existing = NormalizeCooldownTrackedEntry(v)
+        if existing ~= nil and FormatBuffId(existing.id) == id and existing.kind == kind then
+            return false
+        end
+    end
+
+    table.insert(unit_cfg.tracked_buffs, {
+        id = normalized.id,
+        kind = kind
+    })
+    if type(SettingsPage.on_apply) == "function" then
+        pcall(function()
+            SettingsPage.on_apply()
+        end)
+    end
+    return true
+end
+
+local function RefreshCooldownSearchRows()
+    if SettingsPage.controls == nil then
+        return
+    end
+
+    local rows = SettingsPage.controls.ct_search_rows
+    if type(rows) ~= "table" then
+        return
+    end
+
+    local results = type(SettingsPage.cooldown_search_results) == "table" and SettingsPage.cooldown_search_results or {}
+    local query = tostring(SettingsPage.cooldown_search_query or "")
+    if SettingsPage.controls.ct_search_status ~= nil and SettingsPage.controls.ct_search_status.SetText ~= nil then
+        local status = ""
+        if query ~= "" then
+            if #results > 0 then
+                if SettingsPage.cooldown_search_complete then
+                    status = string.format("Found %d match(es)", #results)
+                else
+                    status = string.format("Found %d match(es), scanned to #%d", #results, math.max(0, (tonumber(SettingsPage.cooldown_search_cursor) or 1) - 1))
+                end
+            elseif SettingsPage.cooldown_search_complete then
+                status = "No matches found"
+            else
+                status = string.format("No matches yet, scanned to #%d", math.max(0, (tonumber(SettingsPage.cooldown_search_cursor) or 1) - 1))
+            end
+        end
+        SettingsPage.controls.ct_search_status:SetText(status)
+    end
+
+    for i, row in ipairs(rows) do
+        local entry = results[i]
+        local show = type(entry) == "table"
+        if type(row) == "table" then
+            if row.label ~= nil and row.label.SetText ~= nil then
+                if show then
+                    row.label:SetText(string.format("%s %s", tostring(entry.id or ""), tostring(entry.name or "")))
+                else
+                    row.label:SetText("")
+                end
+            end
+            if row.label ~= nil and row.label.Show ~= nil then
+                row.label:Show(show)
+            end
+            if row.add ~= nil and row.add.Show ~= nil then
+                row.add:Show(show)
+            end
+            if row.add ~= nil then
+                row.add.__polar_search_id = show and tostring(entry.id or "") or nil
+            end
+        end
+    end
+
+    if SettingsPage.controls.ct_search_more ~= nil and SettingsPage.controls.ct_search_more.Show ~= nil then
+        SettingsPage.controls.ct_search_more:Show(query ~= "" and not SettingsPage.cooldown_search_complete)
+    end
+end
+
+local function RunCooldownBuffSearch(loadMore)
+    local query = string.lower(tostring(GetEditText(SettingsPage.controls.ct_search_text) or ""))
+    query = string.match(query, "^%s*(.-)%s*$") or query
+
+    if query == "" then
+        SettingsPage.cooldown_search_query = ""
+        SettingsPage.cooldown_search_results = {}
+        SettingsPage.cooldown_search_cursor = 1
+        SettingsPage.cooldown_search_complete = false
+        RefreshCooldownSearchRows()
+        return
+    end
+
+    local continuing = loadMore and query == tostring(SettingsPage.cooldown_search_query or "")
+    if not continuing then
+        SettingsPage.cooldown_search_query = query
+        SettingsPage.cooldown_search_results = {}
+        SettingsPage.cooldown_search_cursor = 1
+        SettingsPage.cooldown_search_complete = false
+    end
+
+    local results = SettingsPage.cooldown_search_results
+    local seen = {}
+    for _, entry in ipairs(results) do
+        if type(entry) == "table" then
+            seen[tostring(entry.id or "")] = true
+        end
+    end
+
+    local numericQuery = tonumber(query)
+    if numericQuery ~= nil and not continuing then
+        local meta = GetCooldownBuffMetaById(numericQuery)
+        if meta ~= nil then
+            local id = tostring(meta.id or "")
+            if id ~= "" and not seen[id] then
+                table.insert(results, {
+                    id = id,
+                    name = tostring(meta.name or "")
+                })
+                seen[id] = true
+            end
+        end
+    end
+
+    local scanned = 0
+    local cursor = tonumber(SettingsPage.cooldown_search_cursor) or 1
+    if cursor < 1 then
+        cursor = 1
+    end
+
+    while cursor <= COOLDOWN_SEARCH_MAX_ID and #results < COOLDOWN_SEARCH_ROWS and scanned < COOLDOWN_SEARCH_BATCH do
+        local meta = GetCooldownBuffMetaById(cursor)
+        if meta ~= nil then
+            local id = tostring(meta.id or "")
+            local name = string.lower(tostring(meta.name or ""))
+            if id ~= "" and not seen[id] and string.find(name, query, 1, true) ~= nil then
+                table.insert(results, {
+                    id = id,
+                    name = tostring(meta.name or "")
+                })
+                seen[id] = true
+            end
+        end
+        cursor = cursor + 1
+        scanned = scanned + 1
+    end
+
+    SettingsPage.cooldown_search_cursor = cursor
+    if cursor > COOLDOWN_SEARCH_MAX_ID or #results >= COOLDOWN_SEARCH_ROWS then
+        SettingsPage.cooldown_search_complete = cursor > COOLDOWN_SEARCH_MAX_ID
+    else
+        SettingsPage.cooldown_search_complete = false
+    end
+
+    RefreshCooldownSearchRows()
+end
+
 local function RestoreSettingsButtonPos(widget)
     if widget == nil then
         return
@@ -606,19 +1029,29 @@ local function RestoreSettingsButtonPos(widget)
             widget:AddAnchor("TOPLEFT", "UIParent", x, y)
         end
     end)
+    ApplySettingsButtonLayout()
 end
 
 local function SaveSettingsButtonPos(widget)
-    if widget == nil or widget.GetOffset == nil then
+    if widget == nil then
         return
     end
     if SettingsPage.settings == nil or type(SettingsPage.settings) ~= "table" then
         return
     end
 
-    local ok, x, y = pcall(function()
-        return widget:GetOffset()
-    end)
+    local ok = false
+    local x, y = nil, nil
+    if widget.GetEffectiveOffset ~= nil then
+        ok, x, y = pcall(function()
+            return widget:GetEffectiveOffset()
+        end)
+    end
+    if (not ok or x == nil or y == nil) and widget.GetOffset ~= nil then
+        ok, x, y = pcall(function()
+            return widget:GetOffset()
+        end)
+    end
     if not ok then
         return
     end
@@ -634,6 +1067,7 @@ local function SaveSettingsButtonPos(widget)
     end
     SettingsPage.settings.settings_button.x = x
     SettingsPage.settings.settings_button.y = y
+    SettingsPage.settings.settings_button.size = GetSettingsButtonSize()
 
     if type(SettingsPage.on_save) == "function" then
         pcall(function()
@@ -649,27 +1083,42 @@ local function EnsureSettingsButton()
 
     local btn = nil
     pcall(function()
-        btn = api.Interface:CreateWidget("button", "polarUiSettingsToggleBtn", api.rootWindow)
+        if api.Interface ~= nil and api.Interface.CreateEmptyWindow ~= nil then
+            btn = api.Interface:CreateEmptyWindow("polarUiSettingsToggleBtn", "UIParent")
+        elseif api.Interface ~= nil and api.Interface.CreateWidget ~= nil then
+            btn = api.Interface:CreateWidget("button", "polarUiSettingsToggleBtn", api.rootWindow)
+        end
     end)
     if btn == nil then
         return
     end
 
     SettingsPage.toggle_button = btn
+    SettingsPage.toggle_button_icon = nil
     SettingsPage.toggle_button_dragging = false
 
     pcall(function()
         if btn.SetText ~= nil then
-            btn:SetText("NUI")
+            btn:SetText("")
         end
-        if api.Interface ~= nil and api.Interface.ApplyButtonSkin ~= nil and BUTTON_BASIC ~= nil then
-            api.Interface:ApplyButtonSkin(btn, BUTTON_BASIC.DEFAULT)
-        end
-        if btn.SetExtent ~= nil then
-            btn:SetExtent(40, 26)
+        if btn.SetUILayer ~= nil then
+            btn:SetUILayer("game")
         end
         if btn.Show ~= nil then
             btn:Show(true)
+        end
+    end)
+
+    pcall(function()
+        if btn.CreateImageDrawable ~= nil then
+            local icon = btn:CreateImageDrawable("polarUiSettingsToggleBtnIcon", "artwork")
+            if icon ~= nil then
+                icon:SetTexture(ResolveAssetPath("nuzi-ui/icon.png"))
+                icon:AddAnchor("TOPLEFT", btn, 0, 0)
+                icon:SetExtent(GetSettingsButtonSize(), GetSettingsButtonSize())
+                icon:Show(true)
+                SettingsPage.toggle_button_icon = icon
+            end
         end
     end)
 
@@ -677,6 +1126,9 @@ local function EnsureSettingsButton()
 
     if btn.SetHandler ~= nil then
         btn:SetHandler("OnDragStart", function(self)
+            if type(SettingsPage.settings) == "table" and SettingsPage.settings.drag_requires_shift ~= false and not IsShiftDown() then
+                return
+            end
             SettingsPage.toggle_button_dragging = true
             if self.StartMoving ~= nil then
                 self:StartMoving()
@@ -787,6 +1239,12 @@ local function RefreshControls()
         SettingsPage.controls.alignment_grid_enabled:SetChecked(s.alignment_grid_enabled and true or false)
     end
 
+    if SettingsPage.controls.launcher_size ~= nil then
+        local size = GetSettingsButtonSize()
+        refreshSlider(SettingsPage.controls.launcher_size, SettingsPage.controls.launcher_size_val, size)
+        ApplySettingsButtonLayout()
+    end
+
     if SettingsPage.controls.frame_alpha ~= nil then
         local fa = nil
         if type(displayStyle) == "table" then
@@ -868,7 +1326,6 @@ local function RefreshControls()
         end
         refreshSlider(SettingsPage.controls.bar_gap, SettingsPage.controls.bar_gap_val, gap)
     end
-
     if type(s.nameplates) == "table" then
         if SettingsPage.controls.plates_enabled ~= nil then
             SettingsPage.controls.plates_enabled:SetChecked(s.nameplates.enabled and true or false)
@@ -1259,6 +1716,98 @@ local function RefreshControls()
         end
     end
 
+    EnsureCooldownTrackerTables(s)
+    local tracker = type(s.cooldown_tracker) == "table" and s.cooldown_tracker or nil
+    local trackerUnits = tracker ~= nil and type(tracker.units) == "table" and tracker.units or {}
+    local selectedUnitKey = tostring(SettingsPage.cooldown_unit_key or "player")
+    local selectedUnitCfg = type(trackerUnits[selectedUnitKey]) == "table" and trackerUnits[selectedUnitKey] or {}
+
+    if SettingsPage.controls.ct_enabled ~= nil then
+        SettingsPage.controls.ct_enabled:SetChecked(tracker ~= nil and tracker.enabled == true)
+    end
+    if SettingsPage.controls.ct_update_interval ~= nil then
+        refreshSlider(
+            SettingsPage.controls.ct_update_interval,
+            SettingsPage.controls.ct_update_interval_val,
+            tracker ~= nil and (tonumber(tracker.update_interval_ms) or 50) or 50
+        )
+    end
+    if SettingsPage.controls.ct_unit ~= nil then
+        SetComboBoxIndex1Based(SettingsPage.controls.ct_unit, GetCooldownUnitIndexFromKey(selectedUnitKey))
+    end
+    if SettingsPage.controls.ct_display_mode ~= nil then
+        SetComboBoxIndex1Based(SettingsPage.controls.ct_display_mode, GetCooldownDisplayModeIndex(selectedUnitCfg.display_mode))
+    end
+    if SettingsPage.controls.ct_track_kind ~= nil then
+        SetComboBoxIndex1Based(SettingsPage.controls.ct_track_kind, GetCooldownTrackKindIndex(SettingsPage.cooldown_track_kind))
+    end
+    if SettingsPage.controls.ct_position_hint ~= nil and SettingsPage.controls.ct_position_hint.SetText ~= nil then
+        if selectedUnitKey == "player" then
+            SettingsPage.controls.ct_position_hint:SetText("Player uses an absolute screen position.")
+        else
+            SettingsPage.controls.ct_position_hint:SetText("These values are offsets from the unit's overhead nameplate.")
+        end
+    end
+    if SettingsPage.controls.ct_unit_enabled ~= nil then
+        SettingsPage.controls.ct_unit_enabled:SetChecked(selectedUnitCfg.enabled == true)
+    end
+    if SettingsPage.controls.ct_lock_position ~= nil then
+        SettingsPage.controls.ct_lock_position:SetChecked(selectedUnitCfg.lock_position == true)
+    end
+    if SettingsPage.controls.ct_pos_x ~= nil and SettingsPage.controls.ct_pos_x.SetText ~= nil then
+        SettingsPage.controls.ct_pos_x:SetText(tostring(ClampInt(selectedUnitCfg.pos_x, -5000, 5000, 330)))
+    end
+    if SettingsPage.controls.ct_pos_y ~= nil and SettingsPage.controls.ct_pos_y.SetText ~= nil then
+        SettingsPage.controls.ct_pos_y:SetText(tostring(ClampInt(selectedUnitCfg.pos_y, -5000, 5000, 100)))
+    end
+    if SettingsPage.controls.ct_icon_size ~= nil then
+        refreshSlider(SettingsPage.controls.ct_icon_size, SettingsPage.controls.ct_icon_size_val, tonumber(selectedUnitCfg.icon_size) or 40)
+    end
+    if SettingsPage.controls.ct_icon_spacing ~= nil then
+        refreshSlider(SettingsPage.controls.ct_icon_spacing, SettingsPage.controls.ct_icon_spacing_val, tonumber(selectedUnitCfg.icon_spacing) or 5)
+    end
+    if SettingsPage.controls.ct_max_icons ~= nil then
+        refreshSlider(SettingsPage.controls.ct_max_icons, SettingsPage.controls.ct_max_icons_val, tonumber(selectedUnitCfg.max_icons) or 10)
+    end
+    if SettingsPage.controls.ct_show_timer ~= nil then
+        SettingsPage.controls.ct_show_timer:SetChecked(selectedUnitCfg.show_timer ~= false)
+    end
+    if SettingsPage.controls.ct_timer_fs ~= nil then
+        refreshSlider(SettingsPage.controls.ct_timer_fs, SettingsPage.controls.ct_timer_fs_val, tonumber(selectedUnitCfg.timer_font_size) or 16)
+    end
+    local timerColor = type(selectedUnitCfg.timer_color) == "table" and selectedUnitCfg.timer_color or { 255, 255, 255, 255 }
+    if SettingsPage.controls.ct_timer_r ~= nil then
+        refreshSlider(SettingsPage.controls.ct_timer_r, SettingsPage.controls.ct_timer_r_val, tonumber(timerColor[1]) or 255)
+    end
+    if SettingsPage.controls.ct_timer_g ~= nil then
+        refreshSlider(SettingsPage.controls.ct_timer_g, SettingsPage.controls.ct_timer_g_val, tonumber(timerColor[2]) or 255)
+    end
+    if SettingsPage.controls.ct_timer_b ~= nil then
+        refreshSlider(SettingsPage.controls.ct_timer_b, SettingsPage.controls.ct_timer_b_val, tonumber(timerColor[3]) or 255)
+    end
+    if SettingsPage.controls.ct_show_label ~= nil then
+        SettingsPage.controls.ct_show_label:SetChecked(selectedUnitCfg.show_label == true)
+    end
+    if SettingsPage.controls.ct_label_fs ~= nil then
+        refreshSlider(SettingsPage.controls.ct_label_fs, SettingsPage.controls.ct_label_fs_val, tonumber(selectedUnitCfg.label_font_size) or 14)
+    end
+    local labelColor = type(selectedUnitCfg.label_color) == "table" and selectedUnitCfg.label_color or { 255, 255, 255, 255 }
+    if SettingsPage.controls.ct_label_r ~= nil then
+        refreshSlider(SettingsPage.controls.ct_label_r, SettingsPage.controls.ct_label_r_val, tonumber(labelColor[1]) or 255)
+    end
+    if SettingsPage.controls.ct_label_g ~= nil then
+        refreshSlider(SettingsPage.controls.ct_label_g, SettingsPage.controls.ct_label_g_val, tonumber(labelColor[2]) or 255)
+    end
+    if SettingsPage.controls.ct_label_b ~= nil then
+        refreshSlider(SettingsPage.controls.ct_label_b, SettingsPage.controls.ct_label_b_val, tonumber(labelColor[3]) or 255)
+    end
+    if SettingsPage.controls.ct_cache_timeout ~= nil then
+        refreshSlider(SettingsPage.controls.ct_cache_timeout, SettingsPage.controls.ct_cache_timeout_val, tonumber(selectedUnitCfg.cache_timeout_s) or 300)
+    end
+    RefreshCooldownSearchRows()
+    RefreshCooldownBuffRows(selectedUnitCfg)
+    RefreshCooldownScanRows()
+
 end
 
 local function ApplyControlsToSettings()
@@ -1270,6 +1819,14 @@ local function ApplyControlsToSettings()
 
     if SettingsPage.controls.alignment_grid_enabled ~= nil then
         s.alignment_grid_enabled = SettingsPage.controls.alignment_grid_enabled:GetChecked() and true or false
+    end
+
+    if SettingsPage.controls.launcher_size ~= nil then
+        if type(s.settings_button) ~= "table" then
+            s.settings_button = {}
+        end
+        s.settings_button.size = GetSliderValue(SettingsPage.controls.launcher_size)
+        ApplySettingsButtonLayout()
     end
 
     EnsureStyleFrames(s)
@@ -1393,7 +1950,6 @@ local function ApplyControlsToSettings()
     if SettingsPage.controls.bar_gap ~= nil then
         editStyle.bar_gap = GetSliderValue(SettingsPage.controls.bar_gap)
     end
-
     if SettingsPage.controls.name_visible ~= nil then
         editStyle.name_visible = SettingsPage.controls.name_visible:GetChecked() and true or false
     end
@@ -1674,6 +2230,85 @@ local function ApplyControlsToSettings()
         s.style.aura.sort_vertical = SettingsPage.controls.aura_sort_vertical:GetChecked() and true or false
     end
 
+    EnsureCooldownTrackerTables(s)
+    local tracker = s.cooldown_tracker
+    if SettingsPage.controls.ct_enabled ~= nil then
+        tracker.enabled = SettingsPage.controls.ct_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.ct_update_interval ~= nil then
+        tracker.update_interval_ms = GetSliderValue(SettingsPage.controls.ct_update_interval)
+    end
+
+    local selectedUnitKey = tostring(SettingsPage.cooldown_unit_key or "player")
+    local selectedUnitCfg = tracker.units[selectedUnitKey]
+    if type(selectedUnitCfg) ~= "table" then
+        tracker.units[selectedUnitKey] = {}
+        selectedUnitCfg = tracker.units[selectedUnitKey]
+    end
+
+    if SettingsPage.controls.ct_unit_enabled ~= nil then
+        selectedUnitCfg.enabled = SettingsPage.controls.ct_unit_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.ct_lock_position ~= nil then
+        selectedUnitCfg.lock_position = SettingsPage.controls.ct_lock_position:GetChecked() and true or false
+    end
+    if SettingsPage.controls.ct_display_mode ~= nil then
+        local idx = GetComboBoxIndex1Based(SettingsPage.controls.ct_display_mode, #COOLDOWN_DISPLAY_MODE_LABELS)
+        selectedUnitCfg.display_mode = GetCooldownDisplayModeFromIndex(idx)
+    end
+    if SettingsPage.controls.ct_pos_x ~= nil then
+        local x = ParseEditNumber(SettingsPage.controls.ct_pos_x)
+        if x ~= nil then
+            selectedUnitCfg.pos_x = ClampInt(x, -5000, 5000, 330)
+        end
+    end
+    if SettingsPage.controls.ct_pos_y ~= nil then
+        local y = ParseEditNumber(SettingsPage.controls.ct_pos_y)
+        if y ~= nil then
+            selectedUnitCfg.pos_y = ClampInt(y, -5000, 5000, 100)
+        end
+    end
+    if SettingsPage.controls.ct_icon_size ~= nil then
+        selectedUnitCfg.icon_size = GetSliderValue(SettingsPage.controls.ct_icon_size)
+    end
+    if SettingsPage.controls.ct_icon_spacing ~= nil then
+        selectedUnitCfg.icon_spacing = GetSliderValue(SettingsPage.controls.ct_icon_spacing)
+    end
+    if SettingsPage.controls.ct_max_icons ~= nil then
+        selectedUnitCfg.max_icons = GetSliderValue(SettingsPage.controls.ct_max_icons)
+    end
+    if SettingsPage.controls.ct_show_timer ~= nil then
+        selectedUnitCfg.show_timer = SettingsPage.controls.ct_show_timer:GetChecked() and true or false
+    end
+    if SettingsPage.controls.ct_timer_fs ~= nil then
+        selectedUnitCfg.timer_font_size = GetSliderValue(SettingsPage.controls.ct_timer_fs)
+    end
+    if SettingsPage.controls.ct_timer_r ~= nil and SettingsPage.controls.ct_timer_g ~= nil and SettingsPage.controls.ct_timer_b ~= nil then
+        selectedUnitCfg.timer_color = colorTable(
+            GetSliderValue(SettingsPage.controls.ct_timer_r),
+            GetSliderValue(SettingsPage.controls.ct_timer_g),
+            GetSliderValue(SettingsPage.controls.ct_timer_b),
+            255
+        )
+    end
+    if SettingsPage.controls.ct_show_label ~= nil then
+        selectedUnitCfg.show_label = SettingsPage.controls.ct_show_label:GetChecked() and true or false
+    end
+    if SettingsPage.controls.ct_label_fs ~= nil then
+        selectedUnitCfg.label_font_size = GetSliderValue(SettingsPage.controls.ct_label_fs)
+    end
+    if SettingsPage.controls.ct_label_r ~= nil and SettingsPage.controls.ct_label_g ~= nil and SettingsPage.controls.ct_label_b ~= nil then
+        selectedUnitCfg.label_color = colorTable(
+            GetSliderValue(SettingsPage.controls.ct_label_r),
+            GetSliderValue(SettingsPage.controls.ct_label_g),
+            GetSliderValue(SettingsPage.controls.ct_label_b),
+            255
+        )
+    end
+    if SettingsPage.controls.ct_cache_timeout ~= nil then
+        selectedUnitCfg.cache_timeout_s = GetSliderValue(SettingsPage.controls.ct_cache_timeout)
+    end
+
     if SettingsPage.controls.value_fmt_curmax ~= nil and SettingsPage.controls.value_fmt_percent ~= nil then
         local wantCurMax = SettingsPage.controls.value_fmt_curmax:GetChecked() and true or false
         local wantPercent = SettingsPage.controls.value_fmt_percent:GetChecked() and true or false
@@ -1690,6 +2325,10 @@ local function ApplyControlsToSettings()
 
     if SettingsPage.controls.short_numbers ~= nil then
         editStyle.short_numbers = SettingsPage.controls.short_numbers:GetChecked() and true or false
+    end
+
+    if SettingsPage.style_target == "all" and type(PruneStyleFrameOverrides) == "function" then
+        PruneStyleFrameOverrides(s, { "player", "target", "watchtarget", "target_of_target", "party" })
     end
 
 end
@@ -1890,786 +2529,21 @@ local function EnsureWindow()
         )
         y = y + gap
 
+        SettingsPage.controls.launcher_size, SettingsPage.controls.launcher_size_val = CreateSlider(
+            "polarUiLauncherSize",
+            page,
+            "Launcher size",
+            15,
+            y,
+            36,
+            96,
+            1
+        )
+        y = y + 34
+
         SettingsPage.page_heights.general = y + 40
     end
 
-    do
-        local quests = {}
-
-        local function safeGetQuestTitle(id)
-            local id_num = tonumber(id)
-            if id_num == nil then
-                return tostring(id)
-            end
-            local title = nil
-            pcall(function()
-                if api ~= nil and api.Quest ~= nil and api.Quest.GetQuestContextMainTitle ~= nil then
-                    title = api.Quest:GetQuestContextMainTitle(id_num)
-                end
-            end)
-            if type(title) == "string" and title ~= "" then
-                return title
-            end
-            return tostring(id_num)
-        end
-
-        local function isQuestCompleted(id)
-            local id_num = tonumber(id)
-            if id_num == nil then
-                return false
-            end
-            if api == nil or api.Quest == nil or api.Quest.IsCompleted == nil then
-                return false
-            end
-            local ok, done = pcall(function()
-                return api.Quest:IsCompleted(id_num)
-            end)
-            if ok then
-                return done and true or false
-            end
-            return false
-        end
-
-        local function buildQuestEntries()
-            local out = {}
-            if type(quests) == "table" then
-                for _, ids in ipairs(quests) do
-                    if type(ids) == "table" and ids[1] ~= nil then
-                        local id_num = tonumber(ids[1])
-                        if id_num ~= nil then
-                            table.insert(out, { id = id_num, title = safeGetQuestTitle(id_num) })
-                        end
-                    end
-                end
-            end
-            table.insert(out, { id = 9000009, title = safeGetQuestTitle(9000009) })
-            table.insert(out, { id = 9000011, title = safeGetQuestTitle(9000011) })
-            return out
-        end
-
-        local function getDailyAgeSearchText()
-            return tostring(SettingsPage.dailyage_search_text or "")
-        end
-
-        local function setDailyAgeSearchText(v)
-            SettingsPage.dailyage_search_text = tostring(v or "")
-        end
-
-        local renderDailyAgeManagerRows = nil
-
-        local function cloneDailyAgeHidden(hidden)
-            local out = {}
-            if type(hidden) ~= "table" then
-                return out
-            end
-            for k, v in pairs(hidden) do
-                local id = tonumber(k)
-                if id ~= nil and v then
-                    out[tostring(math.floor(id + 0.5))] = true
-                end
-            end
-            return out
-        end
-
-        local function beginDailyAgeEditSession()
-            if SettingsPage.settings == nil then
-                SettingsPage.dailyage_pending_hidden = {}
-                return SettingsPage.dailyage_pending_hidden
-            end
-            EnsureDailiesTables(SettingsPage.settings)
-            SettingsPage.dailyage_pending_hidden = cloneDailyAgeHidden(SettingsPage.settings.dailies.hidden)
-            return SettingsPage.dailyage_pending_hidden
-        end
-
-        local function getDailyAgeWorkingHidden()
-            if type(SettingsPage.dailyage_pending_hidden) == "table" then
-                return SettingsPage.dailyage_pending_hidden
-            end
-            if SettingsPage.settings == nil then
-                return {}
-            end
-            EnsureDailiesTables(SettingsPage.settings)
-            return SettingsPage.settings.dailies.hidden
-        end
-
-        local function updateDailyAgeStatus(hidden)
-            local totalCount = 0
-            if type(SettingsPage.dailyage_entries) == "table" then
-                totalCount = #SettingsPage.dailyage_entries
-            end
-            local hiddenCount = 0
-            for _, v in pairs(hidden or {}) do
-                if v then
-                    hiddenCount = hiddenCount + 1
-                end
-            end
-            local shownCount = totalCount - hiddenCount
-            if shownCount < 0 then
-                shownCount = 0
-            end
-            local statusText = string.format("Shown: %d / %d  (Hidden: %d)", shownCount, totalCount, hiddenCount)
-            if SettingsPage.controls.dailyage_status ~= nil and SettingsPage.controls.dailyage_status.SetText ~= nil then
-                SettingsPage.controls.dailyage_status:SetText(statusText)
-            end
-            if SettingsPage.controls.dailyage_mgr_status ~= nil and SettingsPage.controls.dailyage_mgr_status.SetText ~= nil then
-                SettingsPage.controls.dailyage_mgr_status:SetText(statusText)
-            end
-        end
-
-        local function getDailyAgeManagerScrollValue()
-            local scrollFrame = SettingsPage.controls.dailyage_mgr_scroll_frame
-            if scrollFrame == nil then
-                return 0
-            end
-            local value = tonumber(scrollFrame.__polar_scroll_value) or 0
-            pcall(function()
-                if scrollFrame.scroll ~= nil and scrollFrame.scroll.vs ~= nil and scrollFrame.scroll.vs.GetValue ~= nil then
-                    local liveValue = scrollFrame.scroll.vs:GetValue()
-                    if type(liveValue) == "number" then
-                        value = liveValue
-                    end
-                end
-            end)
-            if value < 0 then
-                value = 0
-            end
-            return value
-        end
-
-        local function refreshDailyAgeList(preserveScrollValue)
-            if SettingsPage.settings == nil then
-                return
-            end
-            EnsureDailiesTables(SettingsPage.settings)
-            local hidden = getDailyAgeWorkingHidden()
-            if type(hidden) ~= "table" then
-                hidden = {}
-                if type(SettingsPage.dailyage_pending_hidden) == "table" then
-                    SettingsPage.dailyage_pending_hidden = hidden
-                else
-                    SettingsPage.settings.dailies.hidden = hidden
-                end
-            end
-
-            if SettingsPage.dailyage_entries == nil then
-                SettingsPage.dailyage_entries = buildQuestEntries()
-            end
-
-            local search = string.lower(getDailyAgeSearchText())
-            local haveSearch = search ~= "" and #search > 2
-
-            local items = {}
-            for _, e in ipairs(SettingsPage.dailyage_entries) do
-                local id_key = tostring(e.id)
-                local isHidden = hidden[id_key] and true or false
-                local completed = isQuestCompleted(e.id)
-
-                local show = true
-                if haveSearch then
-                    local t = string.lower(tostring(e.title or ""))
-                    if string.find(t, search, 1, true) == nil then
-                        show = false
-                    end
-                end
-
-                if show then
-                    items[#items + 1] = {
-                        id = e.id,
-                        title = tostring(e.title or ""),
-                        hidden = isHidden,
-                        completed = completed,
-                    }
-                end
-            end
-
-            local desiredScrollValue = tonumber(preserveScrollValue)
-            if desiredScrollValue == nil then
-                desiredScrollValue = getDailyAgeManagerScrollValue()
-            end
-            local scrollFrame = SettingsPage.controls.dailyage_mgr_scroll_frame
-            if scrollFrame ~= nil then
-                scrollFrame.__polar_scroll_value = desiredScrollValue
-            end
-
-            if type(renderDailyAgeManagerRows) == "function" then
-                pcall(function()
-                    renderDailyAgeManagerRows(items)
-                end)
-            end
-
-            updateDailyAgeStatus(hidden)
-        end
-
-        local function setDailyAgeShown(id, shown)
-            if SettingsPage.settings == nil then
-                return
-            end
-            local key = tonumber(id)
-            if key == nil then
-                return
-            end
-            local hidden = getDailyAgeWorkingHidden()
-            if type(hidden) ~= "table" then
-                hidden = beginDailyAgeEditSession()
-            end
-
-            local hiddenKey = tostring(math.floor(key + 0.5))
-            if shown then
-                hidden[hiddenKey] = nil
-            else
-                hidden[hiddenKey] = true
-            end
-            SettingsPage.dailyage_pending_hidden = hidden
-            updateDailyAgeStatus(hidden)
-        end
-
-        local function EnsureDailyAgeManagerWindow()
-            if SettingsPage.controls.dailyage_mgr_window ~= nil then
-                return SettingsPage.controls.dailyage_mgr_window
-            end
-
-            if api == nil or api.Interface == nil or api.Interface.CreateWindow == nil then
-                return nil
-            end
-
-            local ok, wnd = pcall(function()
-                return api.Interface:CreateWindow("polarUiDailyAgeManagerWindow", "Dailies", 560, 720)
-            end)
-            if not ok then
-                return nil
-            end
-
-            SettingsPage.controls.dailyage_mgr_window = wnd
-
-            local function closeHandler()
-                SettingsPage.dailyage_pending_hidden = nil
-                refreshDailyAgeList()
-                if wnd ~= nil and wnd.Show ~= nil then
-                    wnd:Show(false)
-                end
-            end
-
-            pcall(function()
-                if wnd.AddAnchor ~= nil then
-                    wnd:AddAnchor("CENTER", "UIParent", 0, 0)
-                end
-                if wnd.Show ~= nil then
-                    wnd:Show(false)
-                end
-                if wnd.SetHandler ~= nil then
-                    wnd:SetHandler("OnCloseByEsc", closeHandler)
-                end
-                function wnd:OnClose()
-                    closeHandler()
-                end
-            end)
-
-            local y = 18
-            local showAllBtn = CreateButton("polarUiDailyAgeMgrShowAll", wnd, "Show all", 15, y)
-            if showAllBtn ~= nil and showAllBtn.SetHandler ~= nil then
-                showAllBtn:SetHandler("OnClick", function()
-                    if SettingsPage.settings == nil then
-                        return
-                    end
-                    local hidden = getDailyAgeWorkingHidden()
-                    if type(hidden) ~= "table" then
-                        hidden = beginDailyAgeEditSession()
-                    end
-                    for k in pairs(hidden) do
-                        hidden[k] = nil
-                    end
-                    SettingsPage.dailyage_pending_hidden = hidden
-                    local preserveScrollValue = getDailyAgeManagerScrollValue()
-                    refreshDailyAgeList(preserveScrollValue)
-                end)
-            end
-
-            local applyBtn = CreateButton("polarUiDailyAgeMgrApply", wnd, "Apply", 115, y)
-            if applyBtn ~= nil and applyBtn.SetHandler ~= nil then
-                applyBtn:SetHandler("OnClick", function()
-                    if SettingsPage.settings == nil then
-                        return
-                    end
-                    EnsureDailiesTables(SettingsPage.settings)
-                    local preserveScrollValue = getDailyAgeManagerScrollValue()
-                    SettingsPage.settings.dailies.hidden = cloneDailyAgeHidden(getDailyAgeWorkingHidden())
-                    SettingsPage.dailyage_pending_hidden = cloneDailyAgeHidden(SettingsPage.settings.dailies.hidden)
-                    refreshDailyAgeList(preserveScrollValue)
-                    if type(SettingsPage.on_save) == "function" then
-                        pcall(function()
-                            SettingsPage.on_save()
-                        end)
-                    end
-                end)
-            end
-
-            SettingsPage.controls.dailyage_mgr_status = api.Interface:CreateWidget("label", "polarUiDailyAgeMgrStatus", wnd)
-            pcall(function()
-                SettingsPage.controls.dailyage_mgr_status:AddAnchor("TOPLEFT", wnd, 225, y + 6)
-                SettingsPage.controls.dailyage_mgr_status:SetExtent(305, 18)
-                SettingsPage.controls.dailyage_mgr_status:SetText("")
-                if SettingsPage.controls.dailyage_mgr_status.style ~= nil then
-                    SettingsPage.controls.dailyage_mgr_status.style:SetFontSize(13)
-                    SettingsPage.controls.dailyage_mgr_status.style:SetAlign(ALIGN.LEFT)
-                end
-            end)
-
-            y = y + 38
-
-            local searchEdit = CreateEdit("polarUiDailyAgeMgrSearch", wnd, "", 15, y, 250, 24)
-            SettingsPage.controls.dailyage_mgr_search = searchEdit
-            if searchEdit ~= nil and searchEdit.SetHandler ~= nil then
-                searchEdit:SetHandler("OnTextChanged", function()
-                    local txt = GetEditText(searchEdit)
-                    setDailyAgeSearchText(txt)
-                    if #txt > 2 or #txt == 0 then
-                        refreshDailyAgeList()
-                    end
-                end)
-            end
-            CreateLabel("polarUiDailyAgeMgrSearchLabel", wnd, "Filter", 275, y + 2, 13)
-            y = y + 34
-
-            local scrollFrame = nil
-            if wnd.CreateChildWidget ~= nil then
-                local ok2, res = pcall(function()
-                    return wnd:CreateChildWidget("emptywidget", "polarUiDailyAgeMgrScrollFrame", 0, true)
-                end)
-                if ok2 then
-                    scrollFrame = res
-                end
-            end
-            SettingsPage.controls.dailyage_mgr_scroll_frame = scrollFrame
-
-            local content = nil
-            if scrollFrame ~= nil then
-                pcall(function()
-                    scrollFrame:Show(true)
-                    scrollFrame:AddAnchor("TOPLEFT", wnd, 15, y)
-                    scrollFrame:AddAnchor("BOTTOMRIGHT", wnd, -15, -15)
-                end)
-                if scrollFrame.CreateChildWidget ~= nil then
-                    local ok3, res2 = pcall(function()
-                        return scrollFrame:CreateChildWidget("emptywidget", "content", 0, true)
-                    end)
-                    if ok3 then
-                        content = res2
-                    end
-                end
-            end
-            SettingsPage.controls.dailyage_mgr_content = content
-
-            local scroll = nil
-            if scrollFrame ~= nil and W_CTRL ~= nil and W_CTRL.CreateScroll ~= nil then
-                local ok4, res3 = pcall(function()
-                    return W_CTRL.CreateScroll("polarUiDailyAgeMgrScroll", scrollFrame)
-                end)
-                if ok4 then
-                    scroll = res3
-                end
-            end
-            SettingsPage.controls.dailyage_mgr_scroll = scroll
-
-            if scroll ~= nil and scrollFrame ~= nil then
-                pcall(function()
-                    scroll:AddAnchor("TOPRIGHT", scrollFrame, 0, 0)
-                    scroll:AddAnchor("BOTTOMRIGHT", scrollFrame, 0, 0)
-                    if scroll.AlwaysScrollShow ~= nil then
-                        scroll:AlwaysScrollShow()
-                    end
-                end)
-            end
-
-            if scrollFrame ~= nil and content ~= nil then
-                pcall(function()
-                    content:Show(true)
-                    if content.EnableScroll ~= nil then
-                        content:EnableScroll(true)
-                    end
-                    if content.EnablePick ~= nil then
-                        content:EnablePick(false)
-                    end
-                    if content.Clickable ~= nil then
-                        content:Clickable(false)
-                    end
-                    if content.eventWindow ~= nil and content.eventWindow.EnablePick ~= nil then
-                        content.eventWindow:EnablePick(false)
-                    end
-                end)
-                pcall(function()
-                    if content.AddAnchor ~= nil then
-                        content:AddAnchor("TOPLEFT", scrollFrame, 0, 0)
-                        content:AddAnchor("BOTTOM", scrollFrame, 0, 0)
-                        if scroll ~= nil then
-                            content:AddAnchor("RIGHT", scroll, "LEFT", -5, 0)
-                        else
-                            content:AddAnchor("RIGHT", scrollFrame, 0, 0)
-                        end
-                    end
-                end)
-            end
-
-            if scroll ~= nil and scrollFrame ~= nil and scroll.vs ~= nil and scroll.vs.SetHandler ~= nil then
-                scroll.vs:SetHandler("OnSliderChanged", function(a, b)
-                    pcall(function()
-                        local value = b
-                        if type(value) ~= "number" then
-                            value = a
-                        end
-                        if type(value) ~= "number" then
-                            return
-                        end
-                        scrollFrame.__polar_scroll_value = value
-                        if content ~= nil and content.ChangeChildAnchorByScrollValue ~= nil then
-                            content:ChangeChildAnchorByScrollValue("vert", value)
-                        end
-                    end)
-                end)
-            end
-
-            if scrollFrame ~= nil then
-                pcall(function()
-                    if scrollFrame.EnablePick ~= nil then
-                        scrollFrame:EnablePick(false)
-                    end
-                    if scrollFrame.Clickable ~= nil then
-                        scrollFrame:Clickable(false)
-                    end
-                    if scrollFrame.eventWindow ~= nil and scrollFrame.eventWindow.EnablePick ~= nil then
-                        scrollFrame.eventWindow:EnablePick(false)
-                    end
-                end)
-                scrollFrame.content = content
-                scrollFrame.scroll = scroll
-                scrollFrame.__polar_scroll_value = 0
-                function scrollFrame:ResetScroll(totalHeight)
-                    if self.scroll == nil or self.scroll.vs == nil or self.scroll.vs.SetMinMaxValues == nil then
-                        return
-                    end
-                    local currentValue = tonumber(self.__polar_scroll_value) or 0
-                    pcall(function()
-                        if self.scroll.vs.GetValue ~= nil then
-                            local liveValue = self.scroll.vs:GetValue()
-                            if type(liveValue) == "number" then
-                                currentValue = liveValue
-                            end
-                        end
-                    end)
-                    local height = 0
-                    pcall(function()
-                        if self.GetHeight ~= nil then
-                            height = self:GetHeight()
-                        end
-                    end)
-                    local total = tonumber(totalHeight) or 0
-                    local maxScroll = total
-                    if height > 0 then
-                        maxScroll = total - height
-                    end
-                    if maxScroll < 0 then
-                        maxScroll = 0
-                    end
-                    self.scroll.vs:SetMinMaxValues(0, maxScroll)
-                    if currentValue < 0 then
-                        currentValue = 0
-                    end
-                    if currentValue > maxScroll then
-                        currentValue = maxScroll
-                    end
-                    self.__polar_scroll_value = currentValue
-                    if self.scroll.SetEnable ~= nil then
-                        self.scroll:SetEnable(maxScroll > 0)
-                    end
-                    if self.scroll.vs.SetValue ~= nil then
-                        self.scroll.vs:SetValue(currentValue, false)
-                    end
-                    if self.content ~= nil and self.content.ChangeChildAnchorByScrollValue ~= nil then
-                        self.content:ChangeChildAnchorByScrollValue("vert", currentValue)
-                    end
-                end
-            end
-
-            return wnd
-        end
-
-        renderDailyAgeManagerRows = function(items)
-            local wnd = SettingsPage.controls.dailyage_mgr_window
-            local content = SettingsPage.controls.dailyage_mgr_content
-            if wnd == nil or content == nil then
-                return
-            end
-
-            if type(SettingsPage.controls.dailyage_mgr_rows) ~= "table" then
-                SettingsPage.controls.dailyage_mgr_rows = {}
-            end
-            local rows = SettingsPage.controls.dailyage_mgr_rows
-
-            local rowH = 24
-            local y = 0
-
-            local function ensureRow(i)
-                if rows[i] ~= nil then
-                    return rows[i]
-                end
-                local row = {}
-
-                local hitbox = api.Interface:CreateWidget("emptywidget", "polarUiDailyAgeMgrRowHitbox" .. tostring(i), content)
-                pcall(function()
-                    hitbox:SetExtent(520, rowH)
-                    if hitbox.Clickable ~= nil then
-                        hitbox:Clickable(true)
-                    end
-                    if hitbox.EnablePick ~= nil then
-                        hitbox:EnablePick(true)
-                    end
-                    if hitbox.eventWindow ~= nil and hitbox.eventWindow.EnablePick ~= nil then
-                        hitbox.eventWindow:EnablePick(true)
-                    end
-                end)
-
-                local cb = api.Interface:CreateWidget("checkbutton", "polarUiDailyAgeMgrRowCb" .. tostring(i), content)
-                cb:SetExtent(18, 17)
-                ApplyCheckButtonSkin(cb)
-                pcall(function()
-                    if cb.Clickable ~= nil then
-                        cb:Clickable(true)
-                    end
-                    if cb.EnablePick ~= nil then
-                        cb:EnablePick(true)
-                    end
-                    if cb.eventWindow ~= nil and cb.eventWindow.EnablePick ~= nil then
-                        cb.eventWindow:EnablePick(true)
-                    end
-                    if cb.SetButtonStyle ~= nil then
-                        cb:SetButtonStyle("default")
-                    end
-                end)
-
-                local label = api.Interface:CreateWidget("label", "polarUiDailyAgeMgrRowLbl" .. tostring(i), content)
-                label:SetExtent(480, 18)
-                pcall(function()
-                    if label.style ~= nil then
-                        label.style:SetFontSize(13)
-                        label.style:SetAlign(ALIGN.LEFT)
-                        label.style:SetColor(1, 1, 1, 1)
-                    end
-                    if label.Clickable ~= nil then
-                        label:Clickable(true)
-                    end
-                    if label.EnablePick ~= nil then
-                        label:EnablePick(true)
-                    end
-                    if label.eventWindow ~= nil and label.eventWindow.EnablePick ~= nil then
-                        label.eventWindow:EnablePick(true)
-                    end
-                end)
-
-                local function applyState()
-                    if row.__polar_populating then
-                        return
-                    end
-                    if row.quest_id ~= nil and cb.GetChecked ~= nil then
-                        row.last_checked = cb:GetChecked() and true or false
-                        setDailyAgeShown(row.quest_id, cb:GetChecked() and true or false)
-                    end
-                end
-
-                local function toggleRow()
-                    if row.__polar_populating then
-                        return
-                    end
-                    if cb.SetChecked ~= nil and cb.GetChecked ~= nil then
-                        row.__polar_populating = true
-                        cb:SetChecked(not cb:GetChecked())
-                        row.__polar_populating = nil
-                    end
-                    applyState()
-                end
-
-                if cb.SetHandler ~= nil then
-                    cb:SetHandler("OnClick", function()
-                        if row.__polar_populating then
-                            return
-                        end
-                        if cb.GetChecked ~= nil and cb.SetChecked ~= nil then
-                            local checked = cb:GetChecked() and true or false
-                            if row.last_checked ~= nil and checked == row.last_checked then
-                                row.__polar_populating = true
-                                cb:SetChecked(not checked)
-                                row.__polar_populating = nil
-                            end
-                        end
-                        applyState()
-                    end)
-                end
-
-                if hitbox.SetHandler ~= nil then
-                    hitbox:SetHandler("OnClick", function()
-                        toggleRow()
-                    end)
-                end
-
-                if label.SetHandler ~= nil then
-                    label:SetHandler("OnClick", function()
-                        toggleRow()
-                    end)
-                end
-
-                row.hitbox = hitbox
-                row.checkbox = cb
-                row.label = label
-                rows[i] = row
-                return row
-            end
-
-            local count = 0
-            if type(items) == "table" then
-                count = #items
-            end
-
-            for i = 1, count do
-                local item = items[i]
-                local row = ensureRow(i)
-                row.quest_id = tonumber(item.id)
-                local text = string.format("%s %s", tostring(item.id), tostring(item.title or ""))
-
-                row.__polar_populating = true
-                if row.checkbox ~= nil and row.checkbox.SetChecked ~= nil then
-                    row.checkbox:SetChecked(item.hidden and false or true)
-                end
-                row.__polar_populating = nil
-                row.last_checked = not item.hidden
-
-                if row.label ~= nil and row.label.SetText ~= nil then
-                    row.label:SetText(text)
-                end
-
-                pcall(function()
-                    if row.label ~= nil and FONT_COLOR ~= nil and ApplyTextColor ~= nil then
-                        if item.completed then
-                            ApplyTextColor(row.label, FONT_COLOR.GREEN)
-                        else
-                            ApplyTextColor(row.label, FONT_COLOR.RED)
-                        end
-                    end
-                end)
-
-                pcall(function()
-                    if row.hitbox ~= nil and row.hitbox.RemoveAllAnchors ~= nil then
-                        row.hitbox:RemoveAllAnchors()
-                    end
-                    if row.hitbox ~= nil then
-                        row.hitbox:AddAnchor("TOPLEFT", content, 0, y)
-                    end
-                    if row.checkbox.RemoveAllAnchors ~= nil then
-                        row.checkbox:RemoveAllAnchors()
-                    end
-                    row.checkbox:AddAnchor("TOPLEFT", content, 0, y + 3)
-                    if row.label.RemoveAllAnchors ~= nil then
-                        row.label:RemoveAllAnchors()
-                    end
-                    row.label:AddAnchor("LEFT", row.checkbox, "RIGHT", 8, 0)
-                end)
-
-                pcall(function()
-                    if row.hitbox ~= nil and row.hitbox.Show ~= nil then
-                        row.hitbox:Show(true)
-                    end
-                    if row.checkbox.Show ~= nil then
-                        row.checkbox:Show(true)
-                    end
-                    if row.label.Show ~= nil then
-                        row.label:Show(true)
-                    end
-                end)
-
-                y = y + rowH
-            end
-
-            for i = count + 1, #rows do
-                local row = rows[i]
-                if type(row) == "table" then
-                    pcall(function()
-                        if row.hitbox ~= nil and row.hitbox.Show ~= nil then
-                            row.hitbox:Show(false)
-                        end
-                        if row.checkbox ~= nil and row.checkbox.Show ~= nil then
-                            row.checkbox:Show(false)
-                        end
-                        if row.label ~= nil and row.label.Show ~= nil then
-                            row.label:Show(false)
-                        end
-                    end)
-                    row.quest_id = nil
-                end
-            end
-
-            local scrollFrame = SettingsPage.controls.dailyage_mgr_scroll_frame
-            if scrollFrame ~= nil and scrollFrame.ResetScroll ~= nil then
-                scrollFrame:ResetScroll(y + 5)
-            end
-        end
-
-        local page = SettingsPage.pages.dailies
-        if page ~= nil then
-        local y = 35
-        CreateLabel("polarUiDailyAgePageTitle", page, "Dailies", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.dailyage_enabled = CreateCheckbox("polarUiDailyAgeEnabled", page, "Enable Dailies", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.dailyage_clear_hidden = CreateButton("polarUiDailyAgeClearHidden", page, "Show all", 15, y - 4)
-        if SettingsPage.controls.dailyage_clear_hidden ~= nil and SettingsPage.controls.dailyage_clear_hidden.SetHandler ~= nil then
-            SettingsPage.controls.dailyage_clear_hidden:SetHandler("OnClick", function()
-                if SettingsPage.settings == nil then
-                    return
-                end
-                EnsureDailiesTables(SettingsPage.settings)
-                SettingsPage.settings.dailies.hidden = {}
-                refreshDailyAgeList()
-                if type(SettingsPage.on_save) == "function" then
-                    pcall(function()
-                        SettingsPage.on_save()
-                    end)
-                end
-            end)
-        end
-
-        SettingsPage.controls.dailyage_status = api.Interface:CreateWidget("label", "polarUiDailyAgeStatus", page)
-        SettingsPage.controls.dailyage_status:AddAnchor("TOPLEFT", page, 210, y)
-        SettingsPage.controls.dailyage_status:SetExtent(300, 18)
-        SettingsPage.controls.dailyage_status:SetText("Shown: 0")
-        pcall(function()
-            if SettingsPage.controls.dailyage_status.style ~= nil then
-                SettingsPage.controls.dailyage_status.style:SetFontSize(13)
-                SettingsPage.controls.dailyage_status.style:SetAlign(ALIGN.LEFT)
-            end
-        end)
-
-        SettingsPage.controls.dailyage_manage = CreateButton("polarUiDailyAgeManage", page, "Manage dailies...", 15, y + 26)
-        if SettingsPage.controls.dailyage_manage ~= nil and SettingsPage.controls.dailyage_manage.SetHandler ~= nil then
-            SettingsPage.controls.dailyage_manage:SetHandler("OnClick", function()
-                local wnd = EnsureDailyAgeManagerWindow()
-                beginDailyAgeEditSession()
-                if wnd ~= nil and wnd.Show ~= nil then
-                    pcall(function()
-                        wnd:Show(true)
-                    end)
-                end
-                refreshDailyAgeList()
-            end)
-        end
-
-        y = y + 70
-        SettingsPage.page_heights.dailies = y + 40
-
-        SettingsPage.dailyage_entries = nil
-        SettingsPage.dailyage_search_text = ""
-        SettingsPage.RefreshDailyAgeList = refreshDailyAgeList
-        refreshDailyAgeList()
-        end
-    end
 
     do
         local page = SettingsPage.pages.text
@@ -2680,7 +2554,7 @@ local function EnsureWindow()
         CreateLabel("polarUiTextStyleTargetLabel", page, "Edit style for", 15, y, 15)
         SettingsPage.controls.style_target_text = CreateComboBox(
             page,
-            { "All frames", "Player", "Target", "Watchtarget", "Target of Target" },
+            { "All frames", "Player", "Target", "Watchtarget", "Target of Target", "Party" },
             175,
             y - 4,
             220,
@@ -2691,7 +2565,7 @@ local function EnsureWindow()
         SettingsPage.controls.style_target_text_hint = CreateHintLabel(
             "polarUiTextStyleTargetHint",
             page,
-            "Editing shared defaults for all overlay frames.",
+            "Editing shared defaults for all overlay and party frames.",
             15,
             y
         )
@@ -3010,7 +2884,7 @@ local function EnsureWindow()
         CreateLabel("polarUiBarsStyleTargetLabel", page, "Edit style for", 15, y, 15)
         SettingsPage.controls.style_target_bars = CreateComboBox(
             page,
-            { "All frames", "Player", "Target", "Watchtarget", "Target of Target" },
+            { "All frames", "Player", "Target", "Watchtarget", "Target of Target", "Party" },
             175,
             y - 4,
             220,
@@ -3021,7 +2895,7 @@ local function EnsureWindow()
         SettingsPage.controls.style_target_bars_hint = CreateHintLabel(
             "polarUiBarsStyleTargetHint",
             page,
-            "Editing shared defaults for all overlay frames.",
+            "Editing shared defaults for all overlay and party frames.",
             15,
             y
         )
@@ -3199,7 +3073,7 @@ local function EnsureWindow()
         SettingsPage.controls.mp_after_b, SettingsPage.controls.mp_after_b_val = CreateSlider("polarUiMpAfterB", page, "MP After B", 15, y, 0, 255, 1)
         y = y + 24
         SettingsPage.controls.mp_after_a, SettingsPage.controls.mp_after_a_val = CreateSlider("polarUiMpAfterA", page, "MP After alpha", 15, y, 0, 255, 1)
-        y = y + gap
+        y = y + gap + 10
 
         CreateLabel("polarUiHpTextureLabel", page, "HP Texture Mode", 15, y, 15)
         y = y + 22
@@ -3657,6 +3531,8 @@ local function EnsureWindow()
 
         CreateLabel("polarUiCooldownUnitLabel", page, "Unit", 15, y, 15)
         SettingsPage.controls.ct_unit = CreateComboBox(page, COOLDOWN_UNIT_LABELS, 110, y - 4, 220, 24)
+        CreateLabel("polarUiCooldownDisplayModeLabel", page, "Show", 350, y, 15)
+        SettingsPage.controls.ct_display_mode = CreateComboBox(page, COOLDOWN_DISPLAY_MODE_LABELS, 400, y - 4, 180, 24)
         y = y + 34
 
         SettingsPage.controls.ct_unit_enabled = CreateCheckbox(
@@ -3679,6 +3555,18 @@ local function EnsureWindow()
 
         CreateLabel("polarUiCooldownPositionTitle", page, "Position", 15, y, 18)
         y = y + 30
+
+        SettingsPage.controls.ct_position_hint = CreateHintLabel(
+            "polarUiCooldownPositionHint",
+            page,
+            "Player uses an absolute screen position.",
+            15,
+            y
+        )
+        if SettingsPage.controls.ct_position_hint ~= nil then
+            SettingsPage.controls.ct_position_hint:SetExtent(360, 18)
+        end
+        y = y + 24
 
         CreateLabel("polarUiCooldownPosXLabel", page, "X", 15, y, 15)
         SettingsPage.controls.ct_pos_x = CreateEdit("polarUiCooldownPosX", page, "0", 35, y - 4, 90, 22)
@@ -3805,7 +3693,7 @@ local function EnsureWindow()
         )
         y = y + gap + 10
 
-        CreateLabel("polarUiCooldownTrackedBuffsTitle", page, "Tracked Buff IDs", 15, y, 18)
+        CreateLabel("polarUiCooldownTrackedBuffsTitle", page, "Tracked Effects", 15, y, 18)
         y = y + 30
 
         SettingsPage.controls.ct_new_buff_id = CreateEdit("polarUiCooldownNewBuffId", page, "", 15, y - 4, 120, 22)
@@ -3815,7 +3703,40 @@ local function EnsureWindow()
             end)
         end
         SettingsPage.controls.ct_add_buff = CreateButton("polarUiCooldownAddBuff", page, "Add", 145, y - 6)
+        CreateLabel("polarUiCooldownTrackKindLabel", page, "Track as", 225, y, 15)
+        SettingsPage.controls.ct_track_kind = CreateComboBox(page, COOLDOWN_TRACK_KIND_LABELS, 290, y - 4, 110, 24)
+        CreateLabel("polarUiCooldownSearchLabel", page, "Search", 420, y, 15)
+        SettingsPage.controls.ct_search_text = CreateEdit("polarUiCooldownSearchText", page, "", 470, y - 4, 95, 22)
+        SettingsPage.controls.ct_search_btn = CreateButton("polarUiCooldownSearchBtn", page, "Find", 575, y - 6)
+        if SettingsPage.controls.ct_search_btn ~= nil then
+            SettingsPage.controls.ct_search_btn:SetExtent(50, 22)
+        end
         y = y + 34
+
+        SettingsPage.controls.ct_search_status = CreateLabel("polarUiCooldownSearchStatus", page, "", 15, y, 14)
+        if SettingsPage.controls.ct_search_status ~= nil then
+            SettingsPage.controls.ct_search_status:SetExtent(380, 18)
+        end
+        SettingsPage.controls.ct_search_more = CreateButton("polarUiCooldownSearchMore", page, "More", 405, y - 6)
+        if SettingsPage.controls.ct_search_more ~= nil then
+            SettingsPage.controls.ct_search_more:SetExtent(65, 22)
+        end
+        y = y + 34
+
+        SettingsPage.controls.ct_search_rows = {}
+        for i = 1, COOLDOWN_SEARCH_ROWS do
+            local row_y = y + ((i - 1) * 26)
+            local label = CreateLabel("polarUiCooldownSearchRowLabel" .. tostring(i), page, "", 15, row_y + 6, 14)
+            if label ~= nil then
+                label:SetExtent(310, 18)
+            end
+            local add = CreateButton("polarUiCooldownSearchRowAdd" .. tostring(i), page, "Add", 335, row_y)
+            if add ~= nil then
+                add:SetExtent(60, 22)
+            end
+            SettingsPage.controls.ct_search_rows[i] = { label = label, add = add }
+        end
+        y = y + (COOLDOWN_SEARCH_ROWS * 26) + 10
 
         SettingsPage.controls.ct_prev_page = CreateButton("polarUiCooldownPrevPage", page, "Prev", 15, y)
         SettingsPage.controls.ct_next_page = CreateButton("polarUiCooldownNextPage", page, "Next", 110, y)
@@ -3827,9 +3748,9 @@ local function EnsureWindow()
             local row_y = y + ((i - 1) * 26)
             local label = CreateLabel("polarUiCooldownBuffRowLabel" .. tostring(i), page, "", 15, row_y + 6, 14)
             if label ~= nil then
-                label:SetExtent(180, 18)
+                label:SetExtent(280, 18)
             end
-            local rm = CreateButton("polarUiCooldownBuffRowRemove" .. tostring(i), page, "Remove", 205, row_y)
+            local rm = CreateButton("polarUiCooldownBuffRowRemove" .. tostring(i), page, "Remove", 305, row_y)
             if rm ~= nil then
                 rm:SetExtent(90, 22)
             end
@@ -3929,6 +3850,7 @@ local function EnsureWindow()
     end
 
     local sliderList = {
+        { SettingsPage.controls.launcher_size, SettingsPage.controls.launcher_size_val },
         { SettingsPage.controls.frame_alpha, SettingsPage.controls.frame_alpha_val },
         { SettingsPage.controls.overlay_alpha, SettingsPage.controls.overlay_alpha_val },
         { SettingsPage.controls.frame_width, SettingsPage.controls.frame_width_val },
@@ -4098,6 +4020,25 @@ local function EnsureWindow()
         end)
     end
 
+    if SettingsPage.controls.ct_display_mode ~= nil and SettingsPage.controls.ct_display_mode.SetHandler ~= nil then
+        SettingsPage.controls.ct_display_mode:SetHandler("OnSelChanged", function()
+            ApplyControlsToSettings()
+            if type(SettingsPage.on_apply) == "function" then
+                pcall(function()
+                    SettingsPage.on_apply()
+                end)
+            end
+            RefreshControls()
+        end)
+    end
+
+    if SettingsPage.controls.ct_track_kind ~= nil and SettingsPage.controls.ct_track_kind.SetHandler ~= nil then
+        SettingsPage.controls.ct_track_kind:SetHandler("OnSelChanged", function()
+            local idx = GetComboBoxIndex1Based(SettingsPage.controls.ct_track_kind, #COOLDOWN_TRACK_KIND_LABELS)
+            SettingsPage.cooldown_track_kind = GetCooldownTrackKindFromIndex(idx)
+        end)
+    end
+
     if SettingsPage.controls.plates_guild_color_add_target ~= nil and SettingsPage.controls.plates_guild_color_add_target.SetHandler ~= nil then
         SettingsPage.controls.plates_guild_color_add_target:SetHandler("OnClick", function()
             if SettingsPage.settings == nil then
@@ -4263,34 +4204,11 @@ local function EnsureWindow()
                         return
                     end
 
-                    EnsureCooldownTrackerTables(SettingsPage.settings)
-                    local unit_key = tostring(SettingsPage.cooldown_unit_key or "player")
-                    local unit_cfg = SettingsPage.settings.cooldown_tracker.units[unit_key]
-                    if type(unit_cfg) ~= "table" or type(unit_cfg.tracked_buffs) ~= "table" then
-                        return
-                    end
-
                     local id = tostring(entry.id or "")
                     if id == "" then
                         return
                     end
-
-                    local exists = false
-                    for _, v in ipairs(unit_cfg.tracked_buffs) do
-                        if tostring(v) == id then
-                            exists = true
-                            break
-                        end
-                    end
-                    if not exists then
-                        table.insert(unit_cfg.tracked_buffs, id)
-                    end
-
-                    if type(SettingsPage.on_apply) == "function" then
-                        pcall(function()
-                            SettingsPage.on_apply()
-                        end)
-                    end
+                    AddCooldownTrackedBuffToSelectedUnit(id, entry.kind)
                     RefreshControls()
                 end)
             end
@@ -4302,39 +4220,56 @@ local function EnsureWindow()
             if SettingsPage.settings == nil then
                 return
             end
-            EnsureCooldownTrackerTables(SettingsPage.settings)
-            local unit_key = tostring(SettingsPage.cooldown_unit_key or "player")
-            local unit_cfg = SettingsPage.settings.cooldown_tracker.units[unit_key]
-            if type(unit_cfg) ~= "table" then
-                return
-            end
             local txt = GetEditText(SettingsPage.controls.ct_new_buff_id)
             txt = tostring(txt or "")
             txt = txt:gsub("%s+", "")
             if txt == "" then
                 return
             end
+            local numericId = tonumber(txt)
+            if numericId == nil then
+                return
+            end
+            txt = FormatBuffId(math.floor(numericId + 0.5))
 
-            local exists = false
-            for _, v in ipairs(unit_cfg.tracked_buffs) do
-                if tostring(v) == txt then
-                    exists = true
-                    break
-                end
-            end
-            if not exists then
-                table.insert(unit_cfg.tracked_buffs, txt)
-            end
+            local kindIdx = GetComboBoxIndex1Based(SettingsPage.controls.ct_track_kind, #COOLDOWN_TRACK_KIND_LABELS)
+            SettingsPage.cooldown_track_kind = GetCooldownTrackKindFromIndex(kindIdx)
+            AddCooldownTrackedBuffToSelectedUnit(txt, SettingsPage.cooldown_track_kind)
             if SettingsPage.controls.ct_new_buff_id ~= nil and SettingsPage.controls.ct_new_buff_id.SetText ~= nil then
                 SettingsPage.controls.ct_new_buff_id:SetText("")
             end
-            if type(SettingsPage.on_apply) == "function" then
-                pcall(function()
-                    SettingsPage.on_apply()
-                end)
-            end
             RefreshControls()
         end)
+    end
+
+    if SettingsPage.controls.ct_search_btn ~= nil and SettingsPage.controls.ct_search_btn.SetHandler ~= nil then
+        SettingsPage.controls.ct_search_btn:SetHandler("OnClick", function()
+            RunCooldownBuffSearch(false)
+        end)
+    end
+
+    if SettingsPage.controls.ct_search_more ~= nil and SettingsPage.controls.ct_search_more.SetHandler ~= nil then
+        SettingsPage.controls.ct_search_more:SetHandler("OnClick", function()
+            RunCooldownBuffSearch(true)
+        end)
+    end
+
+    if type(SettingsPage.controls.ct_search_rows) == "table" then
+        for _, row in ipairs(SettingsPage.controls.ct_search_rows) do
+            if type(row) == "table" and row.add ~= nil and row.add.SetHandler ~= nil then
+                local btn = row.add
+                row.add:SetHandler("OnClick", function()
+                    local rawId = tostring(btn ~= nil and btn.__polar_search_id or "")
+                    if rawId == "" then
+                        return
+                    end
+                    local kindIdx = GetComboBoxIndex1Based(SettingsPage.controls.ct_track_kind, #COOLDOWN_TRACK_KIND_LABELS)
+                    SettingsPage.cooldown_track_kind = GetCooldownTrackKindFromIndex(kindIdx)
+                    AddCooldownTrackedBuffToSelectedUnit(rawId, SettingsPage.cooldown_track_kind)
+                    RefreshControls()
+                end)
+            end
+        end
     end
 
     if SettingsPage.controls.ct_prev_page ~= nil and SettingsPage.controls.ct_prev_page.SetHandler ~= nil then
@@ -4525,15 +4460,29 @@ function SettingsPage.init(settings, onSave, onApply, actions)
     SettingsPage.on_save = onSave
     SettingsPage.on_apply = onApply
     SettingsPage.actions = actions
-    EnsureWindow()
     EnsureSettingsButton()
+    local ok, err = pcall(function()
+        EnsureWindow()
+    end)
+    if not ok and api ~= nil and api.Log ~= nil and api.Log.Err ~= nil then
+        api.Log:Err("[Nuzi UI] SettingsPage.EnsureWindow failed: " .. tostring(err))
+    end
 end
 
 function SettingsPage.open()
     if SettingsPage.settings == nil then
         return
     end
-    EnsureWindow()
+    EnsureSettingsButton()
+    local ok, err = pcall(function()
+        EnsureWindow()
+    end)
+    if not ok then
+        if api ~= nil and api.Log ~= nil and api.Log.Err ~= nil then
+            api.Log:Err("[Nuzi UI] SettingsPage.open failed: " .. tostring(err))
+        end
+        return
+    end
     RefreshControls()
     SettingsPage.window:Show(true)
 end
@@ -4584,6 +4533,7 @@ function SettingsPage.Unload()
         end)
     end
     SettingsPage.toggle_button = nil
+    SettingsPage.toggle_button_icon = nil
     SettingsPage.toggle_button_dragging = false
     SettingsPage.scroll_frame = nil
     SettingsPage.content = nil

@@ -1,25 +1,126 @@
 local SettingsCommon = {}
+local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
+    player = {
+        enabled = false,
+        pos_x = 330,
+        pos_y = 100,
+        icon_size = 40,
+        icon_spacing = 5,
+        max_icons = 10,
+        lock_position = false,
+        show_timer = true,
+        timer_font_size = 16,
+        timer_color = { 255, 255, 255, 255 },
+        show_label = false,
+        label_font_size = 14,
+        label_color = { 255, 255, 255, 255 },
+        display_mode = "both",
+        tracked_buffs = {}
+    },
+    target = {
+        enabled = false,
+        pos_x = 0,
+        pos_y = -8,
+        icon_size = 40,
+        icon_spacing = 5,
+        max_icons = 10,
+        lock_position = false,
+        show_timer = true,
+        timer_font_size = 16,
+        timer_color = { 255, 255, 255, 255 },
+        show_label = false,
+        label_font_size = 14,
+        label_color = { 255, 255, 255, 255 },
+        display_mode = "both",
+        cache_timeout_s = 300,
+        tracked_buffs = {}
+    },
+    playerpet = {
+        enabled = false,
+        pos_x = 0,
+        pos_y = -8,
+        icon_size = 40,
+        icon_spacing = 5,
+        max_icons = 10,
+        lock_position = false,
+        show_timer = true,
+        timer_font_size = 16,
+        timer_color = { 255, 255, 255, 255 },
+        show_label = false,
+        label_font_size = 14,
+        label_color = { 255, 255, 255, 255 },
+        display_mode = "both",
+        tracked_buffs = {}
+    },
+    watchtarget = {
+        enabled = false,
+        pos_x = 0,
+        pos_y = -8,
+        icon_size = 40,
+        icon_spacing = 5,
+        max_icons = 10,
+        lock_position = false,
+        show_timer = true,
+        timer_font_size = 16,
+        timer_color = { 255, 255, 255, 255 },
+        show_label = false,
+        label_font_size = 14,
+        label_color = { 255, 255, 255, 255 },
+        display_mode = "both",
+        tracked_buffs = {}
+    },
+    target_of_target = {
+        enabled = false,
+        pos_x = 0,
+        pos_y = -8,
+        icon_size = 40,
+        icon_spacing = 5,
+        max_icons = 10,
+        lock_position = false,
+        show_timer = true,
+        timer_font_size = 16,
+        timer_color = { 255, 255, 255, 255 },
+        show_label = false,
+        label_font_size = 14,
+        label_color = { 255, 255, 255, 255 },
+        display_mode = "both",
+        tracked_buffs = {}
+    }
+}
 
-local function NormalizeDailiesHiddenTable(hidden)
-    if type(hidden) ~= "table" then
-        return {}
+local function DeepCopyTable(obj, visited)
+    if type(obj) ~= "table" then
+        return obj
+    end
+    visited = visited or {}
+    if visited[obj] ~= nil then
+        return visited[obj]
     end
     local out = {}
-    for k, v in pairs(hidden) do
-        local id = nil
-        if type(k) == "number" then
-            id = math.floor(k + 0.5)
-        else
-            local parsed = tonumber(k)
-            if parsed ~= nil then
-                id = math.floor(parsed + 0.5)
-            end
-        end
-        if id ~= nil and v then
-            out[tostring(id)] = true
-        end
+    visited[obj] = out
+    for k, v in pairs(obj) do
+        out[DeepCopyTable(k, visited)] = DeepCopyTable(v, visited)
     end
     return out
+end
+
+local function EnsureTableDefault(parent, key, defaultValue)
+    if type(parent) ~= "table" then
+        return
+    end
+    if type(defaultValue) == "table" then
+        if type(parent[key]) ~= "table" then
+            parent[key] = DeepCopyTable(defaultValue)
+        else
+            for childKey, childValue in pairs(defaultValue) do
+                EnsureTableDefault(parent[key], childKey, childValue)
+            end
+        end
+        return
+    end
+    if parent[key] == nil then
+        parent[key] = defaultValue
+    end
 end
 
 function SettingsCommon.ClampInt(v, min_v, max_v, fallback)
@@ -44,28 +145,46 @@ function SettingsCommon.FormatBuffId(buff_id)
     return tostring(buff_id)
 end
 
-function SettingsCommon.EnsureDailiesTables(s)
-    if type(s) ~= "table" then
-        return
+function SettingsCommon.NormalizeCooldownTrackKind(rawKind)
+    local kind = string.lower(tostring(rawKind or "any"))
+    if kind == "buff" or kind == "debuff" then
+        return kind
     end
-    if type(s.dailies) ~= "table" then
-        if type(s.dailyage) == "table" then
-            s.dailies = s.dailyage
-        else
-            s.dailies = {}
-        end
-    end
-    if s.dailies.enabled == nil then
-        s.dailies.enabled = false
-    end
-    s.dailies.hidden = NormalizeDailiesHiddenTable(s.dailies.hidden)
-    if s.dailyage ~= nil then
-        s.dailyage = nil
-    end
+    return "any"
 end
 
-function SettingsCommon.EnsureDailyAgeTables(s)
-    SettingsCommon.EnsureDailiesTables(s)
+function SettingsCommon.NormalizeCooldownDisplayMode(rawMode)
+    local mode = string.lower(tostring(rawMode or "both"))
+    if mode == "active" or mode == "missing" then
+        return mode
+    end
+    return "both"
+end
+
+function SettingsCommon.NormalizeCooldownTrackedEntry(raw)
+    local id = nil
+    local kind = "any"
+
+    if type(raw) == "table" then
+        id = tonumber(raw.id or raw.buff_id or raw.buffId or raw.spellId or raw.spell_id)
+        kind = SettingsCommon.NormalizeCooldownTrackKind(raw.kind)
+    else
+        id = tonumber(raw)
+    end
+
+    if id == nil then
+        return nil
+    end
+
+    id = math.floor(id + 0.5)
+    if id <= 0 then
+        return nil
+    end
+
+    return {
+        id = id,
+        kind = kind
+    }
 end
 
 function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)
@@ -75,22 +194,41 @@ function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)
     if type(s.cooldown_tracker) ~= "table" then
         s.cooldown_tracker = {}
     end
-    if s.cooldown_tracker.enabled == nil then
-        s.cooldown_tracker.enabled = false
-    end
-    if s.cooldown_tracker.update_interval_ms == nil then
-        s.cooldown_tracker.update_interval_ms = 50
-    end
+    EnsureTableDefault(s, "cooldown_tracker", {
+        enabled = false,
+        update_interval_ms = 50,
+        migrated_from_cbt = false,
+        anchor_layout_version = 2,
+        units = {}
+    })
     if type(s.cooldown_tracker.units) ~= "table" then
         s.cooldown_tracker.units = {}
     end
     for _, key in ipairs(unitKeys or {}) do
-        if type(s.cooldown_tracker.units[key]) ~= "table" then
-            s.cooldown_tracker.units[key] = {}
-        end
+        local defaults = COOLDOWN_TRACKER_UNIT_DEFAULTS[key] or {
+            enabled = false,
+            pos_x = 330,
+            pos_y = 100,
+            icon_size = 40,
+            icon_spacing = 5,
+            max_icons = 10,
+            lock_position = false,
+            show_timer = true,
+            timer_font_size = 16,
+            timer_color = { 255, 255, 255, 255 },
+            show_label = false,
+            label_font_size = 14,
+            label_color = { 255, 255, 255, 255 },
+            display_mode = "both",
+            tracked_buffs = {}
+        }
+        EnsureTableDefault(s.cooldown_tracker.units, key, defaults)
         if type(s.cooldown_tracker.units[key].tracked_buffs) ~= "table" then
             s.cooldown_tracker.units[key].tracked_buffs = {}
         end
+        s.cooldown_tracker.units[key].display_mode = SettingsCommon.NormalizeCooldownDisplayMode(
+            s.cooldown_tracker.units[key].display_mode
+        )
     end
 end
 
@@ -136,6 +274,9 @@ function SettingsCommon.EnsureStyleFrames(settings)
     if type(settings.style.frames.target_of_target) ~= "table" then
         settings.style.frames.target_of_target = {}
     end
+    if type(settings.style.frames.party) ~= "table" then
+        settings.style.frames.party = {}
+    end
 end
 
 function SettingsCommon.DeepCopySimple(obj, visited)
@@ -152,6 +293,73 @@ function SettingsCommon.DeepCopySimple(obj, visited)
         out[SettingsCommon.DeepCopySimple(k, visited)] = SettingsCommon.DeepCopySimple(v, visited)
     end
     return out
+end
+
+function SettingsCommon.DeepEqualSimple(a, b, visited)
+    if a == b then
+        return true
+    end
+    if type(a) ~= type(b) then
+        return false
+    end
+    if type(a) ~= "table" then
+        return false
+    end
+
+    visited = visited or {}
+    if visited[a] ~= nil and visited[a] == b then
+        return true
+    end
+    visited[a] = b
+
+    for k, v in pairs(a) do
+        if not SettingsCommon.DeepEqualSimple(v, b[k], visited) then
+            return false
+        end
+    end
+    for k in pairs(b) do
+        if a[k] == nil then
+            return false
+        end
+    end
+    return true
+end
+
+function SettingsCommon.PruneStyleFrameOverrides(settings, frameKeys)
+    if type(settings) ~= "table" or type(settings.style) ~= "table" or type(settings.style.frames) ~= "table" then
+        return false
+    end
+
+    local baseStyle = settings.style
+    local frames = settings.style.frames
+    local changed = false
+
+    local function pruneFrame(frameStyle)
+        if type(frameStyle) ~= "table" then
+            return
+        end
+        for key, value in pairs(frameStyle) do
+            if key ~= "frames" and key ~= "buff_windows" and key ~= "aura" then
+                local baseValue = baseStyle[key]
+                if baseValue ~= nil and SettingsCommon.DeepEqualSimple(value, baseValue) then
+                    frameStyle[key] = nil
+                    changed = true
+                end
+            end
+        end
+    end
+
+    if type(frameKeys) == "table" then
+        for _, frameKey in ipairs(frameKeys) do
+            pruneFrame(frames[frameKey])
+        end
+    else
+        for _, frameStyle in pairs(frames) do
+            pruneFrame(frameStyle)
+        end
+    end
+
+    return changed
 end
 
 function SettingsCommon.CopyTableInto(dst, src)

@@ -208,17 +208,11 @@ local function ShouldPreferBackupOverPrimary(primary, backup)
 
     local primaryScore = ScoreSettingsTree(primary)
     local backupScore = ScoreSettingsTree(backup)
-    local primaryHidden = CountTableEntries(primary.dailies and primary.dailies.hidden)
-    local backupHidden = CountTableEntries(backup.dailies and backup.dailies.hidden)
     local primaryGuildColors = CountTableEntries(primary.nameplates and primary.nameplates.guild_colors)
     local backupGuildColors = CountTableEntries(backup.nameplates and backup.nameplates.guild_colors)
 
     if backupScore >= math.max(primaryScore + 40, math.floor(primaryScore * 1.35)) then
         return true, string.format("backup snapshot is richer (%d > %d)", backupScore, primaryScore)
-    end
-
-    if backupHidden > primaryHidden and backupScore >= math.max(primaryScore + 20, math.floor(primaryScore * 1.10)) then
-        return true, string.format("backup preserved more tracked dailies (%d > %d)", backupHidden, primaryHidden)
     end
 
     if backupGuildColors > primaryGuildColors and backupScore >= math.max(primaryScore + 20, math.floor(primaryScore * 1.10)) then
@@ -340,9 +334,11 @@ function Store.LoadSettings()
 end
 
 function Store.SaveSettingsFile(settings)
+    if type(settings) == "table" then
+        SettingsDefaults.EnsureSettingsDefaultsAndMigrations(settings)
+    end
     api.SaveSettings()
     if api.File ~= nil and api.File.Write ~= nil and type(settings) == "table" then
-        SettingsDefaults.EnsureSettingsDefaultsAndMigrations(settings)
         local okPrimary, errPrimary = pcall(function()
             api.File:Write(Store.SETTINGS_FILE_PATH, settings)
         end)
