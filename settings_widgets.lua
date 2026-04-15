@@ -10,7 +10,30 @@ local function setLabelStyle(label, fontSize, color)
         label.style:SetFontSize(fontSize)
         label.style:SetAlign(ALIGN.LEFT)
         label.style:SetColor(color[1], color[2], color[3], color[4] or 1)
+        if label.style.SetShadow ~= nil then
+            label.style:SetShadow(true)
+        end
     end)
+end
+
+local function applyCheckboxReadableStyle(widget)
+    if type(widget) ~= "table" then
+        return
+    end
+    for _, candidate in ipairs({
+        widget,
+        widget.label,
+        widget.text,
+        widget.textLabel,
+        widget.textButton,
+        widget.titleLabel
+    }) do
+        if type(candidate) == "table" and candidate.style ~= nil and candidate.style.SetShadow ~= nil then
+            pcall(function()
+                candidate.style:SetShadow(true)
+            end)
+        end
+    end
 end
 
 function SettingsWidgets.CreatePage(id, parent)
@@ -113,6 +136,7 @@ function SettingsWidgets.CreateCheckbox(id, parent, text, x, y)
         if checkbox ~= nil and checkbox.SetButtonStyle ~= nil then
             checkbox:SetButtonStyle("default")
         end
+        applyCheckboxReadableStyle(checkbox)
         return checkbox
     end
 
