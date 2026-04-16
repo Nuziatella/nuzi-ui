@@ -531,6 +531,9 @@ local function HookUnitFrameDrag(wnd, settings, key)
         end
 
         wnd.__polar_drag_stop = function(self, ...)
+            if not wnd.__polar_dragging then
+                return
+            end
             local args = { ... }
             local unpackFn = nil
             if table ~= nil and type(table.unpack) == "function" then
@@ -594,7 +597,7 @@ local function HookUnitFrameDrag(wnd, settings, key)
                     end
                 end)
                 t:SetHandler("OnMouseUp", function(self, btn)
-                    if btn == nil or btn == "LeftButton" then
+                    if (btn == nil or btn == "LeftButton") and wnd.__polar_dragging then
                         wnd.__polar_drag_stop(self)
                     end
                 end)
@@ -836,11 +839,9 @@ local function SetStatusBarDynamicState(bar, enabled)
                 widget:UseDynamicContentState(enabled and true or false)
             end
         end)
-        pcall(function()
-            if widget ~= nil and widget.UseDynamicDrawableState ~= nil then
-                widget:UseDynamicDrawableState(enabled and true or false)
-            end
-        end)
+        -- Status bars expose UseDynamicDrawableState(nameLayer, use), but
+        -- we do not have a stable layer contract for these widgets.
+        -- Passing the boolean directly just spams client-side type errors.
     end
 end
 
