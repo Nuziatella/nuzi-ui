@@ -87,6 +87,10 @@ local BuildUiContext
 local PARTY_MAX_GROUPS = 10
 local PARTY_MEMBERS_PER_GROUP = 5
 local ApplyStockFrameStyle
+local SafeGetExtent
+local SetWidgetVisible
+local ResolveFrameStyleTable
+local RefreshFrameBarPresentation
 
 
 local function NormalizeUnitId(unitId)
@@ -640,17 +644,33 @@ local function ColorFrom255(v)
     return n / 255
 end
 
+local BAR_STYLE_STATE = {
+    orig_statusbar = {}
+}
+
+BAR_STYLE_STATE.orig_statusbar.__captured = false
+
 local function NormalizeColor255(rgba, fallback)
     local source = type(rgba) == "table" and rgba or fallback
     if type(source) ~= "table" then
         return { 255, 255, 255, 255 }
     end
-    return {
-        math.floor((tonumber(source[1]) or 255) + 0.5),
-        math.floor((tonumber(source[2]) or 255) + 0.5),
-        math.floor((tonumber(source[3]) or 255) + 0.5),
-        math.floor((tonumber(source[4]) or 255) + 0.5)
-    }
+    local out = {}
+    for i = 1, 4 do
+        local value = tonumber(source[i])
+        if value == nil then
+            value = 255
+        elseif value >= 0 and value <= 1 then
+            value = value * 255
+        end
+        if value < 0 then
+            value = 0
+        elseif value > 255 then
+            value = 255
+        end
+        out[i] = math.floor(value + 0.5)
+    end
+    return out
 end
 
 local function ApplyBarColorState(bar, fillColor, afterColor)
@@ -673,6 +693,43 @@ local function ApplyBarColorState(bar, fillColor, afterColor)
     end
 end
 
+local function InvalidateBarColorState(bar)
+    if bar == nil then
+        return
+    end
+    bar.__polar_fill_sig = nil
+    bar.__polar_after_sig = nil
+end
+
+local function BuildTextureAfterColorValues(template, rgba)
+    if type(rgba) ~= "table" then
+        return nil
+    end
+    local c = NormalizeColor255(rgba)
+    if type(template) == "table" and type(template[1]) == "number" and template[1] > 1 then
+        return { c[1], c[2], c[3], c[4] }
+    end
+    return {
+        ColorFrom255(c[1]),
+        ColorFrom255(c[2]),
+        ColorFrom255(c[3]),
+        ColorFrom255(c[4])
+    }
+end
+
+local function GetTextureAfterColor255(textureInfo, fallback)
+    if type(textureInfo) ~= "table" then
+        return NormalizeColor255(fallback)
+    end
+    if type(textureInfo.afterImage_color_up) == "table" then
+        return NormalizeColor255(textureInfo.afterImage_color_up, fallback)
+    end
+    if type(textureInfo.afterImage_color_down) == "table" then
+        return NormalizeColor255(textureInfo.afterImage_color_down, fallback)
+    end
+    return NormalizeColor255(fallback)
+end
+
 local function SetAnyWidgetColor(widget, rgba)
     if widget == nil or type(rgba) ~= "table" then
         return
@@ -682,10 +739,19 @@ local function SetAnyWidgetColor(widget, rgba)
     local b = ColorFrom255(rgba[3])
     local a = ColorFrom255(rgba[4] or 255)
     pcall(function()
-        widget:SetBarColor(r, g, b, a)
+        if widget.SetBarColor ~= nil then
+            widget:SetBarColor(r, g, b, a)
+        end
     end)
     pcall(function()
-        widget:SetColor(r, g, b, a)
+        if widget.SetColor ~= nil then
+            widget:SetColor(r, g, b, a)
+        end
+    end)
+    pcall(function()
+        if widget.SetLayerColor ~= nil then
+            widget:SetLayerColor(r, g, b, a)
+        end
     end)
 end
 
@@ -693,13 +759,9 @@ local function SetStatusBarFillColor(bar, rgba)
     if bar == nil then
         return
     end
+    local target = bar.statusBar or bar
     pcall(function()
-        if bar.statusBar ~= nil then
-            SetAnyWidgetColor(bar.statusBar, rgba)
-        end
-    end)
-    pcall(function()
-        SetAnyWidgetColor(bar, rgba)
+        SetAnyWidgetColor(target, rgba)
     end)
 end
 
@@ -757,33 +819,40 @@ local function SetStatusBarAfterColor(bar, rgba)
     end)
 end
 
-local BAR_STYLE_STATE = {
-    orig_statusbar = {}
-}
-
-BAR_STYLE_STATE.orig_statusbar.__captured = false
-
-local function ApplyBarStyle(frame, style)
-    if frame == nil or type(style) ~= "table" then
+local function SetStatusBarDynamicState(bar, enabled)
+    if bar == nil then
         return
     end
 
-    local statusbar_style = nil
-    pcall(function()
-        if type(_G) == "table" and _G.STATUSBAR_STYLE ~= nil then
-            statusbar_style = _G.STATUSBAR_STYLE
-        elseif STATUSBAR_STYLE ~= nil then
-            statusbar_style = STATUSBAR_STYLE
-        end
-    end)
+    local widgets = {
+        bar,
+        bar.statusBar,
+        bar.statusBarAfterImage
+    }
 
+    for _, widget in ipairs(widgets) do
+        pcall(function()
+            if widget ~= nil and widget.UseDynamicContentState ~= nil then
+                widget:UseDynamicContentState(enabled and true or false)
+            end
+        end)
+        pcall(function()
+            if widget ~= nil and widget.UseDynamicDrawableState ~= nil then
+                widget:UseDynamicDrawableState(enabled and true or false)
+            end
+        end)
+    end
+end
+
+local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
     local function to01(c)
         if type(c) == "table" then
-            local r = ColorFrom255(c[1])
-            local g = ColorFrom255(c[2])
-            local b = ColorFrom255(c[3])
-            local a = ColorFrom255(c[4] or 255)
-            return { r, g, b, a }
+            return {
+                ColorFrom255(c[1]),
+                ColorFrom255(c[2]),
+                ColorFrom255(c[3]),
+                ColorFrom255(c[4] or 255)
+            }
         end
         return { 1, 1, 1, 1 }
     end
@@ -818,7 +887,6 @@ local function ApplyBarStyle(frame, style)
         statusbar_style[key].afterImage_color_down = afterDown
     end
 
-    -- BetterBars-style: the stock UI pulls these tables when rendering.
     local keys = {
         "L_HP_FRIENDLY",
         "S_HP_FRIENDLY",
@@ -857,7 +925,11 @@ local function ApplyBarStyle(frame, style)
     end
 
     local function coordsFor(key, betterCoords)
-        if BAR_STYLE_STATE.orig_statusbar.__captured then
+        local keepOrig = (mode == "stock")
+        if type(key) == "string" and string.sub(key, 1, 2) == "S_" then
+            keepOrig = true
+        end
+        if keepOrig and BAR_STYLE_STATE.orig_statusbar.__captured then
             local o = BAR_STYLE_STATE.orig_statusbar[key]
             if type(o) == "table" and type(o.coords) == "table" then
                 return o.coords
@@ -865,6 +937,7 @@ local function ApplyBarStyle(frame, style)
         end
         return betterCoords
     end
+
     if statusbar_style ~= nil and type(statusbar_style) == "table" and BAR_STYLE_STATE.orig_statusbar.__captured then
         local function afterColorsFor(key, custom01)
             if colorsEnabled then
@@ -896,14 +969,359 @@ local function ApplyBarStyle(frame, style)
         setStatusBarStyle("S_MP", coordsFor("S_MP", SMALL_BAR_COORDS), mpUp, mpDown)
     end
 
+    if frame.__polar_last_hp_texture_mode ~= mode then
+        frame.__polar_last_hp_texture_mode = mode
+        if mode == "pc" then
+            pcall(function()
+                frame:ChangeHpBarTexture_forPc()
+            end)
+        elseif mode == "npc" then
+            pcall(function()
+                frame:ChangeHpBarTexture_forNpc()
+            end)
+        end
+    end
+
+    local function buildUnitTokens(unit)
+        local token = tostring(unit or "")
+        if token == "" then
+            return {}
+        end
+        local out = { token }
+        local function addToken(alias)
+            for i = 1, #out do
+                if out[i] == alias then
+                    return
+                end
+            end
+            out[#out + 1] = alias
+        end
+        if token == "target_of_target" or token == "targetoftarget" or token == "targettarget" then
+            addToken("targetoftarget")
+            addToken("target_of_target")
+            addToken("targettarget")
+        end
+        return out
+    end
+
     local function isHostileUnit(unit)
         if api == nil or api.Unit == nil then
             return false
         end
-        if type(unit) ~= "string" or unit == "" then
+        local tokens = buildUnitTokens(unit)
+        if #tokens == 0 then
             return false
         end
-        local tid = api.Unit:GetUnitId(unit)
+        local tid = nil
+        for _, token in ipairs(tokens) do
+            tid = api.Unit:GetUnitId(token)
+            if tid ~= nil then
+                break
+            end
+        end
+        if tid == nil then
+            return false
+        end
+        local info = SafeGetUnitInfoById(tid)
+        return type(info) == "table" and tostring(info.faction) == "hostile"
+    end
+
+    local function usesSmallHpMp()
+        return frame.__polar_small_hpmp and true or false
+    end
+
+    local function getHpStyleKey(hostile)
+        local small = usesSmallHpMp()
+        if mode == "pc" then
+            if small and statusbar_style ~= nil and statusbar_style.S_HP_PARTY ~= nil then
+                return "S_HP_PARTY"
+            end
+            if (not small) and statusbar_style ~= nil and statusbar_style.L_HP_PARTY ~= nil then
+                return "L_HP_PARTY"
+            end
+            return small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY"
+        end
+        if mode == "npc" then
+            if hostile then
+                return small and "S_HP_HOSTILE" or "L_HP_HOSTILE"
+            end
+            if small and statusbar_style ~= nil and statusbar_style.S_HP_NEUTRAL ~= nil then
+                return "S_HP_NEUTRAL"
+            end
+            if (not small) and statusbar_style ~= nil and statusbar_style.L_HP_NEUTRAL ~= nil then
+                return "L_HP_NEUTRAL"
+            end
+            return small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY"
+        end
+        if tostring(frame.__polar_unit) == "player" then
+            if small and statusbar_style ~= nil and statusbar_style.S_HP_PARTY ~= nil then
+                return "S_HP_PARTY"
+            end
+            if (not small) and statusbar_style ~= nil and statusbar_style.L_HP_PARTY ~= nil then
+                return "L_HP_PARTY"
+            end
+        end
+        return hostile and (small and "S_HP_HOSTILE" or "L_HP_HOSTILE") or (small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY")
+    end
+
+    pcall(function()
+        if frame.hpBar ~= nil then
+            if statusbar_style ~= nil and type(statusbar_style) == "table" then
+                local hostile = isHostileUnit(frame.__polar_unit)
+                frame.hpBar:ApplyBarTexture(statusbar_style[getHpStyleKey(hostile)])
+            else
+                frame.hpBar:ApplyBarTexture()
+            end
+        end
+    end)
+    pcall(function()
+        if frame.mpBar ~= nil then
+            if statusbar_style ~= nil and type(statusbar_style) == "table" then
+                local mpKey = usesSmallHpMp() and "S_MP" or "L_MP"
+                frame.mpBar:ApplyBarTexture(statusbar_style[mpKey])
+            else
+                frame.mpBar:ApplyBarTexture()
+            end
+        end
+    end)
+
+    pcall(function()
+        SetStatusBarDynamicState(frame.hpBar, not colorsEnabled)
+    end)
+    pcall(function()
+        SetStatusBarDynamicState(frame.mpBar, not colorsEnabled)
+    end)
+
+    if not colorsEnabled then
+        return
+    end
+
+    local function setFill(statusBar, c01)
+        if statusBar == nil or type(c01) ~= "table" then
+            return
+        end
+        pcall(function()
+            statusBar:SetBarColor(c01[1], c01[2], c01[3], c01[4])
+        end)
+        pcall(function()
+            statusBar:SetColor(c01[1], c01[2], c01[3], c01[4])
+        end)
+    end
+
+    pcall(function()
+        if frame.hpBar ~= nil and frame.hpBar.statusBar ~= nil then
+            setFill(frame.hpBar.statusBar, hpFill01)
+        end
+    end)
+    pcall(function()
+        if frame.mpBar ~= nil and frame.mpBar.statusBar ~= nil then
+            setFill(frame.mpBar.statusBar, mpFill01)
+        end
+    end)
+
+    local function setAnyColor(widget, rgba)
+        if widget == nil or type(rgba) ~= "table" then
+            return
+        end
+        local r = ColorFrom255(rgba[1])
+        local g = ColorFrom255(rgba[2])
+        local b = ColorFrom255(rgba[3])
+        local a = ColorFrom255(rgba[4] or 255)
+        pcall(function()
+            widget:SetBarColor(r, g, b, a)
+        end)
+        pcall(function()
+            widget:SetColor(r, g, b, a)
+        end)
+    end
+
+    local function setBarFillColor(bar, rgba)
+        if bar == nil then
+            return
+        end
+        pcall(function()
+            if bar.statusBar ~= nil then
+                setAnyColor(bar.statusBar, rgba)
+            end
+        end)
+        pcall(function()
+            setAnyColor(bar, rgba)
+        end)
+    end
+
+    local function setBarAfterColor(bar, rgba)
+        if bar == nil then
+            return
+        end
+
+        local function afterColorValues(texInfo)
+            local existing = nil
+            if texInfo ~= nil and type(texInfo.afterImage_color_up) == "table" then
+                existing = texInfo.afterImage_color_up
+            elseif texInfo ~= nil and type(texInfo.afterImage_color_down) == "table" then
+                existing = texInfo.afterImage_color_down
+            end
+            if type(existing) == "table" and type(existing[1]) == "number" and existing[1] > 1 then
+                return {
+                    tonumber(rgba[1]) or 0,
+                    tonumber(rgba[2]) or 0,
+                    tonumber(rgba[3]) or 0,
+                    tonumber(rgba[4] or 255) or 255
+                }
+            end
+            return {
+                ColorFrom255(rgba[1]),
+                ColorFrom255(rgba[2]),
+                ColorFrom255(rgba[3]),
+                ColorFrom255(rgba[4] or 255)
+            }
+        end
+
+        pcall(function()
+            if bar.statusBarAfterImage ~= nil then
+                setAnyColor(bar.statusBarAfterImage, rgba)
+            end
+        end)
+
+        pcall(function()
+            if bar.textureInfo ~= nil and type(bar.textureInfo) == "table" then
+                local c = afterColorValues(bar.textureInfo)
+                if type(bar.textureInfo.afterImage_color_up) == "table" then
+                    bar.textureInfo.afterImage_color_up = c
+                end
+                if type(bar.textureInfo.afterImage_color_down) == "table" then
+                    bar.textureInfo.afterImage_color_down = c
+                end
+            end
+        end)
+
+        pcall(function()
+            if bar.ChangeAfterImageColor ~= nil then
+                bar:ChangeAfterImageColor()
+            end
+        end)
+    end
+
+    local function resolveColor(key, fallbackKey)
+        if type(style[key]) == "table" then
+            return style[key]
+        end
+        if type(style[fallbackKey]) == "table" then
+            return style[fallbackKey]
+        end
+        return nil
+    end
+
+    local hpFill = resolveColor("hp_fill_color", "hp_bar_color")
+    local hpAfter = resolveColor("hp_after_color", "hp_bar_color")
+    local mpFill = resolveColor("mp_fill_color", "mp_bar_color")
+    local mpAfter = resolveColor("mp_after_color", "mp_bar_color")
+
+    pcall(function()
+        if frame.hpBar ~= nil then
+            if hpFill ~= nil then
+                setBarFillColor(frame.hpBar, hpFill)
+            end
+            if hpAfter ~= nil then
+                setBarAfterColor(frame.hpBar, hpAfter)
+            end
+        end
+    end)
+    pcall(function()
+        if frame.mpBar ~= nil then
+            if mpFill ~= nil then
+                setBarFillColor(frame.mpBar, mpFill)
+            end
+            if mpAfter ~= nil then
+                setBarAfterColor(frame.mpBar, mpAfter)
+            end
+        end
+    end)
+end
+
+local function ApplyBarStyle(frame, style)
+    if frame == nil or type(style) ~= "table" then
+        return
+    end
+    if frame.__polar_bar_style_running then
+        return
+    end
+    frame.__polar_bar_style_running = true
+
+    local statusbar_style = nil
+    pcall(function()
+        if type(_G) == "table" and _G.STATUSBAR_STYLE ~= nil then
+            statusbar_style = _G.STATUSBAR_STYLE
+        elseif STATUSBAR_STYLE ~= nil then
+            statusbar_style = STATUSBAR_STYLE
+        end
+    end)
+
+    if not frame.__polar_party_overlay then
+        local ok, err = pcall(function()
+            ApplyLegacyStockBarStyle(frame, style, statusbar_style)
+        end)
+        frame.__polar_bar_style_running = nil
+        if not ok and api ~= nil and api.Log ~= nil and api.Log.Err ~= nil then
+            api.Log:Err("[Nuzi UI] ApplyLegacyStockBarStyle failed: " .. tostring(err))
+        end
+        return
+    end
+
+    local function resolveColor(key, fallbackKey)
+        if type(style[key]) == "table" then
+            return style[key]
+        end
+        if type(style[fallbackKey]) == "table" then
+            return style[fallbackKey]
+        end
+        return nil
+    end
+
+    local colorsEnabled = (style.bar_colors_enabled and true or false)
+    local mode = tostring(style.hp_texture_mode or "stock")
+
+    local function buildUnitTokens(unit)
+        local token = tostring(unit or "")
+        if token == "" then
+            return {}
+        end
+
+        local out = { token }
+        local function addToken(alias)
+            for i = 1, #out do
+                if out[i] == alias then
+                    return
+                end
+            end
+            out[#out + 1] = alias
+        end
+
+        if token == "target_of_target" or token == "targetoftarget" or token == "targettarget" then
+            addToken("targetoftarget")
+            addToken("target_of_target")
+            addToken("targettarget")
+        end
+
+        return out
+    end
+
+    local function isHostileUnit(unit)
+        if api == nil or api.Unit == nil then
+            return false
+        end
+        local tokens = buildUnitTokens(unit)
+        if #tokens == 0 then
+            return false
+        end
+
+        local tid = nil
+        for _, token in ipairs(tokens) do
+            tid = api.Unit:GetUnitId(token)
+            if tid ~= nil then
+                break
+            end
+        end
         if tid == nil then
             return false
         end
@@ -924,7 +1342,10 @@ local function ApplyBarStyle(frame, style)
             if small and statusbar_style ~= nil and statusbar_style.S_HP_PARTY ~= nil then
                 return "S_HP_PARTY"
             end
-            return hostile and (small and "S_HP_HOSTILE" or "L_HP_HOSTILE") or (small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY")
+            if (not small) and statusbar_style ~= nil and statusbar_style.L_HP_PARTY ~= nil then
+                return "L_HP_PARTY"
+            end
+            return small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY"
         end
         if mode == "npc" then
             if hostile then
@@ -938,56 +1359,58 @@ local function ApplyBarStyle(frame, style)
             end
             return small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY"
         end
+        if tostring(frame.__polar_unit) == "player" then
+            if small and statusbar_style ~= nil and statusbar_style.S_HP_PARTY ~= nil then
+                return "S_HP_PARTY"
+            end
+            if (not small) and statusbar_style ~= nil and statusbar_style.L_HP_PARTY ~= nil then
+                return "L_HP_PARTY"
+            end
+        end
         return hostile and (small and "S_HP_HOSTILE" or "L_HP_HOSTILE") or (small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY")
     end
 
-    pcall(function()
-        if frame.hpBar ~= nil then
-            if mode == "pc" then
-                local changePc = frame.__polar_orig_ChangeHpBarTexture_forPc or frame.ChangeHpBarTexture_forPc
-                if type(changePc) == "function" then
-                    pcall(function()
-                        changePc(frame)
-                    end)
-                end
-            elseif mode == "npc" then
-                local changeNpc = frame.__polar_orig_ChangeHpBarTexture_forNpc or frame.ChangeHpBarTexture_forNpc
-                if type(changeNpc) == "function" then
-                    pcall(function()
-                        changeNpc(frame)
-                    end)
-                end
-            end
+    local function BuildTextureInfo(styleKey, afterColor)
+        if statusbar_style == nil or type(statusbar_style) ~= "table" then
+            return nil
+        end
+        local src = statusbar_style[styleKey]
+        if type(src) ~= "table" then
+            return nil
+        end
 
-            if statusbar_style ~= nil and type(statusbar_style) == "table" then
-                local unit = frame.__polar_unit
-                local hostile = isHostileUnit(unit)
-                local styleKey = getHpStyleKey(hostile)
-                frame.hpBar:ApplyBarTexture(statusbar_style[styleKey])
-            else
-                frame.hpBar:ApplyBarTexture()
+        local out = DeepCopyTable(src)
+        if colorsEnabled then
+            local up = BuildTextureAfterColorValues(out.afterImage_color_up, afterColor)
+            local down = BuildTextureAfterColorValues(out.afterImage_color_down, afterColor)
+            if up ~= nil and type(out.afterImage_color_up) == "table" then
+                out.afterImage_color_up = up
+            end
+            if down ~= nil and type(out.afterImage_color_down) == "table" then
+                out.afterImage_color_down = down
             end
         end
-    end)
-    pcall(function()
-        if frame.mpBar ~= nil then
-            if statusbar_style ~= nil and type(statusbar_style) == "table" then
-                local mpKey = usesSmallHpMp() and "S_MP" or "L_MP"
-                frame.mpBar:ApplyBarTexture(statusbar_style[mpKey])
-            else
-                frame.mpBar:ApplyBarTexture()
-            end
-        end
-    end)
+        return out
+    end
 
-    local function resolveColor(key, fallbackKey)
-        if type(style[key]) == "table" then
-            return style[key]
+    local function ApplyTexture(bar, textureInfo, textureKey)
+        if bar == nil then
+            return false
         end
-        if type(style[fallbackKey]) == "table" then
-            return style[fallbackKey]
+        local ok = pcall(function()
+            if textureInfo ~= nil then
+                bar.textureInfo = textureInfo
+                bar:ApplyBarTexture(textureInfo)
+            else
+                bar:ApplyBarTexture()
+            end
+        end)
+        if ok then
+            bar.__polar_texture_key = textureKey
+            bar.__polar_applied_texture_info = textureInfo or bar.textureInfo
+            InvalidateBarColorState(bar)
         end
-        return nil
+        return ok
     end
 
     local hpFill = resolveColor("hp_fill_color", "hp_bar_color")
@@ -995,18 +1418,48 @@ local function ApplyBarStyle(frame, style)
     local mpFill = resolveColor("mp_fill_color", "mp_bar_color")
     local mpAfter = resolveColor("mp_after_color", "mp_bar_color")
 
+    local hpBar = frame.hpBar
+    local mpBar = frame.mpBar
+
     pcall(function()
-        if frame.hpBar ~= nil and hpFill ~= nil then
-            local afterColor = colorsEnabled and (hpAfter or hpFill) or hpFill
-            ApplyBarColorState(frame.hpBar, hpFill, afterColor)
+        if hpBar ~= nil then
+            local unit = frame.__polar_unit
+            local hostile = isHostileUnit(unit)
+            local styleKey = getHpStyleKey(hostile)
+            local textureInfo = BuildTextureInfo(styleKey, hpAfter or hpFill)
+            ApplyTexture(hpBar, textureInfo, styleKey or mode or "default")
         end
     end)
     pcall(function()
-        if frame.mpBar ~= nil and mpFill ~= nil then
-            local afterColor = colorsEnabled and (mpAfter or mpFill) or mpFill
-            ApplyBarColorState(frame.mpBar, mpFill, afterColor)
+        if mpBar ~= nil then
+            local mpKey = usesSmallHpMp() and "S_MP" or "L_MP"
+            local textureInfo = BuildTextureInfo(mpKey, mpAfter or mpFill)
+            ApplyTexture(mpBar, textureInfo, mpKey or "default")
         end
     end)
+
+    local defaultFill = { 255, 255, 255, 255 }
+    pcall(function()
+        if hpBar ~= nil then
+            SetStatusBarDynamicState(hpBar, not colorsEnabled)
+            local fillColor = colorsEnabled and NormalizeColor255(hpFill, defaultFill) or defaultFill
+            local afterColor = colorsEnabled
+                and NormalizeColor255(hpAfter or hpFill, fillColor)
+                or GetTextureAfterColor255(hpBar.__polar_applied_texture_info or hpBar.textureInfo, defaultFill)
+            ApplyBarColorState(hpBar, fillColor, afterColor)
+        end
+    end)
+    pcall(function()
+        if mpBar ~= nil then
+            SetStatusBarDynamicState(mpBar, not colorsEnabled)
+            local fillColor = colorsEnabled and NormalizeColor255(mpFill, defaultFill) or defaultFill
+            local afterColor = colorsEnabled
+                and NormalizeColor255(mpAfter or mpFill, fillColor)
+                or GetTextureAfterColor255(mpBar.__polar_applied_texture_info or mpBar.textureInfo, defaultFill)
+            ApplyBarColorState(mpBar, fillColor, afterColor)
+        end
+    end)
+    frame.__polar_bar_style_running = nil
 end
 
 local function ApplyTextLayout(frame, style)
@@ -1153,7 +1606,7 @@ local function SetNotClickable(widget)
     end
 end
 
-local function SafeGetExtent(wnd)
+SafeGetExtent = function(wnd)
     if wnd == nil then
         return nil, nil
     end
@@ -1589,8 +2042,100 @@ local function ApplyFrameLayout(frame, settings)
     if type(styleTable) == "table" then
         ApplyValueTextFormat(frame, styleTable)
         ApplyTextLayout(frame, styleTable)
-        ApplyBarStyle(frame, styleTable)
+        RefreshFrameBarPresentation(frame, styleTable)
     end
+end
+
+local function ReapplyFrameBarStyle(frame)
+    if frame == nil or frame.__polar_frame_style_applying or frame.__polar_bar_style_running then
+        return
+    end
+    RefreshFrameBarPresentation(frame, nil)
+end
+
+local function SetBarWidgetStyleHook(frame, widget, tag)
+    if frame == nil or widget == nil or type(tag) ~= "string" then
+        return
+    end
+
+    local function wrap(methodName)
+        if type(widget[methodName]) ~= "function" then
+            return
+        end
+        local origKey = "__polar_orig_" .. tag .. "_" .. methodName
+        if type(widget[origKey]) == "function" then
+            return
+        end
+
+        widget[origKey] = widget[methodName]
+        widget[methodName] = function(self, ...)
+            local out = nil
+            local orig = self[origKey]
+            if type(orig) == "function" then
+                out = orig(self, ...)
+            end
+            ReapplyFrameBarStyle(frame)
+            return out
+        end
+    end
+
+    wrap("SetBarColor")
+    wrap("SetColor")
+    wrap("SetLayerColor")
+    wrap("SetBarTexture")
+    wrap("SetBarTextureCoords")
+    wrap("ApplyBarTexture")
+    wrap("ChangeAfterImageColor")
+end
+
+local function ClearBarWidgetStyleHook(widget, tag)
+    if widget == nil or type(tag) ~= "string" then
+        return
+    end
+
+    local function restore(methodName)
+        local origKey = "__polar_orig_" .. tag .. "_" .. methodName
+        if type(widget[origKey]) == "function" then
+            widget[methodName] = widget[origKey]
+        end
+        widget[origKey] = nil
+    end
+
+    restore("SetBarColor")
+    restore("SetColor")
+    restore("SetLayerColor")
+    restore("SetBarTexture")
+    restore("SetBarTextureCoords")
+    restore("ApplyBarTexture")
+    restore("ChangeAfterImageColor")
+end
+
+local function SetFrameBarStyleHook(frame)
+    if frame == nil then
+        return
+    end
+
+    SetBarWidgetStyleHook(frame, frame.hpBar, "hpbar")
+    SetBarWidgetStyleHook(frame, frame.hpBar ~= nil and frame.hpBar.statusBar or nil, "hpstatus")
+    SetBarWidgetStyleHook(frame, frame.hpBar ~= nil and frame.hpBar.statusBarAfterImage or nil, "hpafter")
+
+    SetBarWidgetStyleHook(frame, frame.mpBar, "mpbar")
+    SetBarWidgetStyleHook(frame, frame.mpBar ~= nil and frame.mpBar.statusBar or nil, "mpstatus")
+    SetBarWidgetStyleHook(frame, frame.mpBar ~= nil and frame.mpBar.statusBarAfterImage or nil, "mpafter")
+end
+
+local function ClearFrameBarStyleHook(frame)
+    if frame == nil then
+        return
+    end
+
+    ClearBarWidgetStyleHook(frame.hpBar, "hpbar")
+    ClearBarWidgetStyleHook(frame.hpBar ~= nil and frame.hpBar.statusBar or nil, "hpstatus")
+    ClearBarWidgetStyleHook(frame.hpBar ~= nil and frame.hpBar.statusBarAfterImage or nil, "hpafter")
+
+    ClearBarWidgetStyleHook(frame.mpBar, "mpbar")
+    ClearBarWidgetStyleHook(frame.mpBar ~= nil and frame.mpBar.statusBar or nil, "mpstatus")
+    ClearBarWidgetStyleHook(frame.mpBar ~= nil and frame.mpBar.statusBarAfterImage or nil, "mpafter")
 end
 
 local function SetFrameStyleHook(frame, settings)
@@ -1599,6 +2144,7 @@ local function SetFrameStyleHook(frame, settings)
     end
 
     frame.__polar_frame_style_cfg = settings
+    SetFrameBarStyleHook(frame)
     if frame.__polar_frame_style_hooked then
         return
     end
@@ -1651,6 +2197,8 @@ local function ClearFrameStyleHook(frame)
     end
 
     frame.__polar_frame_style_cfg = nil
+    ClearFrameBarStyleHook(frame)
+    RefreshFrameBarPresentation(frame, nil)
     if not frame.__polar_frame_style_hooked then
         return
     end
@@ -1680,11 +2228,38 @@ local function ClearFrameStyleHook(frame)
     end)
 end
 
-local function SetWidgetVisible(widget, shown)
+SetWidgetVisible = function(widget, shown)
     if widget ~= nil and widget.Show ~= nil then
         pcall(function()
             widget:Show(shown and true or false)
         end)
+    end
+end
+
+ResolveFrameStyleTable = function(frame)
+    if frame == nil then
+        return nil
+    end
+    if type(frame.__polar_style_override) == "table" then
+        return frame.__polar_style_override
+    end
+    local settings = frame.__polar_frame_style_cfg
+    if type(settings) == "table" and type(settings.style) == "table" then
+        return settings.style
+    end
+    return nil
+end
+
+RefreshFrameBarPresentation = function(frame, style)
+    if frame == nil then
+        return
+    end
+    local styleTable = style
+    if type(styleTable) ~= "table" or type(styleTable.style) == "table" then
+        styleTable = ResolveFrameStyleTable(frame)
+    end
+    if type(styleTable) == "table" then
+        ApplyBarStyle(frame, styleTable)
     end
 end
 
@@ -2011,7 +2586,7 @@ local function UpdatePartyOverlayData(record, settings)
         mpText = BuildFormattedValueText(vitals.mp, vitals.mp_max, style, true) or ""
     end
     SetLabelTextIfChanged(record.frame.mpBar ~= nil and record.frame.mpBar.mpLabel or nil, mpText)
-    ApplyBarStyle(record.frame, style)
+    RefreshFrameBarPresentation(record.frame, style)
     SetWidgetVisible(record.frame, true)
     HideStockPartyBits(record.host)
 end
@@ -2038,6 +2613,13 @@ local function UpdatePartyOverlays(settings)
             FreePartyOverlay(unit)
         end
     end
+end
+
+local function RefreshTrackedStockFrameBars()
+    RefreshFrameBarPresentation(UI.player.wnd, nil)
+    RefreshFrameBarPresentation(UI.target.wnd, nil)
+    RefreshFrameBarPresentation(UI.watchtarget.wnd, nil)
+    RefreshFrameBarPresentation(UI.target_of_target.wnd, nil)
 end
 
 local function ApplyAuraLayout(frame, aura)
@@ -2480,7 +3062,7 @@ ApplyStockFrameStyle = function(frame, style)
     end)
 
     ApplyTextLayout(frame, style)
-    ApplyBarStyle(frame, style)
+    RefreshFrameBarPresentation(frame, style)
 
     pcall(function()
         local function SafeAnchor(widget, target)
@@ -2690,6 +3272,8 @@ local function EnsureUi(settings)
         ApplyStockFrameStyle(UI.target_of_target.wnd, UI.target_of_target.wnd.__polar_style_override or baseStyle)
     end
 
+    RefreshTrackedStockFrameBars()
+
     if UI.player.wnd ~= nil then
         ApplyValueTextFormat(UI.player.wnd, UI.player.wnd.__polar_style_override or baseStyle)
     end
@@ -2835,6 +3419,11 @@ UI.UnLoad = function()
     if AlignmentModule ~= nil and AlignmentModule.Reset ~= nil then
         AlignmentModule.Reset(BuildUiContext())
     end
+    UI.enabled = false
+    RefreshFrameBarPresentation(UI.player.wnd, nil)
+    RefreshFrameBarPresentation(UI.target.wnd, nil)
+    RefreshFrameBarPresentation(UI.watchtarget.wnd, nil)
+    RefreshFrameBarPresentation(UI.target_of_target.wnd, nil)
     ClearPartyOverlays()
     for _, widget in ipairs(UI.created or {}) do
         pcall(function()
@@ -2886,6 +3475,8 @@ UI.SetEnabled = function(enabled)
     if not UI.enabled then
         ClearFrameStyleHook(UI.player.wnd)
         ClearFrameStyleHook(UI.target.wnd)
+        ClearFrameStyleHook(UI.watchtarget.wnd)
+        ClearFrameStyleHook(UI.target_of_target.wnd)
         ClearAuraFrameHook(UI.player.wnd)
         ClearAuraFrameHook(UI.target.wnd)
         ClearAuraOverride(UI.player.wnd)
@@ -2900,8 +3491,20 @@ UI.SetEnabled = function(enabled)
                 UI.target.wnd:UpdateAll()
             end
         end)
+        pcall(function()
+            if UI.watchtarget.wnd ~= nil and UI.watchtarget.wnd.UpdateAll ~= nil then
+                UI.watchtarget.wnd:UpdateAll()
+            end
+        end)
+        pcall(function()
+            if UI.target_of_target.wnd ~= nil and UI.target_of_target.wnd.UpdateAll ~= nil then
+                UI.target_of_target.wnd:UpdateAll()
+            end
+        end)
         ApplyFrameAlpha(UI.player.wnd, 1)
         ApplyFrameAlpha(UI.target.wnd, 1)
+        ApplyFrameAlpha(UI.watchtarget.wnd, 1)
+        ApplyFrameAlpha(UI.target_of_target.wnd, 1)
         pcall(function()
             if UI.player.wnd ~= nil and UI.player.wnd.SetScale ~= nil then
                 UI.player.wnd:SetScale(1)
@@ -2910,6 +3513,16 @@ UI.SetEnabled = function(enabled)
         pcall(function()
             if UI.target.wnd ~= nil and UI.target.wnd.SetScale ~= nil then
                 UI.target.wnd:SetScale(1)
+            end
+        end)
+        pcall(function()
+            if UI.watchtarget.wnd ~= nil and UI.watchtarget.wnd.SetScale ~= nil then
+                UI.watchtarget.wnd:SetScale(1)
+            end
+        end)
+        pcall(function()
+            if UI.target_of_target.wnd ~= nil and UI.target_of_target.wnd.SetScale ~= nil then
+                UI.target_of_target.wnd:SetScale(1)
             end
         end)
         UI.stock_refreshed = false
@@ -3007,6 +3620,7 @@ UI.OnUpdate = function(dt)
     UI.accum_ms = 0
 
     UpdatePartyOverlays(UI.settings)
+    RefreshTrackedStockFrameBars()
 
     if UI.enabled and UI.target.wnd ~= nil then
         local tid = api.Unit:GetUnitId("target")

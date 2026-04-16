@@ -2143,9 +2143,16 @@ local function ApplyControlsToSettings()
                 if frameKey ~= "all" then
                     local frameStyle = s.style.frames[frameKey]
                     if type(frameStyle) == "table" then
+                        frameStyle.bar_colors_enabled = nil
                         frameStyle.hp_texture_mode = nil
                         frameStyle.hp_custom_texture_path = nil
                         frameStyle.hp_custom_texture_key = nil
+                        frameStyle.hp_bar_color = nil
+                        frameStyle.hp_fill_color = nil
+                        frameStyle.hp_after_color = nil
+                        frameStyle.mp_bar_color = nil
+                        frameStyle.mp_fill_color = nil
+                        frameStyle.mp_after_color = nil
                     end
                 end
             end
