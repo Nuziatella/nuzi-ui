@@ -1806,7 +1806,13 @@ local function SetLabelTextIfChanged(label, text)
         return
     end
     local newText = tostring(text or "")
-    if label.__polar_text ~= newText then
+    local currentText = nil
+    if label.GetText ~= nil then
+        pcall(function()
+            currentText = tostring(label:GetText() or "")
+        end)
+    end
+    if label.__polar_text ~= newText or currentText ~= newText then
         label:SetText(newText)
         label.__polar_text = newText
     end
@@ -3621,7 +3627,6 @@ UI.OnUpdate = function(dt)
     UI.accum_ms = 0
 
     UpdatePartyOverlays(UI.settings)
-    RefreshTrackedStockFrameBars()
 
     if UI.enabled and UI.target.wnd ~= nil then
         local tid = api.Unit:GetUnitId("target")

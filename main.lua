@@ -12,7 +12,7 @@ local SaveSettingsFile = nil
 local PolarUiAddon = {
     name = "Nuzi UI",
     author = "Nuzi",
-    version = "2.1.3",
+    version = "2.1.4",
     desc = "Interface overhaul"
 }
 

@@ -31,7 +31,14 @@ local SettingsPage = {
     cooldown_search_query = "",
     cooldown_search_cursor = 1,
     cooldown_search_complete = false,
-    cooldown_buff_meta_cache = {}
+    cooldown_buff_meta_cache = {},
+    restart_notice_overlay = nil,
+    restart_notice_panel = nil,
+    restart_notice_title = nil,
+    restart_notice_line1 = nil,
+    restart_notice_line2 = nil,
+    restart_notice_line3 = nil,
+    restart_notice_ok = nil
 }
 
 local detectedAddonDir = nil
@@ -761,9 +768,164 @@ end
 
 local function MakeCloseHandler()
     return function()
+        if SettingsPage.restart_notice_overlay ~= nil and SettingsPage.restart_notice_overlay.Show ~= nil then
+            local visible = false
+            if SettingsPage.restart_notice_overlay.IsVisible ~= nil then
+                pcall(function()
+                    visible = SettingsPage.restart_notice_overlay:IsVisible() and true or false
+                end)
+            end
+            if visible then
+                SettingsPage.restart_notice_overlay:Show(false)
+                return
+            end
+        end
         if SettingsPage.window ~= nil then
             SettingsPage.window:Show(false)
         end
+    end
+end
+
+local function CreateEmptyChild(parent, id)
+    if parent == nil then
+        return nil
+    end
+
+    local widget = nil
+    if parent.CreateChildWidget ~= nil then
+        local ok, res = pcall(function()
+            return parent:CreateChildWidget("emptywidget", id, 0, true)
+        end)
+        if ok then
+            widget = res
+        end
+    end
+
+    if widget == nil and api ~= nil and api.Interface ~= nil and api.Interface.CreateWidget ~= nil then
+        local ok, res = pcall(function()
+            return api.Interface:CreateWidget("emptywidget", id, parent)
+        end)
+        if ok then
+            widget = res
+        end
+    end
+
+    return widget
+end
+
+local function AddPanelBackground(widget, alpha)
+    if widget == nil or widget.CreateNinePartDrawable == nil or TEXTURE_PATH == nil or TEXTURE_PATH.HUD == nil then
+        return nil
+    end
+
+    local background = nil
+    local ok, res = pcall(function()
+        return widget:CreateNinePartDrawable(TEXTURE_PATH.HUD, "background")
+    end)
+    if ok then
+        background = res
+    end
+
+    if background ~= nil then
+        pcall(function()
+            if background.SetTextureInfo ~= nil then
+                background:SetTextureInfo("bg_quest")
+            end
+            if background.SetColor ~= nil then
+                background:SetColor(0, 0, 0, tonumber(alpha) or 0.82)
+            end
+            background:AddAnchor("TOPLEFT", widget, 0, 0)
+            background:AddAnchor("BOTTOMRIGHT", widget, 0, 0)
+        end)
+    end
+
+    return background
+end
+
+local function EnsureRestartNotice()
+    if SettingsPage.window == nil or SettingsPage.restart_notice_overlay ~= nil then
+        return
+    end
+
+    local overlay = CreateEmptyChild(SettingsPage.window, "polarUiRestartNoticeOverlay")
+    if overlay == nil then
+        return
+    end
+    SettingsPage.restart_notice_overlay = overlay
+    pcall(function()
+        overlay:AddAnchor("TOPLEFT", SettingsPage.window, 0, 0)
+        overlay:AddAnchor("BOTTOMRIGHT", SettingsPage.window, 0, 0)
+        overlay:SetExtent(820, 760)
+        if overlay.Show ~= nil then
+            overlay:Show(false)
+        end
+    end)
+    AddPanelBackground(overlay, 0.4)
+
+    local panel = CreateEmptyChild(overlay, "polarUiRestartNoticePanel")
+    if panel == nil then
+        return
+    end
+    SettingsPage.restart_notice_panel = panel
+    pcall(function()
+        panel:SetExtent(420, 170)
+        panel:AddAnchor("CENTER", overlay, 0, 0)
+    end)
+    AddPanelBackground(panel, 0.92)
+
+    local title = SettingsWidgets.CreateLabel("polarUiRestartNoticeTitle", panel, "Restart Required", 24, 22, 18)
+    if title ~= nil and title.SetExtent ~= nil then
+        pcall(function()
+            title:SetExtent(320, 24)
+        end)
+    end
+    SettingsPage.restart_notice_title = title
+
+    SettingsPage.restart_notice_line1 = SettingsWidgets.CreateHintLabel(
+        "polarUiRestartNoticeLine1",
+        panel,
+        "A full game restart is required for some",
+        24,
+        58,
+        372
+    )
+    SettingsPage.restart_notice_line2 = SettingsWidgets.CreateHintLabel(
+        "polarUiRestartNoticeLine2",
+        panel,
+        "Nuzi UI settings to take effect.",
+        24,
+        80,
+        372
+    )
+    SettingsPage.restart_notice_line3 = SettingsWidgets.CreateHintLabel(
+        "polarUiRestartNoticeLine3",
+        panel,
+        "UI reload alone may not be enough.",
+        24,
+        102,
+        372
+    )
+
+    local okButton = SettingsWidgets.CreateButton("polarUiRestartNoticeOk", panel, "OK", 165, 130)
+    if okButton ~= nil then
+        pcall(function()
+            okButton:SetExtent(90, 26)
+        end)
+        if okButton.SetHandler ~= nil then
+            okButton:SetHandler("OnClick", function()
+                if SettingsPage.restart_notice_overlay ~= nil and SettingsPage.restart_notice_overlay.Show ~= nil then
+                    SettingsPage.restart_notice_overlay:Show(false)
+                end
+            end)
+        end
+    end
+    SettingsPage.restart_notice_ok = okButton
+end
+
+local function ShowRestartNotice()
+    EnsureRestartNotice()
+    if SettingsPage.restart_notice_overlay ~= nil and SettingsPage.restart_notice_overlay.Show ~= nil then
+        SettingsPage.restart_notice_overlay:Show(true)
     end
 end
 
@@ -4390,6 +4552,7 @@ local function EnsureWindow()
             end)
         end
         RefreshControls()
+        ShowRestartNotice()
     end)
 
     closeBtn:SetHandler("OnClick", function()
@@ -4460,6 +4623,7 @@ local function EnsureWindow()
     end
 
     RefreshControls()
+    EnsureRestartNotice()
 end
 
 function SettingsPage.init(settings, onSave, onApply, actions)
