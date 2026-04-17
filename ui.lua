@@ -132,6 +132,86 @@ local function TrimText(value)
     return text
 end
 
+local function NormalizeRuntimeUnitToken(unit)
+    if type(unit) ~= "string" then
+        return nil
+    end
+    local token = TrimText(unit)
+    if token == "" then
+        return nil
+    end
+    if token == "targetoftarget" or token == "target_of_target" then
+        return "targettarget"
+    end
+    return token
+end
+
+local function ResolveFrameRuntimeUnit(frame)
+    if type(frame) ~= "table" then
+        return nil
+    end
+    local token = NormalizeRuntimeUnitToken(frame.__polar_runtime_unit)
+    if token ~= nil then
+        return token
+    end
+    token = NormalizeRuntimeUnitToken(frame.target)
+    if token ~= nil then
+        return token
+    end
+    return NormalizeRuntimeUnitToken(frame.__polar_unit)
+end
+
+local function SyncSecondaryFrameBinding(frame, runtimeUnit)
+    if frame == nil then
+        return
+    end
+
+    local unitKey = NormalizeRuntimeUnitToken(runtimeUnit)
+    if unitKey == nil then
+        return
+    end
+
+    local normalizedUnitId = nil
+    if Runtime ~= nil and Runtime.GetUnitId ~= nil then
+        normalizedUnitId = NormalizeUnitId(Runtime.GetUnitId(unitKey))
+    end
+    local bindingKey = tostring(unitKey) .. ":" .. tostring(normalizedUnitId or "")
+    local changedTarget = type(frame.target) ~= "string" or frame.target ~= unitKey
+    if not changedTarget and frame.__polar_bound_target_key == bindingKey then
+        return
+    end
+
+    if changedTarget then
+        frame.target = unitKey
+    end
+    frame.__polar_bound_target_key = bindingKey
+
+    local invoked = false
+    if unitKey == "watchtarget" and type(frame.SetWatchTarget) == "function" then
+        local ok = pcall(function()
+            frame:SetWatchTarget(unitKey)
+        end)
+        invoked = invoked or ok
+    end
+    if type(frame.SetTarget) == "function" then
+        local ok = pcall(function()
+            frame:SetTarget(unitKey)
+        end)
+        invoked = invoked or ok
+    end
+    if type(frame.TargetChanged) == "function" then
+        local ok = pcall(function()
+            frame:TargetChanged(unitKey)
+        end)
+        invoked = invoked or ok
+    end
+    if (changedTarget or invoked) and type(frame.UpdateAll) == "function" then
+        pcall(function()
+            frame:UpdateAll()
+        end)
+    end
+end
+
 local function ResolveUnitDisplayName(info)
     if type(info) ~= "table" then
         return ""
@@ -1068,7 +1148,7 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
     pcall(function()
         if frame.hpBar ~= nil then
             if statusbar_style ~= nil and type(statusbar_style) == "table" then
-                local hostile = isHostileUnit(frame.__polar_unit)
+                local hostile = isHostileUnit(ResolveFrameRuntimeUnit(frame) or frame.__polar_unit)
                 frame.hpBar:ApplyBarTexture(statusbar_style[getHpStyleKey(hostile)])
             else
                 frame.hpBar:ApplyBarTexture()
@@ -1424,7 +1504,7 @@ local function ApplyBarStyle(frame, style)
 
     pcall(function()
         if hpBar ~= nil then
-            local unit = frame.__polar_unit
+            local unit = ResolveFrameRuntimeUnit(frame) or frame.__polar_unit
             local hostile = isHostileUnit(unit)
             local styleKey = getHpStyleKey(hostile)
             local textureInfo = BuildTextureInfo(styleKey, hpAfter or hpFill)
@@ -1721,7 +1801,8 @@ local function ParseTwoNumbers(text)
 end
 
 local function GetUnitVitals(unit)
-    if api == nil or api.Unit == nil or type(unit) ~= "string" then
+    unit = NormalizeRuntimeUnitToken(unit)
+    if api == nil or api.Unit == nil or unit == nil then
         return nil
     end
 
@@ -1851,12 +1932,7 @@ local function ApplyValueTextFormat(frame, style)
         return
     end
 
-    local unit = nil
-    if type(frame.__polar_unit) == "string" then
-        unit = frame.__polar_unit
-    elseif type(frame.target) == "string" then
-        unit = frame.target
-    end
+    local unit = ResolveFrameRuntimeUnit(frame)
 
     local vitals = GetUnitVitals(unit)
 
@@ -3156,10 +3232,12 @@ local function EnsureUi(settings)
     end
     if UI.watchtarget.wnd ~= nil then
         UI.watchtarget.wnd.__polar_unit = "watchtarget"
+        UI.watchtarget.wnd.__polar_runtime_unit = "watchtarget"
         UI.watchtarget.wnd.__polar_small_hpmp = true
     end
     if UI.target_of_target.wnd ~= nil then
-        UI.target_of_target.wnd.__polar_unit = "targetoftarget"
+        UI.target_of_target.wnd.__polar_unit = "targettarget"
+        UI.target_of_target.wnd.__polar_runtime_unit = "targettarget"
         UI.target_of_target.wnd.__polar_small_hpmp = true
     end
 
@@ -3258,6 +3336,9 @@ local function EnsureUi(settings)
             end
         end)
     end
+
+    SyncSecondaryFrameBinding(UI.watchtarget.wnd, "watchtarget")
+    SyncSecondaryFrameBinding(UI.target_of_target.wnd, "targettarget")
 
     ApplyUnitFramePosition(UI.player.wnd, settings, "player", 10, 300)
     ApplyUnitFramePosition(UI.target.wnd, settings, "target", 10, 380)
@@ -3625,6 +3706,11 @@ UI.OnUpdate = function(dt)
     end
 
     UI.accum_ms = 0
+
+    if UI.enabled then
+        SyncSecondaryFrameBinding(UI.watchtarget.wnd, "watchtarget")
+        SyncSecondaryFrameBinding(UI.target_of_target.wnd, "targettarget")
+    end
 
     UpdatePartyOverlays(UI.settings)
 
