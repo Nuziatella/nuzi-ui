@@ -1,0 +1,5 @@
+settings.txt
+settings_backup.txt
+settings_backup_*.txt
+settings_backup_index.txt
+backups/
