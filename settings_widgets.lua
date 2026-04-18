@@ -1,6 +1,11 @@
 local api = require("api")
 
 local SettingsWidgets = {}
+local CreateNuziSlider = nil
+
+pcall(function()
+    CreateNuziSlider = require("nuzi-core/ui/slider")
+end)
 
 local function setLabelStyle(label, fontSize, color)
     if label == nil or label.style == nil then
@@ -252,7 +257,15 @@ function SettingsWidgets.CreateSlider(id, parent, text, x, y, minVal, maxVal, st
     setLabelStyle(label, 13, { 1, 1, 1, 1 })
 
     local slider = nil
-    if api._Library ~= nil and api._Library.UI ~= nil and api._Library.UI.CreateSlider ~= nil then
+    if CreateNuziSlider ~= nil then
+        local ok, res = pcall(function()
+            return CreateNuziSlider(id, parent)
+        end)
+        if ok then
+            slider = res
+        end
+    end
+    if slider == nil and api._Library ~= nil and api._Library.UI ~= nil and api._Library.UI.CreateSlider ~= nil then
         local ok, res = pcall(function()
             return api._Library.UI.CreateSlider(id, parent)
         end)
