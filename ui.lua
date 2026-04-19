@@ -88,14 +88,22 @@ local STOCK_LEVEL_ARTIFACT_FIELDS = {
     "levelLabel",
     "level",
     "gradeIcon",
-    "ancestralIcon"
+    "ancestralIcon",
+    "heirFrame",
+    "heirWing",
+    "heirIcon",
+    "heirTexture",
+    "successorFrame",
+    "successor_frame"
 }
 
 local STOCK_LEVEL_ARTIFACT_PATTERNS = {
     "ancestral",
     "grade",
     "wing",
-    "flare"
+    "flare",
+    "heir",
+    "successor"
 }
 
 local STOCK_TARGET_BACKGROUND_FIELDS = {
@@ -111,7 +119,9 @@ local STOCK_TARGET_BACKGROUND_FIELDS = {
     "leftBg",
     "rightBg",
     "leftDeco",
-    "rightDeco"
+    "rightDeco",
+    "gradeBg",
+    "gradeDeco"
 }
 
 local STOCK_TARGET_BACKGROUND_EXCLUDE = {
@@ -445,19 +455,43 @@ local function ApplyLevelArtifactHide(levelRoot, hidden)
         SetWidgetForcedHidden(widget, hidden)
     end
 
-    for key, child in pairs(levelRoot) do
-        if key ~= "style" and key ~= "label" and type(child) == "table" then
-            local lower = string.lower(tostring(key or ""))
-            if lower == "icon" or lower == "bg" or MatchesLevelArtifactPattern(lower) then
-                hideWidget(child)
-                for nestedKey, nestedValue in pairs(child) do
-                    if nestedKey ~= "style" and type(nestedValue) == "table" then
-                        hideWidget(nestedValue)
-                    end
-                end
+    local function visit(node, key, depth)
+        if type(node) ~= "table" or (tonumber(depth) or 0) > 5 then
+            return
+        end
+
+        local lower = string.lower(tostring(key or ""))
+        if lower == "icon" or lower == "bg" or lower == "gradeicon" or MatchesLevelArtifactPattern(lower) then
+            hideWidget(node)
+        end
+
+        for nestedKey, nestedValue in pairs(node) do
+            if nestedKey ~= "style" and nestedKey ~= "label" and type(nestedValue) == "table" then
+                visit(nestedValue, nestedKey, (tonumber(depth) or 0) + 1)
             end
         end
     end
+
+    visit(levelRoot, "level", 0)
+end
+
+local function InvokeFrameMethod(frame, methodName, ...)
+    if frame == nil or type(methodName) ~= "string" then
+        return false
+    end
+
+    local fn = frame["__polar_orig_" .. methodName]
+    if type(fn) ~= "function" then
+        fn = frame[methodName]
+    end
+    if type(fn) ~= "function" then
+        return false
+    end
+
+    local args = { ... }
+    return pcall(function()
+        fn(frame, unpack(args))
+    end)
 end
 
 local function EnsureTargetFallbackBarBackground(frame, key)
@@ -1949,15 +1983,43 @@ local function ApplyStockFrameDecorations(frame, settings)
     end
 
     local hideLevelArtifacts = type(settings) == "table" and settings.hide_ancestral_icon_level == true
-    local hideBossBackground = type(settings) == "table" and settings.hide_boss_frame_background == true and UI ~= nil and UI.target ~= nil and frame == UI.target.wnd
+    local isTargetFrame = UI ~= nil and UI.target ~= nil and frame == UI.target.wnd
+    local hideBossBackground = type(settings) == "table" and settings.hide_boss_frame_background == true and isTargetFrame
+    local hideTargetGradeStar = type(settings) == "table" and settings.hide_target_grade_star == true and isTargetFrame
 
     for _, key in ipairs(STOCK_LEVEL_ARTIFACT_FIELDS) do
         SetWidgetForcedHidden(frame[key], hideLevelArtifacts)
     end
     ApplyLevelArtifactHide(frame.level, hideLevelArtifacts)
 
-    if UI ~= nil and UI.target ~= nil and frame == UI.target.wnd then
+    if hideLevelArtifacts then
+        InvokeFrameMethod(frame, "ShowHeirFrame", false)
+        frame.__polar_heir_art_forced_hidden = true
+    elseif frame.__polar_heir_art_forced_hidden then
+        frame.__polar_heir_art_forced_hidden = nil
+        InvokeFrameMethod(frame, "UpdateLevel")
+    end
+
+    if isTargetFrame then
         local style = ResolveFrameStyleTable(frame)
+        local gradeStarOffsetX = tonumber(type(style) == "table" and style.target_grade_star_offset_x or nil) or 0
+        local gradeStarOffsetY = tonumber(type(style) == "table" and style.target_grade_star_offset_y or nil) or 0
+        local moveGradeStar = gradeStarOffsetX ~= 0 or gradeStarOffsetY ~= 0
+
+        pcall(function()
+            if not moveGradeStar and frame.__polar_grade_star_moved then
+                frame.__polar_grade_star_moved = nil
+                if frame.SetGradeBg ~= nil then
+                    frame:SetGradeBg()
+                end
+                if frame.UpdateNameStyle ~= nil then
+                    frame:UpdateNameStyle()
+                end
+            end
+        end)
+
+        SetWidgetForcedHidden(frame.gradeStar, hideTargetGradeStar)
+
         local seen = {}
         local function applyBackground(widget)
             widget = ResolveWidgetCandidate(widget)
@@ -1976,12 +2038,62 @@ local function ApplyStockFrameDecorations(frame, settings)
             for key, value in pairs(frame) do
                 local lower = string.lower(tostring(key or ""))
                 if not STOCK_TARGET_BACKGROUND_EXCLUDE[lower] and
-                    (lower == "bg" or lower == "background" or lower == "backdrop" or string.find(lower, "boss", 1, true) ~= nil or string.find(lower, "background", 1, true) ~= nil) then
+                    (lower == "bg" or lower == "background" or lower == "backdrop" or lower == "gradebg" or
+                        lower == "gradedeco" or string.find(lower, "boss", 1, true) ~= nil or
+                        string.find(lower, "background", 1, true) ~= nil) then
                     applyBackground(value)
                 end
             end
         end)
         ApplyTargetFallbackBackgroundStyle(frame, style, hideBossBackground)
+
+        pcall(function()
+            local gradeStar = ResolveWidgetCandidate(frame.gradeStar)
+            if gradeStar == nil or hideTargetGradeStar or not moveGradeStar then
+                return
+            end
+
+            local function safeAnchor(widget, point, rel, relPoint, x, y)
+                if widget == nil or widget.AddAnchor == nil or rel == nil then
+                    return false
+                end
+                local ok = pcall(function()
+                    widget:AddAnchor(point, rel, relPoint, x, y)
+                end)
+                if ok then
+                    return true
+                end
+                return pcall(function()
+                    widget:AddAnchor(point, rel, x, y)
+                end)
+            end
+
+            if gradeStar.RemoveAllAnchors ~= nil then
+                gradeStar:RemoveAllAnchors()
+            end
+
+            local anchored = false
+            if frame.level ~= nil then
+                anchored = safeAnchor(gradeStar, "BOTTOMLEFT", frame.level, "BOTTOMRIGHT", gradeStarOffsetX, gradeStarOffsetY)
+            end
+            if not anchored and frame.level ~= nil and frame.level.label ~= nil then
+                anchored = safeAnchor(
+                    gradeStar,
+                    "BOTTOMLEFT",
+                    frame.level.label,
+                    "BOTTOMRIGHT",
+                    gradeStarOffsetX,
+                    gradeStarOffsetY
+                )
+            end
+            if not anchored and frame.name ~= nil then
+                anchored = safeAnchor(gradeStar, "LEFT", frame.name, "LEFT", gradeStarOffsetX, gradeStarOffsetY)
+            end
+
+            if anchored then
+                frame.__polar_grade_star_moved = true
+            end
+        end)
     end
 end
 
@@ -2010,6 +2122,20 @@ local function ApplyStockDistanceSetting()
             end
         end)
     end
+end
+
+local function RefreshStockFrameDecorations(settings)
+    for _, frame in ipairs({
+        UI.player.wnd,
+        UI.target.wnd,
+        UI.watchtarget.wnd,
+        UI.target_of_target.wnd
+    }) do
+        if frame ~= nil then
+            ApplyStockFrameDecorations(frame, settings)
+        end
+    end
+    ApplyStockDistanceSetting()
 end
 
 local function HideLegacyPolarDistanceOverlay(frame)
@@ -2649,9 +2775,15 @@ local function SetFrameStyleHook(frame, settings)
         wrap("UpdateHpMp")
         wrap("SetHp")
         wrap("SetMp")
+        wrap("SetLevel")
         wrap("UpdateNameStyle")
         wrap("UpdateName")
         wrap("UpdateLevel")
+        wrap("ShowHeirFrame")
+        wrap("TargetChanged")
+        wrap("ChangeTarget")
+        wrap("SetTarget")
+        wrap("SetTargetToTarget")
         wrap("UpdateHpBarTexture_FirstHitByMe")
         wrap("ChangeHpBarTexture_forPc")
         wrap("ChangeHpBarTexture_forNpc")
@@ -2686,9 +2818,15 @@ local function ClearFrameStyleHook(frame)
         restore("UpdateHpMp")
         restore("SetHp")
         restore("SetMp")
+        restore("SetLevel")
         restore("UpdateNameStyle")
         restore("UpdateName")
         restore("UpdateLevel")
+        restore("ShowHeirFrame")
+        restore("TargetChanged")
+        restore("ChangeTarget")
+        restore("SetTarget")
+        restore("SetTargetToTarget")
         restore("UpdateHpBarTexture_FirstHitByMe")
         restore("ChangeHpBarTexture_forPc")
         restore("ChangeHpBarTexture_forNpc")
@@ -3803,7 +3941,7 @@ local function EnsureUi(settings)
 
     UpdatePartyOverlays(settings)
 
-    ApplyStockDistanceSetting()
+    RefreshStockFrameDecorations(settings)
 
     local auraEnabled = type(baseStyle.aura) == "table" and (baseStyle.aura.enabled and true or false) or false
     local auraCfgKey = auraEnabled and GetAuraCfgKey(baseStyle.aura) or nil
@@ -4153,6 +4291,9 @@ UI.OnUpdate = function(dt)
     if UI.enabled then
         SyncSecondaryFrameBinding(UI.watchtarget.wnd, "watchtarget")
         SyncSecondaryFrameBinding(UI.target_of_target.wnd, "targettarget")
+        ApplyUnitFramePosition(UI.watchtarget.wnd, UI.settings, "watchtarget", 10, 460)
+        ApplyUnitFramePosition(UI.target_of_target.wnd, UI.settings, "target_of_target", 10, 540)
+        RefreshStockFrameDecorations(UI.settings)
     end
 
     UpdatePartyOverlays(UI.settings)

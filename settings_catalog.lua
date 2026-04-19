@@ -8,6 +8,12 @@ SettingsCatalog.PAGES = {
         summary = "Core addon toggles and shared runtime behavior."
     },
     {
+        id = "npc",
+        label = "NPC",
+        title = "NPC",
+        summary = "Stock unit-frame art, boss target decorations, target distance, and grade-star placement."
+    },
+    {
         id = "text",
         label = "Text",
         title = "Text",

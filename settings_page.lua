@@ -4,6 +4,7 @@ local Compat = SafeRequire("nuzi-ui/compat", "nuzi-ui.compat")
 local SettingsCommon = SafeRequire("nuzi-ui/settings_common", "nuzi-ui.settings_common")
 local SettingsWidgets = SafeRequire("nuzi-ui/settings_widgets", "nuzi-ui.settings_widgets")
 local SettingsCatalog = SafeRequire("nuzi-ui/settings_catalog", "nuzi-ui.settings_catalog")
+local SettingsSchema = SafeRequire("nuzi-ui/settings_schema", "nuzi-ui.settings_schema")
 
 local SettingsPage = {
     settings = nil,
@@ -32,6 +33,7 @@ local SettingsPage = {
     cooldown_search_cursor = 1,
     cooldown_search_complete = false,
     cooldown_buff_meta_cache = {},
+    schema_control_states = {},
     restart_notice_overlay = nil,
     restart_notice_panel = nil,
     restart_notice_title = nil,
@@ -201,6 +203,7 @@ local COOLDOWN_SEARCH_BATCH = 1000
 local COOLDOWN_SEARCH_MAX_ID = 250000
 local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAGES) == "table" and SettingsCatalog.PAGES) or {
     { id = "general", label = "General", title = "General", summary = "Core addon toggles and shared runtime behavior." },
+    { id = "npc", label = "NPC", title = "NPC", summary = "Stock unit-frame art, boss target decorations, target distance, and grade-star placement." },
     { id = "text", label = "Text", title = "Text", summary = "Name, level, role, guild, and number formatting." },
     { id = "bars", label = "Bars", title = "Bars", summary = "Frame sizing, alpha, bar colors, textures, and value placement." },
     { id = "auras", label = "Auras", title = "Auras", summary = "Aura windows, icon layout, and buff or debuff anchor controls." },
@@ -518,6 +521,7 @@ local SetComboBoxIndex1Based = SettingsWidgets.SetComboBoxIndex1Based
 local GetComboBoxIndex1Based = SettingsWidgets.GetComboBoxIndex1Based
 
 local EnsureStyleFrames = SettingsCommon.EnsureStyleFrames
+local SetReadableControlText
 
 local function GetStyleTargetKeyFromIndex(idx)
     return SettingsCommon.GetKeyFromIndex(STYLE_TARGET_KEYS, idx)
@@ -626,9 +630,7 @@ local function UpdateStyleTargetHints()
 
     for _, key in ipairs(hintKeys) do
         local label = SettingsPage.controls[key]
-        if label ~= nil and label.SetText ~= nil then
-            label:SetText(summary)
-        end
+        SetReadableControlText(label, summary)
     end
 end
 
@@ -665,6 +667,27 @@ local function GetStyleTables(settings)
         override = {}
     end
     return EffectiveStyle(base, override), override
+end
+
+local function GetTargetFrameStyleTables(settings)
+    if type(settings) ~= "table" then
+        return nil, nil
+    end
+
+    EnsureStyleFrames(settings)
+    if type(settings.style) ~= "table" then
+        settings.style = {}
+    end
+
+    local base = settings.style
+    if type(base.frames) ~= "table" then
+        base.frames = {}
+    end
+    if type(base.frames.target) ~= "table" then
+        base.frames.target = {}
+    end
+
+    return EffectiveStyle(base, base.frames.target), base.frames.target
 end
 
 local DeepCopySimple = SettingsCommon.DeepCopySimple
@@ -941,15 +964,18 @@ UpdateNavigationState = function(activePageId)
             end
             btn:SetText(label)
         end
+        if btn ~= nil and btn.SetAlpha ~= nil then
+            pcall(function()
+                btn:SetAlpha(page.id == pageId and 1 or 0.82)
+            end)
+        end
     end
 
     local meta = GetPageMeta(pageId) or {}
     if SettingsPage.controls.page_header_title ~= nil and SettingsPage.controls.page_header_title.SetText ~= nil then
         SettingsPage.controls.page_header_title:SetText(tostring(meta.title or ""))
     end
-    if SettingsPage.controls.page_header_summary ~= nil and SettingsPage.controls.page_header_summary.SetText ~= nil then
-        SettingsPage.controls.page_header_summary:SetText(tostring(meta.summary or ""))
-    end
+    SetReadableControlText(SettingsPage.controls.page_header_summary, meta.summary or "")
 end
 
 GetCooldownBuffMetaById = function(rawId)
@@ -1338,6 +1364,348 @@ local GetSliderValue = SettingsWidgets.GetSliderValue
 local SetSliderValue = SettingsWidgets.SetSliderValue
 local CreateSlider = SettingsWidgets.CreateSlider
 local CreateComboBox = SettingsWidgets.CreateComboBox
+local CreateSectionCard = SettingsWidgets.CreateSectionCard
+local SetControlEnabled = SettingsWidgets.SetControlEnabled
+local EstimateTextHeight = SettingsWidgets.EstimateTextHeight
+local SetWrappedText = SettingsWidgets.SetWrappedText
+
+local SCHEMA_PAGE_IDS = { "general", "npc", "text", "bars", "auras", "plates" }
+local SCHEMA_PAGE_LEFT = 18
+local SCHEMA_PAGE_TOP = 18
+local SCHEMA_CARD_WIDTH = 580
+local SCHEMA_SECTION_GAP = 16
+
+SetReadableControlText = function(control, text)
+    if control == nil then
+        return
+    end
+
+    local content = tostring(text or "")
+    if type(SetWrappedText) == "function" and control.__polar_wrap_width ~= nil then
+        local ok = pcall(function()
+            SetWrappedText(control, content)
+        end)
+        if ok then
+            return
+        end
+    end
+
+    if control.SetText ~= nil then
+        pcall(function()
+            control:SetText(content)
+        end)
+    end
+end
+
+local function EstimateSchemaFieldAdvance(field)
+    if type(field) ~= "table" then
+        return 0
+    end
+    if tonumber(field.advance) ~= nil then
+        return math.max(0, tonumber(field.advance))
+    end
+    local kind = tostring(field.kind or "")
+    if kind == "combo" then
+        return 34
+    elseif kind == "hint" then
+        local width = tonumber(field.width) or 520
+        local height = tonumber(field.height) or
+            (type(EstimateTextHeight) == "function" and EstimateTextHeight(field.text, width, 12, 16, 1)) or 16
+        return math.max(height + 8, 26)
+    elseif kind == "label" then
+        local width = tonumber(field.width) or 520
+        local fontSize = tonumber(field.font_size) or 13
+        local height = tonumber(field.height) or
+            (type(EstimateTextHeight) == "function" and EstimateTextHeight(field.text, width, fontSize, fontSize + 4, 1)) or 18
+        return math.max(height + 6, 22)
+    elseif kind == "slider" then
+        return 24
+    elseif kind == "custom" then
+        return math.max(0, tonumber(field.estimate_height) or 0)
+    elseif kind == "spacer" then
+        return math.max(0, tonumber(field.size) or 12)
+    end
+    return 24
+end
+
+local function EvaluateSchemaDependency(dep)
+    if type(dep) ~= "table" then
+        return true
+    end
+    local control = dep.control ~= nil and SettingsPage.controls[tostring(dep.control)] or nil
+    local checked = nil
+    if control ~= nil and control.GetChecked ~= nil then
+        local ok, value = pcall(function()
+            return control:GetChecked()
+        end)
+        if ok then
+            checked = value and true or false
+        end
+    end
+    if dep.checked ~= nil then
+        return checked == (dep.checked and true or false)
+    end
+    return checked == true
+end
+
+local function RegisterSchemaDependency(dep, widgets)
+    if type(dep) ~= "table" or type(widgets) ~= "table" then
+        return
+    end
+    local list = {}
+    for _, widget in ipairs(widgets) do
+        if widget ~= nil then
+            list[#list + 1] = widget
+        end
+    end
+    if #list == 0 then
+        return
+    end
+    SettingsPage.schema_control_states[#SettingsPage.schema_control_states + 1] = {
+        dep = dep,
+        widgets = list
+    }
+end
+
+local function RefreshSchemaControlStates()
+    if type(SettingsPage.schema_control_states) ~= "table" then
+        return
+    end
+    for _, entry in ipairs(SettingsPage.schema_control_states) do
+        local enabled = EvaluateSchemaDependency(entry.dep)
+        if type(entry.widgets) == "table" then
+            for _, widget in ipairs(entry.widgets) do
+                if widget ~= nil and SetControlEnabled ~= nil then
+                    SetControlEnabled(widget, enabled)
+                end
+            end
+        end
+    end
+end
+
+local function BuildSchemaPlatesGuildColorEditor(parent, y)
+    SettingsPage.controls.plates_guild_color_rows = {}
+
+    local guildLabel = CreateLabel("polarUiPlatesGuildColorNameLbl", parent, "Guild", 0, y, 15)
+    if guildLabel ~= nil and guildLabel.SetExtent ~= nil then
+        pcall(function()
+            guildLabel:SetExtent(50, 18)
+        end)
+    end
+    SettingsPage.controls.plates_guild_color_name = CreateEdit("polarUiPlatesGuildColorName", parent, "", 58, y - 4, 180, 22)
+    SettingsPage.controls.plates_guild_color_add = CreateButton("polarUiPlatesGuildColorAdd", parent, "Add", 250, y - 6)
+    SettingsPage.controls.plates_guild_color_add_target = CreateButton("polarUiPlatesGuildColorAddTarget", parent, "Use Target", 328, y - 6)
+    if SettingsPage.controls.plates_guild_color_add ~= nil then
+        pcall(function()
+            SettingsPage.controls.plates_guild_color_add:SetExtent(68, 22)
+        end)
+    end
+    if SettingsPage.controls.plates_guild_color_add_target ~= nil then
+        pcall(function()
+            SettingsPage.controls.plates_guild_color_add_target:SetExtent(102, 22)
+        end)
+    end
+    y = y + 28
+
+    SettingsPage.controls.plates_guild_color_r, SettingsPage.controls.plates_guild_color_r_val = CreateSlider(
+        "polarUiPlatesGuildColorR",
+        parent,
+        "R (0-255)",
+        0,
+        y,
+        0,
+        255,
+        1
+    )
+    y = y + 24
+    SettingsPage.controls.plates_guild_color_g, SettingsPage.controls.plates_guild_color_g_val = CreateSlider(
+        "polarUiPlatesGuildColorG",
+        parent,
+        "G (0-255)",
+        0,
+        y,
+        0,
+        255,
+        1
+    )
+    y = y + 24
+    SettingsPage.controls.plates_guild_color_b, SettingsPage.controls.plates_guild_color_b_val = CreateSlider(
+        "polarUiPlatesGuildColorB",
+        parent,
+        "B (0-255)",
+        0,
+        y,
+        0,
+        255,
+        1
+    )
+    y = y + 30
+
+    for i = 1, 8 do
+        local rowY = y
+        local rowLabel = CreateLabel("polarUiPlatesGuildColorRow" .. tostring(i), parent, "", 15, rowY, 14)
+        if rowLabel ~= nil and rowLabel.SetExtent ~= nil then
+            pcall(function()
+                rowLabel:SetExtent(300, 18)
+            end)
+        end
+        local rowRemove = CreateButton("polarUiPlatesGuildColorRemove" .. tostring(i), parent, "Remove", 330, rowY - 6)
+        if rowRemove ~= nil and rowRemove.SetExtent ~= nil then
+            pcall(function()
+                rowRemove:SetExtent(80, 22)
+            end)
+        end
+        SettingsPage.controls.plates_guild_color_rows[i] = {
+            label = rowLabel,
+            remove = rowRemove
+        }
+        y = y + 26
+    end
+
+    return y
+end
+
+local CUSTOM_SCHEMA_RENDERERS = {
+    plates_guild_colors = BuildSchemaPlatesGuildColorEditor
+}
+
+local function BuildSchemaField(parent, y, field)
+    if type(field) ~= "table" then
+        return y
+    end
+
+    local kind = tostring(field.kind or "")
+    local widgets = {}
+
+    if kind == "checkbox" then
+        local checkbox = CreateCheckbox(tostring(field.widget_id), parent, tostring(field.label or ""), 0, y)
+        SettingsPage.controls[tostring(field.control)] = checkbox
+        widgets[1] = checkbox
+    elseif kind == "slider" then
+        local slider, valueLabel = CreateSlider(
+            tostring(field.widget_id),
+            parent,
+            tostring(field.label or ""),
+            0,
+            y,
+            tonumber(field.min) or 0,
+            tonumber(field.max) or 100,
+            tonumber(field.step) or 1
+        )
+        SettingsPage.controls[tostring(field.control)] = slider
+        SettingsPage.controls[tostring(field.value_control or (tostring(field.control) .. "_val"))] = valueLabel
+        widgets[1] = slider
+    elseif kind == "combo" then
+        local comboLabel = CreateLabel(tostring(field.widget_id) .. "Label", parent, tostring(field.label or ""), 0, y, tonumber(field.font_size) or 15)
+        local combo = CreateComboBox(parent, field.items or {}, 175, y - 4, tonumber(field.width) or 220, tonumber(field.height) or 24)
+        SettingsPage.controls[tostring(field.control)] = combo
+        widgets[1] = combo
+        widgets[2] = comboLabel
+    elseif kind == "hint" then
+        local hintLabel = CreateHintLabel(
+            tostring(field.widget_id),
+            parent,
+            tostring(field.text or ""),
+            0,
+            y,
+            tonumber(field.width) or 520
+        )
+        if hintLabel ~= nil and hintLabel.SetExtent ~= nil then
+            local hintHeight = tonumber(field.height) or tonumber(hintLabel.__polar_estimated_height) or 18
+            pcall(function()
+                hintLabel:SetExtent(tonumber(field.width) or 520, hintHeight)
+            end)
+        end
+        if field.control ~= nil then
+            SettingsPage.controls[tostring(field.control)] = hintLabel
+        end
+        widgets[1] = hintLabel
+    elseif kind == "label" then
+        local labelWidget = CreateLabel(
+            tostring(field.widget_id),
+            parent,
+            tostring(field.text or ""),
+            0,
+            y,
+            tonumber(field.font_size) or 13,
+            tonumber(field.width) or 520
+        )
+        if labelWidget ~= nil and labelWidget.SetExtent ~= nil then
+            local labelHeight = tonumber(field.height) or tonumber(labelWidget.__polar_estimated_height) or 18
+            pcall(function()
+                labelWidget:SetExtent(tonumber(field.width) or 520, labelHeight)
+            end)
+        end
+        if field.control ~= nil then
+            SettingsPage.controls[tostring(field.control)] = labelWidget
+        end
+        widgets[1] = labelWidget
+    elseif kind == "custom" then
+        local renderer = CUSTOM_SCHEMA_RENDERERS[tostring(field.renderer or "")]
+        if type(renderer) == "function" then
+            y = renderer(parent, y, field)
+        end
+        return y
+    end
+
+    RegisterSchemaDependency(field.depends_on, widgets)
+    return y + EstimateSchemaFieldAdvance(field)
+end
+
+local function BuildSchemaSection(page, pageId, y, section)
+    local fields = type(section.fields) == "table" and section.fields or {}
+    local estimatedBody = 0
+    for _, field in ipairs(fields) do
+        estimatedBody = estimatedBody + EstimateSchemaFieldAdvance(field)
+    end
+    estimatedBody = math.max(estimatedBody + 6, tonumber(section.min_body_height) or 24)
+
+    local card, body, headerHeight = CreateSectionCard(
+        "polarUiSchema_" .. tostring(pageId) .. "_" .. tostring(section.id or "section"),
+        page,
+        tostring(section.title or ""),
+        section.hint,
+        SCHEMA_PAGE_LEFT,
+        y,
+        SCHEMA_CARD_WIDTH,
+        estimatedBody + 88
+    )
+    if card == nil or body == nil then
+        return y
+    end
+
+    local bodyY = 0
+    for _, field in ipairs(fields) do
+        bodyY = BuildSchemaField(body, bodyY, field)
+    end
+
+    local bodyHeight = math.max(bodyY + 6, tonumber(section.min_body_height) or 24)
+    local cardHeight = math.max(estimatedBody + 88, (tonumber(headerHeight) or 42) + bodyHeight + 16)
+
+    pcall(function()
+        body:SetExtent(SCHEMA_CARD_WIDTH - 32, bodyHeight)
+    end)
+    pcall(function()
+        card:SetExtent(SCHEMA_CARD_WIDTH, cardHeight)
+    end)
+
+    return y + cardHeight + SCHEMA_SECTION_GAP
+end
+
+local function BuildSchemaPage(pageId)
+    local page = SettingsPage.pages[pageId]
+    local schemaPage = type(SettingsSchema) == "table" and type(SettingsSchema.PAGES) == "table" and SettingsSchema.PAGES[pageId] or nil
+    if page == nil or type(schemaPage) ~= "table" then
+        return
+    end
+
+    local y = SCHEMA_PAGE_TOP
+    for _, section in ipairs(schemaPage.sections or {}) do
+        y = BuildSchemaSection(page, pageId, y, section)
+    end
+
+    SettingsPage.page_heights[pageId] = y + 18
+end
 
 local function SetHpTextureModeChecks(mode)
     local resolved = tostring(mode or "stock")
@@ -1401,6 +1769,10 @@ local function RefreshControls()
         SettingsPage.controls.hide_boss_frame_background:SetChecked(s.hide_boss_frame_background and true or false)
     end
 
+    if SettingsPage.controls.hide_target_grade_star ~= nil then
+        SettingsPage.controls.hide_target_grade_star:SetChecked(s.hide_target_grade_star and true or false)
+    end
+
     if SettingsPage.controls.show_distance ~= nil then
         SettingsPage.controls.show_distance:SetChecked(s.show_distance ~= false)
     end
@@ -1413,6 +1785,23 @@ local function RefreshControls()
         local size = GetSettingsButtonSize()
         refreshSlider(SettingsPage.controls.launcher_size, SettingsPage.controls.launcher_size_val, size)
         ApplySettingsButtonLayout()
+    end
+
+    local npcStyle = nil
+    npcStyle, _ = GetTargetFrameStyleTables(s)
+    if SettingsPage.controls.target_grade_star_offset_x ~= nil then
+        refreshSlider(
+            SettingsPage.controls.target_grade_star_offset_x,
+            SettingsPage.controls.target_grade_star_offset_x_val,
+            tonumber(type(npcStyle) == "table" and npcStyle.target_grade_star_offset_x or nil) or 0
+        )
+    end
+    if SettingsPage.controls.target_grade_star_offset_y ~= nil then
+        refreshSlider(
+            SettingsPage.controls.target_grade_star_offset_y,
+            SettingsPage.controls.target_grade_star_offset_y_val,
+            tonumber(type(npcStyle) == "table" and npcStyle.target_grade_star_offset_y or nil) or 0
+        )
     end
 
     if SettingsPage.controls.frame_alpha ~= nil then
@@ -1521,10 +1910,8 @@ local function RefreshControls()
         if SettingsPage.controls.plates_show_guild ~= nil then
             SettingsPage.controls.plates_show_guild:SetChecked(s.nameplates.show_guild ~= false)
         end
-        if SettingsPage.controls.plates_runtime_status ~= nil and SettingsPage.controls.plates_runtime_status.SetText ~= nil then
-            local runtimeText = Compat ~= nil and Compat.GetStatusText() or "Runtime OK"
-            SettingsPage.controls.plates_runtime_status:SetText(runtimeText)
-        end
+        local runtimeText = Compat ~= nil and Compat.GetStatusText() or "Runtime OK"
+        SetReadableControlText(SettingsPage.controls.plates_runtime_status, runtimeText)
         if SettingsPage.controls.plates_alpha ~= nil then
             refreshSlider(SettingsPage.controls.plates_alpha, SettingsPage.controls.plates_alpha_val, tonumber(s.nameplates.alpha_pct) or 100)
         end
@@ -1914,12 +2301,10 @@ local function RefreshControls()
     if SettingsPage.controls.ct_track_kind ~= nil then
         SetComboBoxIndex1Based(SettingsPage.controls.ct_track_kind, GetCooldownTrackKindIndex(SettingsPage.cooldown_track_kind))
     end
-    if SettingsPage.controls.ct_position_hint ~= nil and SettingsPage.controls.ct_position_hint.SetText ~= nil then
-        if selectedUnitKey == "player" then
-            SettingsPage.controls.ct_position_hint:SetText("Player uses an absolute screen position.")
-        else
-            SettingsPage.controls.ct_position_hint:SetText("These values are offsets from the unit's overhead nameplate.")
-        end
+    if selectedUnitKey == "player" then
+        SetReadableControlText(SettingsPage.controls.ct_position_hint, "Player uses an absolute screen position.")
+    else
+        SetReadableControlText(SettingsPage.controls.ct_position_hint, "These values are offsets from the unit's overhead nameplate.")
     end
     if SettingsPage.controls.ct_unit_enabled ~= nil then
         SettingsPage.controls.ct_unit_enabled:SetChecked(selectedUnitCfg.enabled == true)
@@ -1980,6 +2365,7 @@ local function RefreshControls()
     RefreshCooldownSearchRows()
     RefreshCooldownBuffRows(selectedUnitCfg)
     RefreshCooldownScanRows()
+    RefreshSchemaControlStates()
 
 end
 
@@ -2000,6 +2386,10 @@ local function ApplyControlsToSettings()
 
     if SettingsPage.controls.hide_boss_frame_background ~= nil then
         s.hide_boss_frame_background = SettingsPage.controls.hide_boss_frame_background:GetChecked() and true or false
+    end
+
+    if SettingsPage.controls.hide_target_grade_star ~= nil then
+        s.hide_target_grade_star = SettingsPage.controls.hide_target_grade_star:GetChecked() and true or false
     end
 
     if SettingsPage.controls.launcher_size ~= nil then
@@ -2025,6 +2415,8 @@ local function ApplyControlsToSettings()
         editStyle = {}
         s.style = editStyle
     end
+
+    local _, targetEditStyle = GetTargetFrameStyleTables(s)
 
     local function colorTable(r, g, b, a)
         return { r, g, b, a or 255 }
@@ -2101,6 +2493,15 @@ local function ApplyControlsToSettings()
 
     if SettingsPage.controls.show_distance ~= nil then
         s.show_distance = SettingsPage.controls.show_distance:GetChecked() and true or false
+    end
+
+    if type(targetEditStyle) == "table" then
+        if SettingsPage.controls.target_grade_star_offset_x ~= nil then
+            targetEditStyle.target_grade_star_offset_x = GetSliderValue(SettingsPage.controls.target_grade_star_offset_x)
+        end
+        if SettingsPage.controls.target_grade_star_offset_y ~= nil then
+            targetEditStyle.target_grade_star_offset_y = GetSliderValue(SettingsPage.controls.target_grade_star_offset_y)
+        end
     end
 
     if SettingsPage.controls.frame_alpha ~= nil then
@@ -2538,6 +2939,48 @@ local function EnsureWindow()
         closeHandler()
     end
 
+    local navPanel = CreateEmptyChild(SettingsPage.window, "polarUiNavPanel")
+    if navPanel ~= nil then
+        pcall(function()
+            navPanel:SetExtent(160, 655)
+            navPanel:AddAnchor("TOPLEFT", SettingsPage.window, 12, 38)
+            navPanel:AddAnchor("BOTTOMLEFT", SettingsPage.window, 12, -52)
+            navPanel:Show(true)
+        end)
+        AddPanelBackground(navPanel, 0.88)
+        pcall(function()
+            if navPanel.CreateColorDrawable ~= nil then
+                local accent = navPanel:CreateColorDrawable(0.93, 0.78, 0.45, 0.12, "overlay")
+                accent:AddAnchor("TOPLEFT", navPanel, 0, 0)
+                accent:AddAnchor("TOPRIGHT", navPanel, 0, 0)
+                accent:SetHeight(42)
+            end
+        end)
+    end
+
+    local contentPanel = CreateEmptyChild(SettingsPage.window, "polarUiContentPanel")
+    if contentPanel ~= nil then
+        pcall(function()
+            contentPanel:AddAnchor("TOPLEFT", SettingsPage.window, 182, 34)
+            contentPanel:AddAnchor("BOTTOMRIGHT", SettingsPage.window, -12, -52)
+            contentPanel:Show(true)
+        end)
+        AddPanelBackground(contentPanel, 0.86)
+        pcall(function()
+            if contentPanel.CreateColorDrawable ~= nil then
+                local accent = contentPanel:CreateColorDrawable(0.94, 0.80, 0.48, 0.12, "overlay")
+                accent:AddAnchor("TOPLEFT", contentPanel, 0, 0)
+                accent:AddAnchor("TOPRIGHT", contentPanel, 0, 0)
+                accent:SetHeight(54)
+
+                local divider = contentPanel:CreateColorDrawable(0.94, 0.80, 0.48, 0.18, "overlay")
+                divider:AddAnchor("TOPLEFT", contentPanel, 18, 58)
+                divider:AddAnchor("TOPRIGHT", contentPanel, -18, 58)
+                divider:SetHeight(1)
+            end
+        end)
+    end
+
     SettingsPage.scroll_frame = nil
     SettingsPage.content = SettingsPage.window
 
@@ -2553,8 +2996,13 @@ local function EnsureWindow()
     if SettingsPage.scroll_frame ~= nil then
         pcall(function()
             SettingsPage.scroll_frame:Show(true)
-            SettingsPage.scroll_frame:AddAnchor("TOPLEFT", SettingsPage.window, 185, 105)
-            SettingsPage.scroll_frame:AddAnchor("BOTTOMRIGHT", SettingsPage.window, -15, -50)
+            if contentPanel ~= nil then
+                SettingsPage.scroll_frame:AddAnchor("TOPLEFT", contentPanel, 12, 78)
+                SettingsPage.scroll_frame:AddAnchor("BOTTOMRIGHT", contentPanel, -12, -14)
+            else
+                SettingsPage.scroll_frame:AddAnchor("TOPLEFT", SettingsPage.window, 185, 105)
+                SettingsPage.scroll_frame:AddAnchor("BOTTOMRIGHT", SettingsPage.window, -15, -50)
+            end
             SettingsPage.scroll_frame:SetExtent(620, 585)
         end)
 
@@ -2662,19 +3110,25 @@ local function EnsureWindow()
         end
     end
 
-    CreateLabel("polarUiNavTitle", SettingsPage.window, "Sections", 15, 42, 18)
-    SettingsPage.controls.page_header_title = CreateLabel("polarUiPageHeaderTitle", SettingsPage.window, "", 185, 42, 18)
-    SettingsPage.controls.page_header_summary = CreateHintLabel("polarUiPageHeaderSummary", SettingsPage.window, "", 185, 68, 600)
+    local navParent = navPanel or SettingsPage.window
+    local headerParent = contentPanel or SettingsPage.window
+
+    CreateLabel("polarUiNavTitle", navParent, "Sections", 14, 12, 18)
+    SettingsPage.controls.page_header_title = CreateLabel("polarUiPageHeaderTitle", headerParent, "", 18, 12, 18)
+    SettingsPage.controls.page_header_summary = CreateHintLabel("polarUiPageHeaderSummary", headerParent, "", 18, 38, 600)
     if SettingsPage.controls.page_header_summary ~= nil then
-        SettingsPage.controls.page_header_summary:SetExtent(600, 32)
+        SettingsPage.controls.page_header_summary:SetExtent(
+            600,
+            math.max(32, tonumber(SettingsPage.controls.page_header_summary.__polar_estimated_height) or 16)
+        )
     end
 
-    local navY = 72
+    local navY = 44
     for _, page in ipairs(PAGE_DEFS) do
-        local button = CreateButton("polarUiNav_" .. tostring(page.id), SettingsPage.window, tostring(page.label or page.id), 15, navY)
+        local button = CreateButton("polarUiNav_" .. tostring(page.id), navParent, tostring(page.label or page.id), 10, navY)
         if button ~= nil then
             pcall(function()
-                button:SetExtent(155, 26)
+                button:SetExtent(140, 28)
             end)
             if button.SetHandler ~= nil then
                 local pageId = page.id
@@ -2696,6 +3150,13 @@ local function EnsureWindow()
 
     local gap = 24
 
+    SettingsPage.schema_control_states = {}
+    for _, schemaPageId in ipairs(SCHEMA_PAGE_IDS) do
+        BuildSchemaPage(schemaPageId)
+    end
+
+    if false then
+
     do
         local page = SettingsPage.pages.general
         local y = 35
@@ -2706,15 +3167,6 @@ local function EnsureWindow()
         y = y + gap
 
         SettingsPage.controls.large_hpmp = CreateCheckbox("polarUiLargeHpMp", page, "Large HP/MP text", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.hide_ancestral_icon_level = CreateCheckbox("polarUiHideAncestralLevel", page, "Hide ancestral icon and level", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.hide_boss_frame_background = CreateCheckbox("polarUiHideBossBackground", page, "Hide boss frame background", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.show_distance = CreateCheckbox("polarUiShowDistance", page, "Show target distance", 15, y)
         y = y + gap
 
         SettingsPage.controls.alignment_grid_enabled = CreateCheckbox(
@@ -2739,6 +3191,94 @@ local function EnsureWindow()
         y = y + 34
 
         SettingsPage.page_heights.general = y + 40
+    end
+
+    do
+        local page = SettingsPage.pages.npc
+        local y = 35
+        CreateLabel("polarUiNpcPageTitle", page, "NPC", 15, y, 18)
+        y = y + 30
+
+        CreateLabel("polarUiNpcUnitArtTitle", page, "Unit Frame Art", 15, y, 18)
+        y = y + 30
+
+        SettingsPage.controls.hide_ancestral_icon_level = CreateCheckbox(
+            "polarUiHideAncestralLevel",
+            page,
+            "Hide ancestral icon and level",
+            15,
+            y
+        )
+        y = y + gap + 10
+
+        CreateLabel("polarUiNpcTargetFrameTitle", page, "Target Frame", 15, y, 18)
+        y = y + 30
+
+        SettingsPage.controls.hide_boss_frame_background = CreateCheckbox(
+            "polarUiHideBossBackground",
+            page,
+            "Hide boss frame background",
+            15,
+            y
+        )
+        y = y + gap
+
+        SettingsPage.controls.hide_target_grade_star = CreateCheckbox(
+            "polarUiHideTargetGradeStar",
+            page,
+            "Hide target grade stars",
+            15,
+            y
+        )
+        y = y + gap
+
+        SettingsPage.controls.show_distance = CreateCheckbox(
+            "polarUiShowDistance",
+            page,
+            "Show target distance",
+            15,
+            y
+        )
+        y = y + gap + 10
+
+        CreateLabel("polarUiNpcGradeStarTitle", page, "Grade Star Placement", 15, y, 18)
+        y = y + 30
+
+        SettingsPage.controls.npc_grade_star_hint = CreateHintLabel(
+            "polarUiNpcGradeStarHint",
+            page,
+            "Offsets apply when grade stars are visible. Zero keeps the stock placement.",
+            15,
+            y,
+            540
+        )
+        y = y + 28
+
+        SettingsPage.controls.target_grade_star_offset_x, SettingsPage.controls.target_grade_star_offset_x_val = CreateSlider(
+            "polarUiTargetGradeStarOffsetX",
+            page,
+            "Grade star offset X",
+            15,
+            y,
+            -200,
+            200,
+            1
+        )
+        y = y + 24
+
+        SettingsPage.controls.target_grade_star_offset_y, SettingsPage.controls.target_grade_star_offset_y_val = CreateSlider(
+            "polarUiTargetGradeStarOffsetY",
+            page,
+            "Grade star offset Y",
+            15,
+            y,
+            -200,
+            200,
+            1
+        )
+        y = y + 34
+
+        SettingsPage.page_heights.npc = y + 40
     end
 
 
@@ -3707,6 +4247,8 @@ local function EnsureWindow()
         SettingsPage.page_heights.plates = y + 40
     end
 
+    end
+
     do
         local page = SettingsPage.pages.cooldown
         if page ~= nil then
@@ -3770,7 +4312,10 @@ local function EnsureWindow()
             y
         )
         if SettingsPage.controls.ct_position_hint ~= nil then
-            SettingsPage.controls.ct_position_hint:SetExtent(360, 18)
+            SettingsPage.controls.ct_position_hint:SetExtent(
+                360,
+                math.max(18, tonumber(SettingsPage.controls.ct_position_hint.__polar_estimated_height) or 16)
+            )
         end
         y = y + 24
 
@@ -4048,6 +4593,7 @@ local function EnsureWindow()
         end
         syncStyleTargetFromActivePage()
         ApplyControlsToSettings()
+        RefreshSchemaControlStates()
         if type(SettingsPage.on_apply) == "function" then
             pcall(function()
                 SettingsPage.on_apply()
@@ -4094,6 +4640,8 @@ local function EnsureWindow()
         { SettingsPage.controls.mp_value_offset_y, SettingsPage.controls.mp_value_offset_y_val },
         { SettingsPage.controls.target_guild_offset_x, SettingsPage.controls.target_guild_offset_x_val },
         { SettingsPage.controls.target_guild_offset_y, SettingsPage.controls.target_guild_offset_y_val },
+        { SettingsPage.controls.target_grade_star_offset_x, SettingsPage.controls.target_grade_star_offset_x_val },
+        { SettingsPage.controls.target_grade_star_offset_y, SettingsPage.controls.target_grade_star_offset_y_val },
         { SettingsPage.controls.name_offset_x, SettingsPage.controls.name_offset_x_val },
         { SettingsPage.controls.name_offset_y, SettingsPage.controls.name_offset_y_val },
         { SettingsPage.controls.level_font_size, SettingsPage.controls.level_font_size_val },
@@ -4194,6 +4742,7 @@ local function EnsureWindow()
         SettingsPage.controls.large_hpmp,
         SettingsPage.controls.hide_ancestral_icon_level,
         SettingsPage.controls.hide_boss_frame_background,
+        SettingsPage.controls.hide_target_grade_star,
         SettingsPage.controls.show_distance,
         SettingsPage.controls.alignment_grid_enabled,
         SettingsPage.controls.bar_colors_enabled,
