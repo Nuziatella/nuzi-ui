@@ -1393,6 +1393,14 @@ local function RefreshControls()
         SettingsPage.controls.large_hpmp:SetChecked(s.style.large_hpmp ~= false)
     end
 
+    if SettingsPage.controls.hide_ancestral_icon_level ~= nil then
+        SettingsPage.controls.hide_ancestral_icon_level:SetChecked(s.hide_ancestral_icon_level and true or false)
+    end
+
+    if SettingsPage.controls.hide_boss_frame_background ~= nil then
+        SettingsPage.controls.hide_boss_frame_background:SetChecked(s.hide_boss_frame_background and true or false)
+    end
+
     if SettingsPage.controls.show_distance ~= nil then
         SettingsPage.controls.show_distance:SetChecked(s.show_distance ~= false)
     end
@@ -1876,6 +1884,9 @@ local function RefreshControls()
         if SettingsPage.controls.aura_sort_vertical ~= nil then
             SettingsPage.controls.aura_sort_vertical:SetChecked(aura.sort_vertical and true or false)
         end
+        if SettingsPage.controls.aura_reverse_growth ~= nil then
+            SettingsPage.controls.aura_reverse_growth:SetChecked(aura.reverse_growth and true or false)
+        end
     end
 
     EnsureCooldownTrackerTables(s)
@@ -1981,6 +1992,14 @@ local function ApplyControlsToSettings()
 
     if SettingsPage.controls.alignment_grid_enabled ~= nil then
         s.alignment_grid_enabled = SettingsPage.controls.alignment_grid_enabled:GetChecked() and true or false
+    end
+
+    if SettingsPage.controls.hide_ancestral_icon_level ~= nil then
+        s.hide_ancestral_icon_level = SettingsPage.controls.hide_ancestral_icon_level:GetChecked() and true or false
+    end
+
+    if SettingsPage.controls.hide_boss_frame_background ~= nil then
+        s.hide_boss_frame_background = SettingsPage.controls.hide_boss_frame_background:GetChecked() and true or false
     end
 
     if SettingsPage.controls.launcher_size ~= nil then
@@ -2398,6 +2417,9 @@ local function ApplyControlsToSettings()
     if SettingsPage.controls.aura_sort_vertical ~= nil then
         s.style.aura.sort_vertical = SettingsPage.controls.aura_sort_vertical:GetChecked() and true or false
     end
+    if SettingsPage.controls.aura_reverse_growth ~= nil then
+        s.style.aura.reverse_growth = SettingsPage.controls.aura_reverse_growth:GetChecked() and true or false
+    end
 
     EnsureCooldownTrackerTables(s)
     local tracker = s.cooldown_tracker
@@ -2684,6 +2706,12 @@ local function EnsureWindow()
         y = y + gap
 
         SettingsPage.controls.large_hpmp = CreateCheckbox("polarUiLargeHpMp", page, "Large HP/MP text", 15, y)
+        y = y + gap
+
+        SettingsPage.controls.hide_ancestral_icon_level = CreateCheckbox("polarUiHideAncestralLevel", page, "Hide ancestral icon and level", 15, y)
+        y = y + gap
+
+        SettingsPage.controls.hide_boss_frame_background = CreateCheckbox("polarUiHideBossBackground", page, "Hide boss frame background", 15, y)
         y = y + gap
 
         SettingsPage.controls.show_distance = CreateCheckbox("polarUiShowDistance", page, "Show target distance", 15, y)
@@ -3357,6 +3385,15 @@ local function EnsureWindow()
             "polarUiAuraSortVertical",
             page,
             "Sort vertical",
+            15,
+            y
+        )
+        y = y + gap
+
+        SettingsPage.controls.aura_reverse_growth = CreateCheckbox(
+            "polarUiAuraReverseGrowth",
+            page,
+            "Reverse growth",
             15,
             y
         )
@@ -4120,6 +4157,9 @@ local function EnsureWindow()
         local valLabel = pair[2]
         if slider ~= nil and slider.SetHandler ~= nil then
             slider:SetHandler("OnSliderChanged", function(_, value)
+                if type(value) == "number" then
+                    slider.__polar_live_value = value
+                end
                 if valLabel ~= nil and valLabel.SetText ~= nil and type(value) == "number" then
                     valLabel:SetText(tostring(math.floor(value + 0.5)))
                 end
@@ -4131,6 +4171,9 @@ local function EnsureWindow()
     local function bindValueLabelOnly(slider, valLabel)
         if slider ~= nil and slider.SetHandler ~= nil then
             slider:SetHandler("OnSliderChanged", function(_, value)
+                if type(value) == "number" then
+                    slider.__polar_live_value = value
+                end
                 if valLabel ~= nil and valLabel.SetText ~= nil and type(value) == "number" then
                     valLabel:SetText(tostring(math.floor(value + 0.5)))
                 end
@@ -4145,9 +4188,12 @@ local function EnsureWindow()
     local checkboxList = {
         SettingsPage.controls.aura_enabled,
         SettingsPage.controls.aura_sort_vertical,
+        SettingsPage.controls.aura_reverse_growth,
         SettingsPage.controls.name_visible,
         SettingsPage.controls.level_visible,
         SettingsPage.controls.large_hpmp,
+        SettingsPage.controls.hide_ancestral_icon_level,
+        SettingsPage.controls.hide_boss_frame_background,
         SettingsPage.controls.show_distance,
         SettingsPage.controls.alignment_grid_enabled,
         SettingsPage.controls.bar_colors_enabled,
@@ -4159,7 +4205,7 @@ local function EnsureWindow()
         SettingsPage.controls.target_mdef_visible,
         SettingsPage.controls.name_shadow,
         SettingsPage.controls.value_shadow,
-        SettingsPage.controls.buff_windows_enabled,
+        SettingsPage.controls.move_buffs,
         SettingsPage.controls.plates_enabled,
         SettingsPage.controls.plates_guild_only,
         SettingsPage.controls.plates_show_target,

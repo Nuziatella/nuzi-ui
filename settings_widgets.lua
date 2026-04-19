@@ -222,6 +222,9 @@ function SettingsWidgets.GetSliderValue(slider)
     if slider == nil then
         return 0
     end
+    if type(slider.__polar_live_value) == "number" then
+        return slider.__polar_live_value
+    end
     local ok, res = pcall(function()
         if slider.GetValue ~= nil then
             return slider:GetValue()
@@ -237,6 +240,11 @@ end
 function SettingsWidgets.SetSliderValue(slider, value)
     if slider == nil then
         return
+    end
+    if type(value) == "number" then
+        slider.__polar_live_value = value
+    else
+        slider.__polar_live_value = nil
     end
     pcall(function()
         if slider.SetValue ~= nil then

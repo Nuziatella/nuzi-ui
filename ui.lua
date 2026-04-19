@@ -66,7 +66,9 @@ local UI = {
         current_target_id = nil,
         guild = nil,
         pdef = nil,
-        mdef = nil
+        mdef = nil,
+        custom_hp_bg = nil,
+        custom_mp_bg = nil
     },
     party = {
         manager = nil,
@@ -82,6 +84,48 @@ local UI = {
     }
 }
 
+local STOCK_LEVEL_ARTIFACT_FIELDS = {
+    "levelLabel",
+    "level",
+    "gradeIcon",
+    "ancestralIcon"
+}
+
+local STOCK_LEVEL_ARTIFACT_PATTERNS = {
+    "ancestral",
+    "grade",
+    "wing",
+    "flare"
+}
+
+local STOCK_TARGET_BACKGROUND_FIELDS = {
+    "bg",
+    "background",
+    "backdrop",
+    "frameBg",
+    "bossBg",
+    "bossBackground",
+    "bossFrameBg",
+    "bossDecoLeft",
+    "bossDecoRight",
+    "leftBg",
+    "rightBg",
+    "leftDeco",
+    "rightDeco"
+}
+
+local STOCK_TARGET_BACKGROUND_EXCLUDE = {
+    hpbar = true,
+    mpbar = true,
+    name = true,
+    level = true,
+    levellabel = true,
+    distancelabel = true,
+    buffwindow = true,
+    debuffwindow = true,
+    eventwindow = true
+}
+
 local BuildUiContext
 
 local PARTY_MAX_GROUPS = 10
@@ -89,6 +133,9 @@ local PARTY_MEMBERS_PER_GROUP = 5
 local ApplyStockFrameStyle
 local SafeGetExtent
 local SetWidgetVisible
+local SetNotClickable
+local ColorFrom255
+local ApplyBuffWindowPlacement
 local ResolveFrameStyleTable
 local RefreshFrameBarPresentation
 
@@ -144,6 +191,22 @@ local function NormalizeRuntimeUnitToken(unit)
         return "targettarget"
     end
     return token
+end
+
+local function NormalizeNumericValue(value)
+    local n = tonumber(value)
+    if n == nil or n ~= n or n == math.huge or n == -math.huge then
+        return nil
+    end
+    return n
+end
+
+local function FormatIntegerValue(value)
+    local n = NormalizeNumericValue(value)
+    if n == nil then
+        return "0"
+    end
+    return string.format("%.0f", n)
 end
 
 local function ResolveFrameRuntimeUnit(frame)
@@ -265,6 +328,9 @@ local function ApplyTargetNameLevel(targetName, targetLevel)
             return
         end
         local showLevel = type(targetLevel) == "number" and targetLevel > 0
+        if type(UI.settings) == "table" and UI.settings.hide_ancestral_icon_level then
+            showLevel = false
+        end
         if levelLabel.SetText ~= nil then
             if showLevel then
                 local levelText = tostring(targetLevel)
@@ -284,6 +350,260 @@ local function ApplyTargetNameLevel(targetName, targetLevel)
             levelLabel.__polar_visible = showLevel
         end
     end)
+end
+
+local function ResolveWidgetCandidate(value)
+    if value == nil then
+        return nil
+    end
+    if type(value) == "table" and value.Show == nil and value.label ~= nil then
+        return value.label
+    end
+    return value
+end
+
+local function SetWidgetForcedHidden(widget, hidden)
+    widget = ResolveWidgetCandidate(widget)
+    if widget == nil then
+        return
+    end
+
+    hidden = hidden and true or false
+    if hidden then
+        if widget.__polar_forced_hidden then
+            return
+        end
+        widget.__polar_forced_hidden = true
+        pcall(function()
+            if widget.IsVisible ~= nil then
+                widget.__polar_prev_visible = widget:IsVisible() and true or false
+            elseif widget.GetVisible ~= nil then
+                widget.__polar_prev_visible = widget:GetVisible() and true or false
+            end
+        end)
+        pcall(function()
+            if widget.GetAlpha ~= nil then
+                widget.__polar_prev_alpha = widget:GetAlpha()
+            end
+        end)
+        pcall(function()
+            if widget.SetAlpha ~= nil then
+                widget:SetAlpha(0)
+            end
+        end)
+        pcall(function()
+            if widget.Show ~= nil then
+                widget:Show(false)
+            end
+        end)
+        return
+    end
+
+    if not widget.__polar_forced_hidden then
+        return
+    end
+
+    widget.__polar_forced_hidden = nil
+    pcall(function()
+        if widget.SetAlpha ~= nil then
+            widget:SetAlpha(widget.__polar_prev_alpha or 1)
+        end
+    end)
+    widget.__polar_prev_alpha = nil
+    local restoreVisible = widget.__polar_prev_visible
+    widget.__polar_prev_visible = nil
+    pcall(function()
+        if widget.Show ~= nil and restoreVisible ~= nil then
+            widget:Show(restoreVisible and true or false)
+        end
+    end)
+end
+
+local function MatchesLevelArtifactPattern(key)
+    local lower = string.lower(tostring(key or ""))
+    for _, pattern in ipairs(STOCK_LEVEL_ARTIFACT_PATTERNS) do
+        if string.find(lower, pattern, 1, true) ~= nil then
+            return true
+        end
+    end
+    return false
+end
+
+local function ApplyLevelArtifactHide(levelRoot, hidden)
+    if type(levelRoot) ~= "table" then
+        return
+    end
+
+    local seen = {}
+
+    local function hideWidget(widget)
+        widget = ResolveWidgetCandidate(widget)
+        if widget == nil or seen[widget] then
+            return
+        end
+        seen[widget] = true
+        SetWidgetForcedHidden(widget, hidden)
+    end
+
+    for key, child in pairs(levelRoot) do
+        if key ~= "style" and key ~= "label" and type(child) == "table" then
+            local lower = string.lower(tostring(key or ""))
+            if lower == "icon" or lower == "bg" or MatchesLevelArtifactPattern(lower) then
+                hideWidget(child)
+                for nestedKey, nestedValue in pairs(child) do
+                    if nestedKey ~= "style" and type(nestedValue) == "table" then
+                        hideWidget(nestedValue)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function EnsureTargetFallbackBarBackground(frame, key)
+    if frame == nil or UI == nil or UI.target == nil or frame ~= UI.target.wnd then
+        return nil
+    end
+
+    local stateKey = "custom_" .. tostring(key or "") .. "_bg"
+    if UI.target[stateKey] ~= nil then
+        return UI.target[stateKey]
+    end
+
+    local bg = nil
+    pcall(function()
+        if frame.CreateColorDrawable ~= nil then
+            bg = frame:CreateColorDrawable(0, 0, 0, 0.72, "background")
+        elseif frame.CreateNinePartDrawable ~= nil and TEXTURE_PATH ~= nil and TEXTURE_PATH.HUD ~= nil then
+            bg = frame:CreateNinePartDrawable(TEXTURE_PATH.HUD, "background")
+            if bg.SetTextureInfo ~= nil then
+                bg:SetTextureInfo("bg_quest")
+            end
+            if bg.SetColor ~= nil then
+                bg:SetColor(0, 0, 0, 0.72)
+            end
+        end
+    end)
+
+    if bg == nil then
+        return nil
+    end
+
+    pcall(function()
+        if bg.AddAnchor ~= nil then
+            bg:AddAnchor("TOPLEFT", frame, -8, -6)
+            bg:AddAnchor("BOTTOMRIGHT", frame, 8, 6)
+        end
+    end)
+    pcall(function()
+        SetNotClickable(bg)
+    end)
+    pcall(function()
+        if bg.Show ~= nil then
+            bg:Show(false)
+        end
+    end)
+
+    UI.target[stateKey] = bg
+    table.insert(UI.created, bg)
+    return bg
+end
+
+local function ApplyTargetFallbackBackgroundStyle(frame, style, visible)
+    if frame == nil or UI == nil or UI.target == nil or frame ~= UI.target.wnd then
+        return
+    end
+
+    local showBg = visible and true or false
+    local function resolveColor(rgba, fallback)
+        local r, g, b, a = 0.02, 0.02, 0.02, 0.62
+        if type(fallback) == "table" then
+            r = ColorFrom255(fallback[1] or 0)
+            g = ColorFrom255(fallback[2] or 0)
+            b = ColorFrom255(fallback[3] or 0)
+            a = 0.52
+        end
+        if type(rgba) == "table" then
+            r = ColorFrom255(rgba[1] or 0)
+            g = ColorFrom255(rgba[2] or 0)
+            b = ColorFrom255(rgba[3] or 0)
+            local rawAlpha = tonumber(rgba[4])
+            if rawAlpha == nil or rawAlpha < 32 then
+                a = 0.52
+            else
+                a = ColorFrom255(rawAlpha)
+                if a < 0.40 then
+                    a = 0.40
+                elseif a > 0.78 then
+                    a = 0.78
+                end
+            end
+        end
+        return r, g, b, a
+    end
+
+    local function anchorBackground(bg, bar)
+        if bg == nil or bar == nil or bg.AddAnchor == nil then
+            return
+        end
+        pcall(function()
+            if bg.RemoveAllAnchors ~= nil then
+                bg:RemoveAllAnchors()
+            end
+            local okTop = pcall(function()
+                bg:AddAnchor("TOPLEFT", bar, "TOPLEFT", -2, -1)
+            end)
+            if not okTop then
+                pcall(function()
+                    bg:AddAnchor("TOPLEFT", bar, -2, -1)
+                end)
+            end
+            local okBottom = pcall(function()
+                bg:AddAnchor("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 2, 1)
+            end)
+            if not okBottom then
+                pcall(function()
+                    bg:AddAnchor("BOTTOMRIGHT", bar, 2, 1)
+                end)
+            end
+        end)
+    end
+
+    local function applyBarBackground(barKey, barWidget, colorKey, fallbackKey)
+        local bg = EnsureTargetFallbackBarBackground(frame, barKey)
+        if bg == nil then
+            return
+        end
+
+        anchorBackground(bg, barWidget)
+
+        local r, g, b, a = 0.02, 0.02, 0.02, 0.62
+        if type(style) == "table" and style.bar_colors_enabled then
+            r, g, b, a = resolveColor(style[colorKey], style[fallbackKey])
+        end
+
+        pcall(function()
+            SetNotClickable(bg)
+        end)
+        pcall(function()
+            if bg.SetColor ~= nil then
+                bg:SetColor(r, g, b, showBg and a or 0)
+            end
+        end)
+        pcall(function()
+            if bg.SetAlpha ~= nil then
+                bg:SetAlpha(showBg and 1 or 0)
+            end
+        end)
+        pcall(function()
+            if bg.Show ~= nil then
+                bg:Show(showBg and barWidget ~= nil)
+            end
+        end)
+    end
+
+    applyBarBackground("hp", frame.hpBar, "hp_after_color", "hp_bar_color")
+    applyBarBackground("mp", frame.mpBar, "mp_after_color", "mp_bar_color")
 end
 
 
@@ -561,9 +881,6 @@ local function HookUnitFrameDrag(wnd, settings, key)
     end
 
     local hookTargets = { hookTarget }
-    if hookTarget ~= wnd then
-        table.insert(hookTargets, wnd)
-    end
 
     if not wnd.__polar_drag_hooked then
         wnd.__polar_drag_hooked = true
@@ -671,16 +988,6 @@ local function HookUnitFrameDrag(wnd, settings, key)
             if t ~= nil and t.SetHandler ~= nil then
                 t:SetHandler("OnDragStart", wnd.__polar_drag_start)
                 t:SetHandler("OnDragStop", wnd.__polar_drag_stop)
-                t:SetHandler("OnMouseDown", function(self, btn)
-                    if btn == nil or btn == "LeftButton" then
-                        wnd.__polar_drag_start(self)
-                    end
-                end)
-                t:SetHandler("OnMouseUp", function(self, btn)
-                    if (btn == nil or btn == "LeftButton") and wnd.__polar_dragging then
-                        wnd.__polar_drag_stop(self)
-                    end
-                end)
             end
             if t ~= nil and t.RegisterForDrag ~= nil then
                 t:RegisterForDrag("LeftButton")
@@ -714,7 +1021,7 @@ local function SetStockDistanceLabelVisible(visible)
     end)
 end
 
-local function ColorFrom255(v)
+ColorFrom255 = function(v)
     local n = tonumber(v)
     if n == nil then
         return 1
@@ -1553,6 +1860,9 @@ local function ApplyTextLayout(frame, style)
     local nameY = tonumber(style.name_offset_y) or 0
 
     local levelVisible = (style.level_visible ~= false)
+    if type(UI.settings) == "table" and UI.settings.hide_ancestral_icon_level then
+        levelVisible = false
+    end
     local levelX = tonumber(style.level_offset_x) or 0
     local levelY = tonumber(style.level_offset_y) or 0
     local levelSize = tonumber(style.level_font_size)
@@ -1633,6 +1943,48 @@ local function ApplyTextLayout(frame, style)
     end
 end
 
+local function ApplyStockFrameDecorations(frame, settings)
+    if frame == nil then
+        return
+    end
+
+    local hideLevelArtifacts = type(settings) == "table" and settings.hide_ancestral_icon_level == true
+    local hideBossBackground = type(settings) == "table" and settings.hide_boss_frame_background == true and UI ~= nil and UI.target ~= nil and frame == UI.target.wnd
+
+    for _, key in ipairs(STOCK_LEVEL_ARTIFACT_FIELDS) do
+        SetWidgetForcedHidden(frame[key], hideLevelArtifacts)
+    end
+    ApplyLevelArtifactHide(frame.level, hideLevelArtifacts)
+
+    if UI ~= nil and UI.target ~= nil and frame == UI.target.wnd then
+        local style = ResolveFrameStyleTable(frame)
+        local seen = {}
+        local function applyBackground(widget)
+            widget = ResolveWidgetCandidate(widget)
+            if widget == nil or seen[widget] then
+                return
+            end
+            seen[widget] = true
+            SetWidgetForcedHidden(widget, hideBossBackground)
+        end
+
+        for _, key in ipairs(STOCK_TARGET_BACKGROUND_FIELDS) do
+            applyBackground(frame[key])
+        end
+
+        pcall(function()
+            for key, value in pairs(frame) do
+                local lower = string.lower(tostring(key or ""))
+                if not STOCK_TARGET_BACKGROUND_EXCLUDE[lower] and
+                    (lower == "bg" or lower == "background" or lower == "backdrop" or string.find(lower, "boss", 1, true) ~= nil or string.find(lower, "background", 1, true) ~= nil) then
+                    applyBackground(value)
+                end
+            end
+        end)
+        ApplyTargetFallbackBackgroundStyle(frame, style, hideBossBackground)
+    end
+end
+
 local function ApplyStockDistanceSetting()
     if UI.target.wnd == nil or UI.target.wnd.distanceLabel == nil then
         return
@@ -1681,7 +2033,7 @@ local function HideLegacyPolarDistanceOverlay(frame)
     end)
 end
 
-local function SetNotClickable(widget)
+SetNotClickable = function(widget)
     if widget ~= nil and widget.Clickable ~= nil then
         widget:Clickable(false)
     end
@@ -1763,7 +2115,8 @@ local function ApplyOverlayAlpha(alpha)
 end
 
 local function FormatShortNumber(n)
-    if type(n) ~= "number" then
+    n = NormalizeNumericValue(n)
+    if n == nil then
         return "0"
     end
     local absN = math.abs(n)
@@ -1780,7 +2133,7 @@ local function FormatShortNumber(n)
         v = absN / 1000
         suffix = "k"
     else
-        return sign .. tostring(math.floor(absN + 0.5))
+        return sign .. FormatIntegerValue(absN)
     end
 
     local s = string.format("%.1f", v)
@@ -1793,11 +2146,22 @@ local function ParseTwoNumbers(text)
         return nil, nil
     end
     local cleaned = text:gsub(",", "")
-    local a, b = cleaned:match("(%d+)%D+(%d+)")
-    if a == nil or b == nil then
+    local found = {}
+    for token in cleaned:gmatch("[-+]?%d+%.?%d*[eE]?[-+]?%d*") do
+        if token ~= "" and token ~= "+" and token ~= "-" then
+            local value = NormalizeNumericValue(token)
+            if value ~= nil then
+                found[#found + 1] = value
+                if #found >= 2 then
+                    break
+                end
+            end
+        end
+    end
+    if #found < 2 then
         return nil, nil
     end
-    return tonumber(a), tonumber(b)
+    return found[1], found[2]
 end
 
 local function GetUnitVitals(unit)
@@ -1821,6 +2185,11 @@ local function GetUnitVitals(unit)
             mpMax = api.Unit:UnitMaxMana(unit)
         end
     end)
+
+    hp = NormalizeNumericValue(hp)
+    hpMax = NormalizeNumericValue(hpMax)
+    mp = NormalizeNumericValue(mp)
+    mpMax = NormalizeNumericValue(mpMax)
 
     if type(hp) ~= "number" or type(hpMax) ~= "number" or hpMax <= 0 then
         hp, hpMax = nil, nil
@@ -1858,8 +2227,8 @@ local function BuildFormattedValueText(cur, max, style, forceCurMax)
 
     local curMaxText = nil
     if wantCurMax then
-        local curTxt = short and FormatShortNumber(cur) or tostring(math.floor(cur + 0.5))
-        local maxTxt = short and FormatShortNumber(max) or tostring(math.floor(max + 0.5))
+        local curTxt = short and FormatShortNumber(cur) or FormatIntegerValue(cur)
+        local maxTxt = short and FormatShortNumber(max) or FormatIntegerValue(max)
         curMaxText = curTxt .. "/" .. maxTxt
     end
 
@@ -1927,9 +2296,25 @@ local function ApplyValueTextFormat(frame, style)
 
     local fmt = tostring(style.value_format or "stock")
     local short = style.short_numbers and true or false
+    local repairStock = false
+
+    local function labelNeedsRepair(label)
+        if label == nil or label.GetText == nil then
+            return false
+        end
+        local text = nil
+        pcall(function()
+            text = tostring(label:GetText() or "")
+        end)
+        return type(text) == "string" and string.find(text, "[eE][%+%-]?%d+") ~= nil
+    end
 
     if fmt == "stock" and not short then
-        return
+        repairStock = labelNeedsRepair(frame.hpBar ~= nil and frame.hpBar.hpLabel or nil) or
+            labelNeedsRepair(frame.mpBar ~= nil and frame.mpBar.mpLabel or nil)
+        if not repairStock then
+            return
+        end
     end
 
     local unit = ResolveFrameRuntimeUnit(frame)
@@ -1941,7 +2326,7 @@ local function ApplyValueTextFormat(frame, style)
             return
         end
 
-        local out = BuildFormattedValueText(cur, max, style, false)
+        local out = BuildFormattedValueText(cur, max, style, repairStock)
         if type(out) == "string" and out ~= "" then
             SetLabelTextIfChanged(label, out)
         end
@@ -2124,6 +2509,7 @@ local function ApplyFrameLayout(frame, settings)
 
     if type(styleTable) == "table" then
         ApplyValueTextFormat(frame, styleTable)
+        ApplyStockFrameDecorations(frame, settings)
         ApplyTextLayout(frame, styleTable)
         RefreshFrameBarPresentation(frame, styleTable)
     end
@@ -2715,6 +3101,7 @@ local function ApplyAuraLayout(frame, aura)
     local yGap = tonumber(aura.icon_y_gap) or 2
     local perRow = tonumber(aura.buffs_per_row) or 10
     local sortVertical = aura.sort_vertical and true or false
+    local reverseGrowth = aura.reverse_growth and true or false
 
     local function ApplyOverrideFields(window)
         if window == nil then
@@ -2762,6 +3149,7 @@ local function ApplyAuraLayout(frame, aura)
         local xGapLocal = tonumber(o.iconXGap) or 2
         local yGapLocal = tonumber(o.iconYGap) or 2
         local sortVerticalLocal = o.iconSortVertical and true or false
+        local reverseGrowthLocal = o.reverseGrowth and true or false
 
         local visible = tonumber(window.visibleBuffCount)
         if visible == nil or visible < 1 then
@@ -2790,7 +3178,7 @@ local function ApplyAuraLayout(frame, aura)
                     end
 
                     local x = col * (iconSizeLocal + xGapLocal)
-                    local y = -row * (iconSizeLocal + yGapLocal)
+                    local y = (reverseGrowthLocal and 1 or -1) * row * (iconSizeLocal + yGapLocal)
 
                     if b.AddAnchor ~= nil then
                         local ok = pcall(function()
@@ -2824,6 +3212,7 @@ local function ApplyAuraLayout(frame, aura)
         window.__polar_aura_override.iconYGap = yGap
         window.__polar_aura_override.buffCountOnSingleLine = perRow
         window.__polar_aura_override.iconSortVertical = sortVertical
+        window.__polar_aura_override.reverseGrowth = reverseGrowth
 
         if window.__polar_aura_hooked then
             return
@@ -2942,23 +3331,33 @@ local function ClearAuraOverride(frame)
     clearWindow(frame.debuffWindow)
 end
 
-local function SetAuraFrameHook(frame, aura)
-    if frame == nil or type(aura) ~= "table" then
+local function ApplyFrameRefreshOverrides(frame)
+    if frame == nil or frame.__polar_frame_refresh_applying then
         return
     end
 
-    frame.__polar_aura_frame_cfg = aura
-    if frame.__polar_aura_frame_hooked then
+    frame.__polar_frame_refresh_applying = true
+    if type(frame.__polar_aura_frame_cfg) == "table" then
+        ApplyAuraLayout(frame, frame.__polar_aura_frame_cfg)
+    end
+    if type(frame.__polar_buff_place_cfg) == "table" then
+        ApplyBuffWindowPlacement(frame, frame.__polar_buff_place_cfg)
+    end
+    frame.__polar_frame_refresh_applying = nil
+end
+
+local function EnsureFrameRefreshHook(frame)
+    if frame == nil or frame.__polar_frame_refresh_hooked then
         return
     end
-    frame.__polar_aura_frame_hooked = true
+    frame.__polar_frame_refresh_hooked = true
 
     local function wrap(methodName)
         if type(frame[methodName]) ~= "function" then
             return
         end
 
-        local origKey = "__polar_orig_" .. methodName
+        local origKey = "__polar_refresh_orig_" .. methodName
         if type(frame[origKey]) == "function" then
             return
         end
@@ -2966,23 +3365,14 @@ local function SetAuraFrameHook(frame, aura)
         frame[origKey] = frame[methodName]
         frame[methodName] = function(self, ...)
             local orig = self[origKey]
-
-            if type(self.__polar_aura_frame_cfg) == "table" and not self.__polar_aura_frame_applying then
-                self.__polar_aura_frame_applying = true
-                ApplyAuraLayout(self, self.__polar_aura_frame_cfg)
-                self.__polar_aura_frame_applying = nil
-            end
+            ApplyFrameRefreshOverrides(self)
 
             local out = nil
             if type(orig) == "function" then
                 out = orig(self, ...)
             end
 
-            if type(self.__polar_aura_frame_cfg) == "table" and not self.__polar_aura_frame_applying then
-                self.__polar_aura_frame_applying = true
-                ApplyAuraLayout(self, self.__polar_aura_frame_cfg)
-                self.__polar_aura_frame_applying = nil
-            end
+            ApplyFrameRefreshOverrides(self)
             return out
         end
     end
@@ -2993,19 +3383,37 @@ local function SetAuraFrameHook(frame, aura)
     end)
 end
 
-local function ClearAuraFrameHook(frame)
+local function SetAuraFrameHook(frame, aura)
     if frame == nil then
         return
     end
+    frame.__polar_aura_frame_cfg = type(aura) == "table" and aura or nil
+    EnsureFrameRefreshHook(frame)
+end
 
-    frame.__polar_aura_frame_cfg = nil
-    if not frame.__polar_aura_frame_hooked then
+local function SetBuffWindowPlacementHook(frame, cfg)
+    if frame == nil then
         return
     end
-    frame.__polar_aura_frame_hooked = nil
+    frame.__polar_buff_place_cfg = type(cfg) == "table" and cfg or nil
+    EnsureFrameRefreshHook(frame)
+end
+
+local function ClearFrameRefreshHookIfUnused(frame)
+    if frame == nil then
+        return
+    end
+    if type(frame.__polar_aura_frame_cfg) == "table" or type(frame.__polar_buff_place_cfg) == "table" then
+        return
+    end
+
+    if not frame.__polar_frame_refresh_hooked then
+        return
+    end
+    frame.__polar_frame_refresh_hooked = nil
 
     local function restore(methodName)
-        local origKey = "__polar_orig_" .. methodName
+        local origKey = "__polar_refresh_orig_" .. methodName
         if type(frame[origKey]) == "function" then
             frame[methodName] = frame[origKey]
         end
@@ -3018,6 +3426,23 @@ local function ClearAuraFrameHook(frame)
     end)
 end
 
+local function ClearAuraFrameHook(frame)
+    if frame == nil then
+        return
+    end
+
+    frame.__polar_aura_frame_cfg = nil
+    ClearFrameRefreshHookIfUnused(frame)
+end
+
+local function ClearBuffWindowPlacementHook(frame)
+    if frame == nil then
+        return
+    end
+    frame.__polar_buff_place_cfg = nil
+    ClearFrameRefreshHookIfUnused(frame)
+end
+
 local function AuraWindowMatches(window, aura)
     if window == nil or type(aura) ~= "table" then
         return true
@@ -3027,6 +3452,7 @@ local function AuraWindowMatches(window, aura)
     local yGap = tonumber(aura.icon_y_gap) or 2
     local perRow = tonumber(aura.buffs_per_row) or 10
     local sortVertical = aura.sort_vertical and true or false
+    local reverseGrowth = aura.reverse_growth and true or false
 
     if window.iconSize ~= nil and window.iconSize ~= iconSize then
         return false
@@ -3041,6 +3467,9 @@ local function AuraWindowMatches(window, aura)
         return false
     end
     if window.iconSortVertical ~= nil and (window.iconSortVertical and true or false) ~= sortVertical then
+        return false
+    end
+    if type(window.__polar_aura_override) == "table" and (window.__polar_aura_override.reverseGrowth and true or false) ~= reverseGrowth then
         return false
     end
 
@@ -3069,10 +3498,11 @@ local function GetAuraCfgKey(aura)
     local yGap = tonumber(aura.icon_y_gap) or 2
     local perRow = tonumber(aura.buffs_per_row) or 10
     local sortVertical = aura.sort_vertical and 1 or 0
-    return string.format("%d:%d:%d:%d:%d", iconSize, xGap, yGap, perRow, sortVertical)
+    local reverseGrowth = aura.reverse_growth and 1 or 0
+    return string.format("%d:%d:%d:%d:%d:%d", iconSize, xGap, yGap, perRow, sortVertical, reverseGrowth)
 end
 
-local function ApplyBuffWindowPlacement(frame, cfg)
+ApplyBuffWindowPlacement = function(frame, cfg)
     if frame == nil or type(cfg) ~= "table" then
         return
     end
@@ -3101,11 +3531,11 @@ local function ApplyBuffWindowPlacement(frame, cfg)
             end
             if widget.AddAnchor ~= nil then
                 local ok = pcall(function()
-                    widget:AddAnchor(anchor, frame, x, y)
+                    widget:AddAnchor(anchor, frame, anchor, x, y)
                 end)
                 if not ok then
                     pcall(function()
-                        widget:AddAnchor(anchor, frame, anchor, x, y)
+                        widget:AddAnchor(anchor, frame, x, y)
                     end)
                 end
             end
@@ -3118,11 +3548,6 @@ local function ApplyBuffWindowPlacement(frame, cfg)
     local placeKey = Key(cfg.buff) .. "|" .. Key(cfg.debuff)
     if frame.__polar_last_buff_place_key ~= placeKey then
         frame.__polar_last_buff_place_key = placeKey
-        pcall(function()
-            if frame.UpdateBuffDebuff ~= nil then
-                frame:UpdateBuffDebuff()
-            end
-        end)
     end
 end
 
@@ -3144,6 +3569,7 @@ ApplyStockFrameStyle = function(frame, style)
         end
     end)
 
+    ApplyStockFrameDecorations(frame, UI.settings)
     ApplyTextLayout(frame, style)
     RefreshFrameBarPresentation(frame, style)
 
@@ -3379,15 +3805,6 @@ local function EnsureUi(settings)
 
     ApplyStockDistanceSetting()
 
-    if type(baseStyle.buff_windows) == "table" and baseStyle.buff_windows.enabled then
-        if type(baseStyle.buff_windows.player) == "table" then
-            ApplyBuffWindowPlacement(UI.player.wnd, baseStyle.buff_windows.player)
-        end
-        if type(baseStyle.buff_windows.target) == "table" then
-            ApplyBuffWindowPlacement(UI.target.wnd, baseStyle.buff_windows.target)
-        end
-    end
-
     local auraEnabled = type(baseStyle.aura) == "table" and (baseStyle.aura.enabled and true or false) or false
     local auraCfgKey = auraEnabled and GetAuraCfgKey(baseStyle.aura) or nil
     if UI.last_aura_enabled == nil then
@@ -3427,6 +3844,25 @@ local function EnsureUi(settings)
             end
         end)
     end
+
+    if type(baseStyle.buff_windows) == "table" and baseStyle.buff_windows.enabled then
+        if type(baseStyle.buff_windows.player) == "table" then
+            SetBuffWindowPlacementHook(UI.player.wnd, baseStyle.buff_windows.player)
+            ApplyBuffWindowPlacement(UI.player.wnd, baseStyle.buff_windows.player)
+        else
+            ClearBuffWindowPlacementHook(UI.player.wnd)
+        end
+        if type(baseStyle.buff_windows.target) == "table" then
+            SetBuffWindowPlacementHook(UI.target.wnd, baseStyle.buff_windows.target)
+            ApplyBuffWindowPlacement(UI.target.wnd, baseStyle.buff_windows.target)
+        else
+            ClearBuffWindowPlacementHook(UI.target.wnd)
+        end
+    else
+        ClearBuffWindowPlacementHook(UI.player.wnd)
+        ClearBuffWindowPlacementHook(UI.target.wnd)
+    end
+
     UI.last_aura_enabled = auraEnabled
     UI.last_aura_cfg = auraCfgKey
     if TargetExtrasModule ~= nil and TargetExtrasModule.Ensure ~= nil then
@@ -3543,6 +3979,8 @@ UI.UnLoad = function()
     UI.target.current_target_id = nil
     UI.target.pdef = nil
     UI.target.mdef = nil
+    UI.target.custom_hp_bg = nil
+    UI.target.custom_mp_bg = nil
 end
 
 UI.SetEnabled = function(enabled)
@@ -3644,6 +4082,11 @@ UI.SetEnabled = function(enabled)
     if UI.target.mdef ~= nil and UI.target.mdef.Show ~= nil then
         if not UI.enabled then
             UI.target.mdef:Show(false)
+        end
+    end
+    for _, bg in ipairs({ UI.target.custom_hp_bg, UI.target.custom_mp_bg }) do
+        if bg ~= nil and bg.Show ~= nil and not UI.enabled then
+            bg:Show(false)
         end
     end
     if UI.settings ~= nil then
