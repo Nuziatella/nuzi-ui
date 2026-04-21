@@ -1342,9 +1342,6 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
 
     local colorsEnabled = (style.bar_colors_enabled and true or false)
     local mode = tostring(style.hp_texture_mode or "stock")
-    if tostring(frame.__polar_unit) == "watchtarget" then
-        mode = "stock"
-    end
 
     local function coordsFor(key, betterCoords)
         local keepOrig = (mode == "stock")
@@ -1452,6 +1449,37 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
         return frame.__polar_small_hpmp and true or false
     end
 
+    local function usesCustomSmallFrameTexture()
+        if not usesSmallHpMp() or mode == "stock" then
+            return false
+        end
+        local unit = tostring(frame.__polar_unit or "")
+        return unit == "watchtarget" or unit == "targettarget"
+    end
+
+    local function buildPerFrameTextureInfo(styleKey, afterColor)
+        if not usesCustomSmallFrameTexture() or statusbar_style == nil or type(statusbar_style) ~= "table" then
+            return nil
+        end
+        local src = statusbar_style[styleKey]
+        if type(src) ~= "table" then
+            return nil
+        end
+        local out = DeepCopyTable(src)
+        out.coords = SMALL_BAR_COORDS
+        if colorsEnabled then
+            local up = BuildTextureAfterColorValues(out.afterImage_color_up, afterColor)
+            local down = BuildTextureAfterColorValues(out.afterImage_color_down, afterColor)
+            if up ~= nil and type(out.afterImage_color_up) == "table" then
+                out.afterImage_color_up = up
+            end
+            if down ~= nil and type(out.afterImage_color_down) == "table" then
+                out.afterImage_color_down = down
+            end
+        end
+        return out
+    end
+
     local function getHpStyleKey(hostile)
         local small = usesSmallHpMp()
         if mode == "pc" then
@@ -1490,7 +1518,9 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
         if frame.hpBar ~= nil then
             if statusbar_style ~= nil and type(statusbar_style) == "table" then
                 local hostile = isHostileUnit(ResolveFrameRuntimeUnit(frame) or frame.__polar_unit)
-                frame.hpBar:ApplyBarTexture(statusbar_style[getHpStyleKey(hostile)])
+                local hpKey = getHpStyleKey(hostile)
+                local textureInfo = buildPerFrameTextureInfo(hpKey, hpAfter01) or statusbar_style[hpKey]
+                frame.hpBar:ApplyBarTexture(textureInfo)
             else
                 frame.hpBar:ApplyBarTexture()
             end
@@ -1500,7 +1530,8 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
         if frame.mpBar ~= nil then
             if statusbar_style ~= nil and type(statusbar_style) == "table" then
                 local mpKey = usesSmallHpMp() and "S_MP" or "L_MP"
-                frame.mpBar:ApplyBarTexture(statusbar_style[mpKey])
+                local textureInfo = buildPerFrameTextureInfo(mpKey, mpAfter01) or statusbar_style[mpKey]
+                frame.mpBar:ApplyBarTexture(textureInfo)
             else
                 frame.mpBar:ApplyBarTexture()
             end

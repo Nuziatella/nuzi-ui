@@ -809,6 +809,48 @@ local function MakeCloseHandler()
     end
 end
 
+local function AttachWindowShiftDrag(widget, target)
+    if widget == nil or target == nil or widget.SetHandler == nil then
+        return
+    end
+    pcall(function()
+        if widget.RegisterForDrag ~= nil then
+            widget:RegisterForDrag("LeftButton")
+        end
+        if widget.EnableDrag ~= nil then
+            widget:EnableDrag(true)
+        end
+    end)
+    widget:SetHandler("OnDragStart", function()
+        if type(SettingsPage.settings) == "table" and SettingsPage.settings.drag_requires_shift ~= false and not IsShiftDown() then
+            return
+        end
+        if target.StartMoving ~= nil then
+            target:StartMoving()
+        end
+        if api ~= nil and api.Cursor ~= nil and api.Cursor.ClearCursor ~= nil then
+            pcall(function()
+                api.Cursor:ClearCursor()
+            end)
+        end
+        if api ~= nil and api.Cursor ~= nil and api.Cursor.SetCursorImage ~= nil and CURSOR_PATH ~= nil and CURSOR_PATH.MOVE ~= nil then
+            pcall(function()
+                api.Cursor:SetCursorImage(CURSOR_PATH.MOVE, 0, 0)
+            end)
+        end
+    end)
+    widget:SetHandler("OnDragStop", function()
+        if target.StopMovingOrSizing ~= nil then
+            target:StopMovingOrSizing()
+        end
+        if api ~= nil and api.Cursor ~= nil and api.Cursor.ClearCursor ~= nil then
+            pcall(function()
+                api.Cursor:ClearCursor()
+            end)
+        end
+    end)
+end
+
 local function CreateEmptyChild(parent, id)
     if parent == nil then
         return nil
@@ -2930,13 +2972,80 @@ local function EnsureWindow()
         return
     end
 
-    SettingsPage.window = api.Interface:CreateWindow("PolarUiSettings", "Nuzi UI Settings", 820, 760)
+    if api == nil or api.Interface == nil then
+        return
+    end
+
+    if api.Interface.CreateEmptyWindow ~= nil then
+        SettingsPage.window = api.Interface:CreateEmptyWindow("PolarUiSettings", "UIParent")
+    elseif api.Interface.CreateWindow ~= nil then
+        SettingsPage.window = api.Interface:CreateWindow("PolarUiSettings", "Nuzi UI Settings", 0, 0)
+    end
+    if SettingsPage.window == nil then
+        return
+    end
+    if SettingsPage.window.SetExtent ~= nil then
+        SettingsPage.window:SetExtent(820, 760)
+    end
+    if SettingsPage.window.EnableHidingIsRemove ~= nil then
+        SettingsPage.window:EnableHidingIsRemove(false)
+    end
     SettingsPage.window:AddAnchor("CENTER", "UIParent", 0, 0)
 
     local closeHandler = MakeCloseHandler()
-    SettingsPage.window:SetHandler("OnCloseByEsc", closeHandler)
+    if SettingsPage.window.SetHandler ~= nil then
+        SettingsPage.window:SetHandler("OnCloseByEsc", closeHandler)
+    end
     function SettingsPage.window:OnClose()
         closeHandler()
+    end
+
+    local shell = CreateEmptyChild(SettingsPage.window, "polarUiShell")
+    if shell ~= nil then
+        pcall(function()
+            shell:AddAnchor("TOPLEFT", SettingsPage.window, 0, 0)
+            shell:AddAnchor("BOTTOMRIGHT", SettingsPage.window, 0, 0)
+            shell:Show(true)
+        end)
+        AddPanelBackground(shell, 0.94)
+    end
+
+    local header = CreateEmptyChild(SettingsPage.window, "polarUiHeader")
+    if header ~= nil then
+        pcall(function()
+            header:AddAnchor("TOPLEFT", SettingsPage.window, 0, 0)
+            header:AddAnchor("TOPRIGHT", SettingsPage.window, 0, 0)
+            if header.SetHeight ~= nil then
+                header:SetHeight(34)
+            else
+                header:SetExtent(1, 34)
+            end
+            header:Show(true)
+        end)
+        AddPanelBackground(header, 0.98)
+        pcall(function()
+            if header.CreateColorDrawable ~= nil then
+                local accent = header:CreateColorDrawable(0.94, 0.80, 0.48, 0.10, "overlay")
+                accent:AddAnchor("TOPLEFT", header, 0, 0)
+                accent:AddAnchor("TOPRIGHT", header, 0, 0)
+                accent:SetHeight(34)
+                local divider = header:CreateColorDrawable(0.94, 0.80, 0.48, 0.18, "overlay")
+                divider:AddAnchor("BOTTOMLEFT", header, 10, 0)
+                divider:AddAnchor("BOTTOMRIGHT", header, -10, 0)
+                divider:SetHeight(1)
+            end
+        end)
+        CreateLabel("polarUiHeaderTitle", header, "Nuzi UI Settings", 16, 8, 15, 260)
+        local headerClose = CreateButton("polarUiHeaderClose", header, "X", 778, 4)
+        if headerClose ~= nil then
+            pcall(function()
+                headerClose:SetExtent(28, 24)
+            end)
+            if headerClose.SetHandler ~= nil then
+                headerClose:SetHandler("OnClick", closeHandler)
+            end
+        end
+        AttachWindowShiftDrag(header, SettingsPage.window)
     end
 
     local navPanel = CreateEmptyChild(SettingsPage.window, "polarUiNavPanel")

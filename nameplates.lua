@@ -1,28 +1,7 @@
 local api = require("api")
-local Compat = nil
-local Runtime = nil
-do
-    local ok, mod = pcall(require, "nuzi-ui/compat")
-    if ok then
-        Compat = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.compat")
-        if ok then
-            Compat = mod
-        end
-    end
-end
-do
-    local ok, mod = pcall(require, "nuzi-ui/runtime")
-    if ok then
-        Runtime = mod
-    else
-        ok, mod = pcall(require, "nuzi-ui.runtime")
-        if ok then
-            Runtime = mod
-        end
-    end
-end
+local SafeRequire = require("nuzi-ui/safe_require")
+local Compat = SafeRequire("nuzi-ui/compat")
+local Runtime = SafeRequire("nuzi-ui/runtime")
 
 local Nameplates = {
     settings = nil,

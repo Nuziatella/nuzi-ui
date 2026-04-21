@@ -83,4 +83,4 @@ You can:
 
 ## Version
 
-Current version: `2.1.1`
+Current version: `2.1.9`
