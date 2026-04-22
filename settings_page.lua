@@ -5,6 +5,7 @@ local SettingsCommon = SafeRequire("nuzi-ui/settings_common", "nuzi-ui.settings_
 local SettingsWidgets = SafeRequire("nuzi-ui/settings_widgets", "nuzi-ui.settings_widgets")
 local SettingsCatalog = SafeRequire("nuzi-ui/settings_catalog", "nuzi-ui.settings_catalog")
 local SettingsSchema = SafeRequire("nuzi-ui/settings_schema", "nuzi-ui.settings_schema")
+local CastBar = SafeRequire("nuzi-ui/castbar", "nuzi-ui.castbar")
 
 local SettingsPage = {
     settings = nil,
@@ -196,6 +197,18 @@ local COOLDOWN_TRACK_KIND_LABELS = {
     "Debuff"
 }
 
+local CASTBAR_TEXTURE_MODE_KEYS = {
+    "auto",
+    "casting",
+    "charge"
+}
+
+local CASTBAR_TEXTURE_MODE_LABELS = {
+    "Auto",
+    "Casting",
+    "Charge"
+}
+
 local COOLDOWN_BUFFS_PER_PAGE = 6
 local COOLDOWN_SCAN_ROWS = 10
 local COOLDOWN_SEARCH_ROWS = 8
@@ -206,6 +219,7 @@ local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAG
     { id = "npc", label = "NPC", title = "NPC", summary = "Stock unit-frame art, boss target decorations, target distance, and grade-star placement." },
     { id = "text", label = "Text", title = "Text", summary = "Name, level, role, guild, and number formatting." },
     { id = "bars", label = "Bars", title = "Bars", summary = "Frame sizing, alpha, bar colors, textures, and value placement." },
+    { id = "castbar", label = "Cast Bar", title = "Cast Bar", summary = "Movable player cast bar with customizable colors, text, and textures." },
     { id = "auras", label = "Auras", title = "Auras", summary = "Aura windows, icon layout, and buff or debuff anchor controls." },
     { id = "plates", label = "Nameplates", title = "Nameplates", summary = "Visibility rules, offsets, colors, and runtime nameplate behavior." },
     { id = "cooldown", label = "Cooldowns", title = "Cooldown Tracker", summary = "Tracked buff and debuff icons for player, target, pet, watchtarget, and target of target." }
@@ -217,6 +231,14 @@ local PruneStyleFrameOverrides = SettingsCommon.PruneStyleFrameOverrides
 local NormalizeCooldownTrackKind = SettingsCommon.NormalizeCooldownTrackKind
 local NormalizeCooldownDisplayMode = SettingsCommon.NormalizeCooldownDisplayMode
 local NormalizeCooldownTrackedEntry = SettingsCommon.NormalizeCooldownTrackedEntry
+
+local function GetCastBarTextureModeIndex(key)
+    return SettingsCommon.GetIndexFromKey(CASTBAR_TEXTURE_MODE_KEYS, tostring(key or "auto"))
+end
+
+local function GetCastBarTextureModeFromIndex(idx)
+    return SettingsCommon.GetKeyFromIndex(CASTBAR_TEXTURE_MODE_KEYS, idx)
+end
 
 local function GetCooldownDisplayModeFromIndex(idx)
     idx = tonumber(idx) or 1
@@ -730,6 +752,31 @@ local function GetPageMeta(pageId)
     return nil
 end
 
+local function IsSettingsWindowVisible()
+    if SettingsPage.window == nil then
+        return false
+    end
+    if SettingsPage.window.IsVisible ~= nil then
+        local ok, visible = pcall(function()
+            return SettingsPage.window:IsVisible()
+        end)
+        if ok then
+            return visible and true or false
+        end
+    end
+    return false
+end
+
+local function UpdateCastBarPreview()
+    if CastBar == nil or CastBar.SetPreviewVisible == nil then
+        return
+    end
+    local visible = IsSettingsWindowVisible() and SettingsPage.active_page == "castbar"
+    pcall(function()
+        CastBar.SetPreviewVisible(visible, SettingsPage.settings)
+    end)
+end
+
 local function SetActivePage(pageId)
     if SettingsPage.pages == nil or SettingsPage.pages[pageId] == nil then
         return
@@ -787,6 +834,8 @@ local function SetActivePage(pageId)
             page:ChangeChildAnchorByScrollValue("vert", 0)
         end
     end)
+
+    UpdateCastBarPreview()
 end
 
 local function MakeCloseHandler()
@@ -805,6 +854,7 @@ local function MakeCloseHandler()
         end
         if SettingsPage.window ~= nil then
             SettingsPage.window:Show(false)
+            UpdateCastBarPreview()
         end
     end
 end
@@ -1411,7 +1461,7 @@ local SetControlEnabled = SettingsWidgets.SetControlEnabled
 local EstimateTextHeight = SettingsWidgets.EstimateTextHeight
 local SetWrappedText = SettingsWidgets.SetWrappedText
 
-local SCHEMA_PAGE_IDS = { "general", "npc", "text", "bars", "auras", "plates" }
+local SCHEMA_PAGE_IDS = { "general", "npc", "text", "bars", "castbar", "auras", "plates" }
 local SCHEMA_PAGE_LEFT = 18
 local SCHEMA_PAGE_TOP = 18
 local SCHEMA_CARD_WIDTH = 580
@@ -1827,6 +1877,111 @@ local function RefreshControls()
         local size = GetSettingsButtonSize()
         refreshSlider(SettingsPage.controls.launcher_size, SettingsPage.controls.launcher_size_val, size)
         ApplySettingsButtonLayout()
+    end
+
+    local castBar = type(s.cast_bar) == "table" and s.cast_bar or {}
+    local castBarFill = type(castBar.fill_color) == "table" and castBar.fill_color or { 245, 199, 107, 255 }
+    local castBarBg = type(castBar.bg_color) == "table" and castBar.bg_color or { 13, 10, 8, 230 }
+    local castBarAccent = type(castBar.accent_color) == "table" and castBar.accent_color or { 240, 204, 122, 36 }
+    local castBarText = type(castBar.text_color) == "table" and castBar.text_color or { 255, 255, 255, 255 }
+    if SettingsPage.controls.castbar_enabled ~= nil then
+        SettingsPage.controls.castbar_enabled:SetChecked(castBar.enabled and true or false)
+    end
+    if SettingsPage.controls.castbar_lock_position ~= nil then
+        SettingsPage.controls.castbar_lock_position:SetChecked(castBar.lock_position and true or false)
+    end
+    if SettingsPage.controls.castbar_width ~= nil then
+        refreshSlider(
+            SettingsPage.controls.castbar_width,
+            SettingsPage.controls.castbar_width_val,
+            tonumber(castBar.width) or 500
+        )
+    end
+    if SettingsPage.controls.castbar_scale ~= nil then
+        local scalePct = math.floor(((tonumber(castBar.scale) or 1.1) * 100) + 0.5)
+        if scalePct < 80 then
+            scalePct = 80
+        elseif scalePct > 200 then
+            scalePct = 200
+        end
+        refreshSlider(SettingsPage.controls.castbar_scale, SettingsPage.controls.castbar_scale_val, scalePct)
+    end
+    if SettingsPage.controls.castbar_texture_mode ~= nil then
+        SettingsPage._refreshing_castbar_texture = true
+        SetComboBoxIndex1Based(
+            SettingsPage.controls.castbar_texture_mode,
+            GetCastBarTextureModeIndex(castBar.bar_texture_mode)
+        )
+        SettingsPage._refreshing_castbar_texture = false
+    end
+    if SettingsPage.controls.castbar_text_font_size ~= nil then
+        refreshSlider(
+            SettingsPage.controls.castbar_text_font_size,
+            SettingsPage.controls.castbar_text_font_size_val,
+            tonumber(castBar.text_font_size) or 15
+        )
+    end
+    if SettingsPage.controls.castbar_text_offset_x ~= nil then
+        refreshSlider(
+            SettingsPage.controls.castbar_text_offset_x,
+            SettingsPage.controls.castbar_text_offset_x_val,
+            tonumber(castBar.text_offset_x) or 0
+        )
+    end
+    if SettingsPage.controls.castbar_text_offset_y ~= nil then
+        refreshSlider(
+            SettingsPage.controls.castbar_text_offset_y,
+            SettingsPage.controls.castbar_text_offset_y_val,
+            tonumber(castBar.text_offset_y) or 6
+        )
+    end
+    if SettingsPage.controls.castbar_fill_r ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_fill_r, SettingsPage.controls.castbar_fill_r_val, tonumber(castBarFill[1]) or 245)
+    end
+    if SettingsPage.controls.castbar_fill_g ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_fill_g, SettingsPage.controls.castbar_fill_g_val, tonumber(castBarFill[2]) or 199)
+    end
+    if SettingsPage.controls.castbar_fill_b ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_fill_b, SettingsPage.controls.castbar_fill_b_val, tonumber(castBarFill[3]) or 107)
+    end
+    if SettingsPage.controls.castbar_fill_a ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_fill_a, SettingsPage.controls.castbar_fill_a_val, tonumber(castBarFill[4]) or 255)
+    end
+    if SettingsPage.controls.castbar_bg_r ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_bg_r, SettingsPage.controls.castbar_bg_r_val, tonumber(castBarBg[1]) or 13)
+    end
+    if SettingsPage.controls.castbar_bg_g ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_bg_g, SettingsPage.controls.castbar_bg_g_val, tonumber(castBarBg[2]) or 10)
+    end
+    if SettingsPage.controls.castbar_bg_b ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_bg_b, SettingsPage.controls.castbar_bg_b_val, tonumber(castBarBg[3]) or 8)
+    end
+    if SettingsPage.controls.castbar_bg_a ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_bg_a, SettingsPage.controls.castbar_bg_a_val, tonumber(castBarBg[4]) or 230)
+    end
+    if SettingsPage.controls.castbar_accent_r ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_accent_r, SettingsPage.controls.castbar_accent_r_val, tonumber(castBarAccent[1]) or 240)
+    end
+    if SettingsPage.controls.castbar_accent_g ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_accent_g, SettingsPage.controls.castbar_accent_g_val, tonumber(castBarAccent[2]) or 204)
+    end
+    if SettingsPage.controls.castbar_accent_b ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_accent_b, SettingsPage.controls.castbar_accent_b_val, tonumber(castBarAccent[3]) or 122)
+    end
+    if SettingsPage.controls.castbar_accent_a ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_accent_a, SettingsPage.controls.castbar_accent_a_val, tonumber(castBarAccent[4]) or 36)
+    end
+    if SettingsPage.controls.castbar_text_r ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_text_r, SettingsPage.controls.castbar_text_r_val, tonumber(castBarText[1]) or 255)
+    end
+    if SettingsPage.controls.castbar_text_g ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_text_g, SettingsPage.controls.castbar_text_g_val, tonumber(castBarText[2]) or 255)
+    end
+    if SettingsPage.controls.castbar_text_b ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_text_b, SettingsPage.controls.castbar_text_b_val, tonumber(castBarText[3]) or 255)
+    end
+    if SettingsPage.controls.castbar_text_a ~= nil then
+        refreshSlider(SettingsPage.controls.castbar_text_a, SettingsPage.controls.castbar_text_a_val, tonumber(castBarText[4]) or 255)
     end
 
     local npcStyle = nil
@@ -2442,6 +2597,35 @@ local function ApplyControlsToSettings()
         ApplySettingsButtonLayout()
     end
 
+    if type(s.cast_bar) ~= "table" then
+        s.cast_bar = {}
+    end
+    if SettingsPage.controls.castbar_enabled ~= nil then
+        s.cast_bar.enabled = SettingsPage.controls.castbar_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.castbar_lock_position ~= nil then
+        s.cast_bar.lock_position = SettingsPage.controls.castbar_lock_position:GetChecked() and true or false
+    end
+    if SettingsPage.controls.castbar_width ~= nil then
+        s.cast_bar.width = GetSliderValue(SettingsPage.controls.castbar_width)
+    end
+    if SettingsPage.controls.castbar_scale ~= nil then
+        s.cast_bar.scale = GetSliderValue(SettingsPage.controls.castbar_scale) / 100
+    end
+    if SettingsPage.controls.castbar_texture_mode ~= nil then
+        local idx = GetComboBoxIndex1Based(SettingsPage.controls.castbar_texture_mode, #CASTBAR_TEXTURE_MODE_KEYS)
+        s.cast_bar.bar_texture_mode = GetCastBarTextureModeFromIndex(idx)
+    end
+    if SettingsPage.controls.castbar_text_font_size ~= nil then
+        s.cast_bar.text_font_size = GetSliderValue(SettingsPage.controls.castbar_text_font_size)
+    end
+    if SettingsPage.controls.castbar_text_offset_x ~= nil then
+        s.cast_bar.text_offset_x = GetSliderValue(SettingsPage.controls.castbar_text_offset_x)
+    end
+    if SettingsPage.controls.castbar_text_offset_y ~= nil then
+        s.cast_bar.text_offset_y = GetSliderValue(SettingsPage.controls.castbar_text_offset_y)
+    end
+
     EnsureStyleFrames(s)
     if type(s.style) ~= "table" then
         s.style = {}
@@ -2462,6 +2646,41 @@ local function ApplyControlsToSettings()
 
     local function colorTable(r, g, b, a)
         return { r, g, b, a or 255 }
+    end
+
+    if type(s.cast_bar) == "table" then
+        if SettingsPage.controls.castbar_fill_r ~= nil then
+            s.cast_bar.fill_color = colorTable(
+                GetSliderValue(SettingsPage.controls.castbar_fill_r),
+                GetSliderValue(SettingsPage.controls.castbar_fill_g),
+                GetSliderValue(SettingsPage.controls.castbar_fill_b),
+                GetSliderValue(SettingsPage.controls.castbar_fill_a)
+            )
+        end
+        if SettingsPage.controls.castbar_bg_r ~= nil then
+            s.cast_bar.bg_color = colorTable(
+                GetSliderValue(SettingsPage.controls.castbar_bg_r),
+                GetSliderValue(SettingsPage.controls.castbar_bg_g),
+                GetSliderValue(SettingsPage.controls.castbar_bg_b),
+                GetSliderValue(SettingsPage.controls.castbar_bg_a)
+            )
+        end
+        if SettingsPage.controls.castbar_accent_r ~= nil then
+            s.cast_bar.accent_color = colorTable(
+                GetSliderValue(SettingsPage.controls.castbar_accent_r),
+                GetSliderValue(SettingsPage.controls.castbar_accent_g),
+                GetSliderValue(SettingsPage.controls.castbar_accent_b),
+                GetSliderValue(SettingsPage.controls.castbar_accent_a)
+            )
+        end
+        if SettingsPage.controls.castbar_text_r ~= nil then
+            s.cast_bar.text_color = colorTable(
+                GetSliderValue(SettingsPage.controls.castbar_text_r),
+                GetSliderValue(SettingsPage.controls.castbar_text_g),
+                GetSliderValue(SettingsPage.controls.castbar_text_b),
+                GetSliderValue(SettingsPage.controls.castbar_text_a)
+            )
+        end
     end
 
     if type(s.nameplates) ~= "table" then
@@ -4712,6 +4931,27 @@ local function EnsureWindow()
 
     local sliderList = {
         { SettingsPage.controls.launcher_size, SettingsPage.controls.launcher_size_val },
+        { SettingsPage.controls.castbar_width, SettingsPage.controls.castbar_width_val },
+        { SettingsPage.controls.castbar_scale, SettingsPage.controls.castbar_scale_val },
+        { SettingsPage.controls.castbar_text_font_size, SettingsPage.controls.castbar_text_font_size_val },
+        { SettingsPage.controls.castbar_text_offset_x, SettingsPage.controls.castbar_text_offset_x_val },
+        { SettingsPage.controls.castbar_text_offset_y, SettingsPage.controls.castbar_text_offset_y_val },
+        { SettingsPage.controls.castbar_fill_r, SettingsPage.controls.castbar_fill_r_val },
+        { SettingsPage.controls.castbar_fill_g, SettingsPage.controls.castbar_fill_g_val },
+        { SettingsPage.controls.castbar_fill_b, SettingsPage.controls.castbar_fill_b_val },
+        { SettingsPage.controls.castbar_fill_a, SettingsPage.controls.castbar_fill_a_val },
+        { SettingsPage.controls.castbar_bg_r, SettingsPage.controls.castbar_bg_r_val },
+        { SettingsPage.controls.castbar_bg_g, SettingsPage.controls.castbar_bg_g_val },
+        { SettingsPage.controls.castbar_bg_b, SettingsPage.controls.castbar_bg_b_val },
+        { SettingsPage.controls.castbar_bg_a, SettingsPage.controls.castbar_bg_a_val },
+        { SettingsPage.controls.castbar_accent_r, SettingsPage.controls.castbar_accent_r_val },
+        { SettingsPage.controls.castbar_accent_g, SettingsPage.controls.castbar_accent_g_val },
+        { SettingsPage.controls.castbar_accent_b, SettingsPage.controls.castbar_accent_b_val },
+        { SettingsPage.controls.castbar_accent_a, SettingsPage.controls.castbar_accent_a_val },
+        { SettingsPage.controls.castbar_text_r, SettingsPage.controls.castbar_text_r_val },
+        { SettingsPage.controls.castbar_text_g, SettingsPage.controls.castbar_text_g_val },
+        { SettingsPage.controls.castbar_text_b, SettingsPage.controls.castbar_text_b_val },
+        { SettingsPage.controls.castbar_text_a, SettingsPage.controls.castbar_text_a_val },
         { SettingsPage.controls.frame_alpha, SettingsPage.controls.frame_alpha_val },
         { SettingsPage.controls.overlay_alpha, SettingsPage.controls.overlay_alpha_val },
         { SettingsPage.controls.frame_width, SettingsPage.controls.frame_width_val },
@@ -4854,6 +5094,8 @@ local function EnsureWindow()
         SettingsPage.controls.hide_target_grade_star,
         SettingsPage.controls.show_distance,
         SettingsPage.controls.alignment_grid_enabled,
+        SettingsPage.controls.castbar_enabled,
+        SettingsPage.controls.castbar_lock_position,
         SettingsPage.controls.bar_colors_enabled,
         SettingsPage.controls.overlay_shadow,
         SettingsPage.controls.target_guild_visible,
@@ -5217,6 +5459,14 @@ local function EnsureWindow()
             styleTargetChanged(SettingsPage.controls.style_target_bars, a, b)
         end)
     end
+    if SettingsPage.controls.castbar_texture_mode ~= nil and SettingsPage.controls.castbar_texture_mode.SetHandler ~= nil then
+        SettingsPage.controls.castbar_texture_mode:SetHandler("OnSelChanged", function()
+            if SettingsPage._refreshing_castbar_texture then
+                return
+            end
+            sliderChanged()
+        end)
+    end
 
     for _, cb in ipairs(checkboxList) do
         if cb ~= nil and cb.SetHandler ~= nil then
@@ -5360,6 +5610,7 @@ function SettingsPage.open()
     end
     RefreshControls()
     SettingsPage.window:Show(true)
+    UpdateCastBarPreview()
 end
 
 function SettingsPage.toggle()
@@ -5380,6 +5631,7 @@ function SettingsPage.toggle()
         SettingsPage.open()
     else
         SettingsPage.window:Show(false)
+        UpdateCastBarPreview()
     end
 end
 
@@ -5395,6 +5647,7 @@ function SettingsPage.Unload()
         end)
         SettingsPage.window = nil
     end
+    UpdateCastBarPreview()
     if SettingsPage.toggle_button ~= nil and SettingsPage.toggle_button.Show ~= nil then
         pcall(function()
             SettingsPage.toggle_button:Show(false)

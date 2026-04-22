@@ -81,6 +81,12 @@ local STYLE_TARGET_ITEMS = {
     "Party"
 }
 
+local CASTBAR_TEXTURE_ITEMS = {
+    "Auto",
+    "Casting",
+    "Charge"
+}
+
 SettingsSchema.PAGES = {
     general = {
         sections = {
@@ -348,6 +354,277 @@ SettingsSchema.PAGES = {
                     checkbox("value_fmt_curmax", "polarUiValueFmtCurMax", "Format HP/MP as cur/max"),
                     checkbox("value_fmt_percent", "polarUiValueFmtPercent", "Format HP/MP as percent"),
                     checkbox("short_numbers", "polarUiShortNumbers", "Short numbers (12.3k/4.5m)")
+                }
+            }
+        }
+    },
+    castbar = {
+        sections = {
+            {
+                id = "castbar_behavior",
+                title = "Player Cast Bar",
+                hint = "Show a movable player cast bar that only appears while you are casting.",
+                fields = {
+                    checkbox("castbar_enabled", "polarUiCastBarEnabled", "Enable player cast bar"),
+                    hint(
+                        "castbar_move_hint",
+                        "polarUiCastBarMoveHint",
+                        "Use Shift + drag in game to move the cast bar. Position saves automatically.",
+                        { width = 520, depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    hint(
+                        "castbar_preview_hint",
+                        "polarUiCastBarPreviewHint",
+                        "A live preview is shown while this page is open.",
+                        { width = 520, depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "castbar_lock_position",
+                        "polarUiCastBarLockPosition",
+                        "Lock cast bar position",
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    )
+                }
+            },
+            {
+                id = "castbar_layout",
+                title = "Layout",
+                hint = "Tune the cast bar size and choose the texture preset used for the fill.",
+                fields = {
+                    slider(
+                        "castbar_width",
+                        "polarUiCastBarWidth",
+                        "Bar width",
+                        240,
+                        620,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_scale",
+                        "polarUiCastBarScale",
+                        "Bar scale (80-200)",
+                        80,
+                        200,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    combo(
+                        "castbar_texture_mode",
+                        "polarUiCastBarTextureMode",
+                        "Texture mode",
+                        CASTBAR_TEXTURE_ITEMS,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    )
+                }
+            },
+            {
+                id = "castbar_text",
+                title = "Text",
+                hint = "Adjust the spell text color, size, and placement under the bar.",
+                fields = {
+                    slider(
+                        "castbar_text_font_size",
+                        "polarUiCastBarTextFontSize",
+                        "Text size",
+                        10,
+                        24,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_text_offset_x",
+                        "polarUiCastBarTextOffsetX",
+                        "Text offset X",
+                        -120,
+                        120,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_text_offset_y",
+                        "polarUiCastBarTextOffsetY",
+                        "Text offset Y",
+                        -40,
+                        60,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    label(
+                        "castbar_text_color_label",
+                        "polarUiCastBarTextColorLabel",
+                        "Text color",
+                        { depends_on = { control = "castbar_enabled", checked = true }, font_size = 15 }
+                    ),
+                    slider(
+                        "castbar_text_r",
+                        "polarUiCastBarTextR",
+                        "Text R",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_text_g",
+                        "polarUiCastBarTextG",
+                        "Text G",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_text_b",
+                        "polarUiCastBarTextB",
+                        "Text B",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_text_a",
+                        "polarUiCastBarTextA",
+                        "Text alpha",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    )
+                }
+            },
+            {
+                id = "castbar_colors",
+                title = "Colors",
+                hint = "Customize the bar fill, background, and accent strip colors.",
+                fields = {
+                    label(
+                        "castbar_fill_label",
+                        "polarUiCastBarFillLabel",
+                        "Fill color",
+                        { depends_on = { control = "castbar_enabled", checked = true }, font_size = 15 }
+                    ),
+                    slider(
+                        "castbar_fill_r",
+                        "polarUiCastBarFillR",
+                        "Fill R",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_fill_g",
+                        "polarUiCastBarFillG",
+                        "Fill G",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_fill_b",
+                        "polarUiCastBarFillB",
+                        "Fill B",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_fill_a",
+                        "polarUiCastBarFillA",
+                        "Fill alpha",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    label(
+                        "castbar_bg_label",
+                        "polarUiCastBarBgLabel",
+                        "Background color",
+                        { depends_on = { control = "castbar_enabled", checked = true }, font_size = 15 }
+                    ),
+                    slider(
+                        "castbar_bg_r",
+                        "polarUiCastBarBgR",
+                        "Background R",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_bg_g",
+                        "polarUiCastBarBgG",
+                        "Background G",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_bg_b",
+                        "polarUiCastBarBgB",
+                        "Background B",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_bg_a",
+                        "polarUiCastBarBgA",
+                        "Background alpha",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    label(
+                        "castbar_accent_label",
+                        "polarUiCastBarAccentLabel",
+                        "Accent color",
+                        { depends_on = { control = "castbar_enabled", checked = true }, font_size = 15 }
+                    ),
+                    slider(
+                        "castbar_accent_r",
+                        "polarUiCastBarAccentR",
+                        "Accent R",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_accent_g",
+                        "polarUiCastBarAccentG",
+                        "Accent G",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_accent_b",
+                        "polarUiCastBarAccentB",
+                        "Accent B",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_accent_a",
+                        "polarUiCastBarAccentA",
+                        "Accent alpha",
+                        0,
+                        255,
+                        1,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    )
                 }
             }
         }

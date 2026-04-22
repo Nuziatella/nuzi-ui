@@ -111,6 +111,23 @@ SettingsDefaults.DEFAULT_SETTINGS = {
             }
         }
     },
+    cast_bar = {
+        enabled = false,
+        width = 500,
+        scale = 1.1,
+        pos_x = 0,
+        pos_y = 0,
+        position_initialized = false,
+        lock_position = false,
+        bar_texture_mode = "auto",
+        fill_color = { 245, 199, 107, 255 },
+        bg_color = { 13, 10, 8, 230 },
+        accent_color = { 240, 204, 122, 36 },
+        text_color = { 255, 255, 255, 255 },
+        text_offset_x = 0,
+        text_offset_y = 6,
+        text_font_size = 15
+    },
     nameplates = {
         enabled = false,
         guild_only = false,
@@ -572,6 +589,15 @@ function SettingsDefaults.EnsureSettingsDefaultsAndMigrations(s)
 
     for k, v in pairs(defaults) do
         EnsureTableDefault(s, k, v)
+    end
+
+    if type(s.cast_bar) == "table"
+        and s.cast_bar.position_initialized ~= true
+        and tonumber(s.cast_bar.width) == 420
+        and tonumber(s.cast_bar.scale) == 1.25 then
+        s.cast_bar.width = defaults.cast_bar.width
+        s.cast_bar.scale = defaults.cast_bar.scale
+        forceWrite = true
     end
 
     for _, key in ipairs(legacyRootKeys) do

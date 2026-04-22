@@ -26,6 +26,12 @@ SettingsCatalog.PAGES = {
         summary = "Frame sizing, alpha, bar colors, textures, and value placement."
     },
     {
+        id = "castbar",
+        label = "Cast Bar",
+        title = "Cast Bar",
+        summary = "Movable player cast bar with customizable colors, text, and textures."
+    },
+    {
         id = "auras",
         label = "Auras",
         title = "Auras",

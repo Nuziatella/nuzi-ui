@@ -7,6 +7,7 @@ Because the stock frames are fine right up until you actually want them to look 
 `Nuzi UI` keeps the important frame cleanup in one place:
 
 - styles the stock `player`, `target`, `watchtarget`, `target of target`, and stock `party` frames
+- adds an optional movable player cast bar built on the stock X2 casting widget
 - supports optional custom nameplates with matching layout controls
 - adds tracked cooldown and effect windows for `player`, `target`, `mount/pet`, `watchtarget`, and `target of target`
 - includes target overlay extras, aura layout controls, and a movable launcher icon
@@ -25,7 +26,8 @@ Saved data lives in `nuzi-ui/.data` so your layout, cooldown tracking, and setti
 1. Open the `Nuzi UI` settings from the launcher icon.
 2. Pick which frame group you want to edit and adjust text, bars, auras, or plates.
 3. Enable only the overlays you actually want visible.
-4. If you use cooldown tracking, add effects by ID, search, or scan and place each tracker where it fits your UI.
+4. If you want a player cast bar, enable it on the `Cast Bar` page and move it with `Shift + drag`.
+5. If you use cooldown tracking, add effects by ID, search, or scan and place each tracker where it fits your UI.
 
 This is the addon version of looking at the stock UI and saying "we can do better than this."
 
@@ -63,6 +65,17 @@ You can:
 - show active effects, missing effects, or both
 - attach non-player trackers near their nameplate and move them with offsets
 
+### Cast Bar
+
+The cast bar page adds a player-only cast bar using AAClassic's stock casting widget.
+
+You can:
+
+- enable or disable it separately from the other frame styling work
+- resize it with width and scale controls
+- move it with `Shift + drag`
+- lock its position once it is where you want it
+
 ### Settings And Backups
 
 The settings window also handles profile safety tools.
@@ -76,11 +89,11 @@ You can:
 
 ## Notes
 
-- The launcher icon, settings window, overlays, and cooldown trackers all save their positions.
+- The launcher icon, settings window, overlays, cooldown trackers, and cast bar all save their positions.
 - Cooldown tracker windows for non-player units use nameplate-relative offsets instead of fixed screen coordinates.
 - Backup files live in `.data/backups`.
 - Moving addon windows follows the same `Shift + drag` behavior as the other Nuzi addons.
 
 ## Version
 
-Current version: `2.1.10`
+Current version: `2.1.11`

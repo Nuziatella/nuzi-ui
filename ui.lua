@@ -6,6 +6,7 @@ local Runtime = SafeRequire("nuzi-ui/runtime", "nuzi-ui.runtime")
 local AlignmentModule = SafeRequire("nuzi-ui/ui_alignment", "nuzi-ui.ui_alignment")
 local TargetExtrasModule = SafeRequire("nuzi-ui/ui_target_extras", "nuzi-ui.ui_target_extras")
 local CooldownTracker = SafeRequire("nuzi-ui/cooldown_tracker", "nuzi-ui.cooldown_tracker")
+local CastBar = SafeRequire("nuzi-ui/castbar", "nuzi-ui.castbar")
 local SettingsStore = SafeRequire("nuzi-ui/settings_store", "nuzi-ui.settings_store")
 
 local function AnchorTopLeft(wnd, x, y)
@@ -4063,6 +4064,11 @@ UI.ApplySettings = function(settings)
             CooldownTracker.ApplySettings(settings)
         end)
     end
+    if CastBar ~= nil and CastBar.ApplySettings ~= nil then
+        pcall(function()
+            CastBar.ApplySettings(settings)
+        end)
+    end
 
     local wantEnabled = settings.enabled and true or false
     local enabledChanged = (UI.enabled and true or false) ~= wantEnabled
@@ -4095,6 +4101,11 @@ UI.Init = function(settings)
             CooldownTracker.Init(settings)
         end)
     end
+    if CastBar ~= nil and CastBar.Init ~= nil then
+        pcall(function()
+            CastBar.Init(settings)
+        end)
+    end
     UI.SetEnabled(UI.enabled)
 end
 
@@ -4107,6 +4118,11 @@ UI.UnLoad = function()
     if CooldownTracker ~= nil and CooldownTracker.Unload ~= nil then
         pcall(function()
             CooldownTracker.Unload()
+        end)
+    end
+    if CastBar ~= nil and CastBar.Unload ~= nil then
+        pcall(function()
+            CastBar.Unload()
         end)
     end
     if AlignmentModule ~= nil and AlignmentModule.Reset ~= nil then
@@ -4164,6 +4180,11 @@ UI.SetEnabled = function(enabled)
     if CooldownTracker ~= nil and CooldownTracker.SetEnabled ~= nil then
         pcall(function()
             CooldownTracker.SetEnabled(UI.enabled)
+        end)
+    end
+    if CastBar ~= nil and CastBar.SetEnabled ~= nil then
+        pcall(function()
+            CastBar.SetEnabled(UI.enabled)
         end)
     end
 
@@ -4308,6 +4329,15 @@ UI.OnUpdate = function(dt)
         end)
         if not ok and api.Log ~= nil and api.Log.Err ~= nil then
             api.Log:Err("[Nuzi UI] CooldownTracker.OnUpdate failed: " .. tostring(err))
+        end
+    end
+
+    if CastBar ~= nil and CastBar.OnUpdate ~= nil then
+        local ok, err = pcall(function()
+            CastBar.OnUpdate(dt, UI.settings)
+        end)
+        if not ok and api.Log ~= nil and api.Log.Err ~= nil then
+            api.Log:Err("[Nuzi UI] CastBar.OnUpdate failed: " .. tostring(err))
         end
     end
 
