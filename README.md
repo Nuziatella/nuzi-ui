@@ -94,6 +94,4 @@ You can:
 - Backup files live in `.data/backups`.
 - Moving addon windows follows the same `Shift + drag` behavior as the other Nuzi addons.
 
-## Version
-
-Current version: `2.1.11`
+2.1.13

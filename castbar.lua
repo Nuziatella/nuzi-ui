@@ -202,6 +202,35 @@ local function setWidgetVisible(widget, visible, fadeOutTime)
     end)
 end
 
+local function setWidgetInteractive(widget, enabled)
+    if widget == nil then
+        return
+    end
+
+    enabled = enabled and true or false
+    if widget.__nuzi_castbar_interactive == enabled then
+        return
+    end
+
+    if widget.Clickable ~= nil then
+        safeCall(function()
+            widget:Clickable(enabled)
+        end)
+    end
+    if widget.EnablePick ~= nil then
+        safeCall(function()
+            widget:EnablePick(enabled)
+        end)
+    end
+    if widget.EnableDrag ~= nil then
+        safeCall(function()
+            widget:EnableDrag(enabled)
+        end)
+    end
+
+    widget.__nuzi_castbar_interactive = enabled
+end
+
 local function isShiftDown()
     if api ~= nil and api.Input ~= nil and api.Input.IsShiftKeyDown ~= nil then
         local ok, down = pcall(function()
@@ -751,6 +780,21 @@ local function showPreview(frame)
     showFrame(frame)
 end
 
+local function syncInteractionState(frame)
+    if frame == nil then
+        return
+    end
+
+    local active, cfg = getActiveConfig()
+    local visible = CastBar.state.is_casting or CastBar.preview_visible
+    local interactive = frame.__nuzi_castbar_dragging
+        or (active and cfg ~= nil and not cfg.lock_position and visible and isShiftDown())
+
+    for _, target in ipairs({ frame, frame.statusBar, frame.text, frame.probeLabel }) do
+        setWidgetInteractive(target, interactive)
+    end
+end
+
 local function refreshIdleFrame(frame)
     if frame == nil then
         return
@@ -759,10 +803,12 @@ local function refreshIdleFrame(frame)
     local active = getActiveConfig()
     if active and CastBar.preview_visible and not CastBar.state.is_casting then
         showPreview(frame)
+        syncInteractionState(frame)
         return
     end
 
     hideFrame(frame, true)
+    syncInteractionState(frame)
 end
 
 local function updateCastingDisplay(frame, spellName, currentMs, totalMs, castingUseable)
@@ -809,6 +855,7 @@ local function updateCastingDisplay(frame, spellName, currentMs, totalMs, castin
     )
 
     showFrame(frame)
+    syncInteractionState(frame)
 
     if CastBar.state.is_casting and not CastBar.state.ending and currentMs >= (totalMs * 0.9) then
         CastBar.state.ending = true
@@ -1265,11 +1312,6 @@ local function attachDragHandlers(frame)
     for _, target in ipairs(dragTargets) do
         if target ~= nil then
             safeCall(function()
-                if target.EnableDrag ~= nil then
-                    target:EnableDrag(true)
-                end
-            end)
-            safeCall(function()
                 if target.RegisterForDrag ~= nil then
                     target:RegisterForDrag("LeftButton")
                 end
@@ -1278,6 +1320,7 @@ local function attachDragHandlers(frame)
                 target:SetHandler("OnDragStart", onDragStart)
                 target:SetHandler("OnDragStop", onDragStop)
             end
+            setWidgetInteractive(target, false)
         end
     end
 end
@@ -1377,6 +1420,8 @@ local function ensureFrame()
         setWidgetVisible(CastBar.frame.text, false)
     end
 
+    syncInteractionState(CastBar.frame)
+
     return CastBar.frame
 end
 
@@ -1433,6 +1478,8 @@ function CastBar.OnUpdate(dt, settings)
     if frame == nil then
         return
     end
+
+    syncInteractionState(frame)
 
     dt = tonumber(dt) or 0
     if CastBar.state.ignore_info_ms > 0 then
