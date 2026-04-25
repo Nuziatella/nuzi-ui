@@ -39,6 +39,10 @@ local DEFAULT_TEXT_COLOR_255 = { 255, 255, 255, 255 }
 local DEFAULT_TEXT_OFFSET_X = 0
 local DEFAULT_TEXT_OFFSET_Y = 6
 local DEFAULT_TEXTURE_MODE = "auto"
+local DEFAULT_FILL_STYLE = "texture"
+local DEFAULT_BORDER_THICKNESS = 4
+local MIN_BORDER_THICKNESS = 0
+local MAX_BORDER_THICKNESS = 12
 local PREVIEW_SPELL_NAME = "Preview Spell"
 local PREVIEW_TOTAL_MS = 3000
 local PREVIEW_CURRENT_MS = 1500
@@ -133,6 +137,43 @@ local function getCastBarTextureMode(cfg)
         return DEFAULT_TEXTURE_MODE
     end
     return mode
+end
+
+local function getCastBarFillStyle(cfg)
+    local mode = string.lower(tostring(type(cfg) == "table" and cfg.fill_style or DEFAULT_FILL_STYLE))
+    if mode == "solid" then
+        return "solid"
+    end
+    return DEFAULT_FILL_STYLE
+end
+
+local function getBorderThickness(cfg)
+    return clampInt(
+        type(cfg) == "table" and cfg.border_thickness or nil,
+        MIN_BORDER_THICKNESS,
+        MAX_BORDER_THICKNESS,
+        DEFAULT_BORDER_THICKNESS
+    )
+end
+
+local function getBarInsets(cfg, textureMode)
+    local border = getBorderThickness(cfg)
+    if border <= 0 then
+        return 0, 0
+    end
+
+    local x = border + 2
+    local y = border - 1
+    if textureMode == "charge" then
+        y = border - 2
+    end
+    if y < 0 then
+        y = 0
+    end
+    if y > 11 then
+        y = 11
+    end
+    return x, y
 end
 
 local function getResolvedTextureMode(cfg, castingUseable)
@@ -276,17 +317,17 @@ local function readWindowOffset(window)
     if window == nil then
         return nil, nil
     end
-    if type(window.GetEffectiveOffset) == "function" then
+    if type(window.GetOffset) == "function" then
         local ok, x, y = pcall(function()
-            return window:GetEffectiveOffset()
+            return window:GetOffset()
         end)
         if ok and tonumber(x) ~= nil and tonumber(y) ~= nil then
             return tonumber(x), tonumber(y)
         end
     end
-    if type(window.GetOffset) == "function" then
+    if type(window.GetEffectiveOffset) == "function" then
         local ok, x, y = pcall(function()
-            return window:GetOffset()
+            return window:GetEffectiveOffset()
         end)
         if ok and tonumber(x) ~= nil and tonumber(y) ~= nil then
             return tonumber(x), tonumber(y)
@@ -581,10 +622,11 @@ local function getCastingInfo()
     return info
 end
 
-local function applyBackdrop(frame)
+local function applyBackdrop(frame, borderThickness)
     if frame == nil then
         return
     end
+    borderThickness = clampInt(borderThickness, MIN_BORDER_THICKNESS, MAX_BORDER_THICKNESS, DEFAULT_BORDER_THICKNESS)
 
     if frame.__nuzi_castbar_backdrop == nil and frame.CreateColorDrawable ~= nil then
         local bg = safeCall(function()
@@ -602,6 +644,23 @@ local function applyBackdrop(frame)
                 bg:AddAnchor("BOTTOMRIGHT", frame, 8, 4)
             end)
             frame.__nuzi_castbar_backdrop = bg
+        end
+    end
+
+    if frame.__nuzi_castbar_backdrop ~= nil then
+        local outerX = borderThickness > 0 and (borderThickness * 2) or 0
+        local outerY = borderThickness > 0 and borderThickness or 0
+        if frame.__nuzi_castbar_backdrop_outer_x ~= outerX
+            or frame.__nuzi_castbar_backdrop_outer_y ~= outerY then
+            safeCall(function()
+                if frame.__nuzi_castbar_backdrop.RemoveAllAnchors ~= nil then
+                    frame.__nuzi_castbar_backdrop:RemoveAllAnchors()
+                end
+                frame.__nuzi_castbar_backdrop:AddAnchor("TOPLEFT", frame, -outerX, -outerY)
+                frame.__nuzi_castbar_backdrop:AddAnchor("BOTTOMRIGHT", frame, outerX, outerY)
+            end)
+            frame.__nuzi_castbar_backdrop_outer_x = outerX
+            frame.__nuzi_castbar_backdrop_outer_y = outerY
         end
     end
 
@@ -626,6 +685,126 @@ local function applyBackdrop(frame)
             frame.__nuzi_castbar_accent = accent
         end
     end
+
+    if frame.__nuzi_castbar_accent ~= nil then
+        local outerX = borderThickness > 0 and (borderThickness * 2) or 0
+        local outerY = borderThickness > 0 and borderThickness or 0
+        local accentHeight = borderThickness > 0 and (borderThickness + 2) or 1
+        if frame.__nuzi_castbar_accent_outer_x ~= outerX
+            or frame.__nuzi_castbar_accent_outer_y ~= outerY
+            or frame.__nuzi_castbar_accent_height ~= accentHeight then
+            safeCall(function()
+                if frame.__nuzi_castbar_accent.RemoveAllAnchors ~= nil then
+                    frame.__nuzi_castbar_accent:RemoveAllAnchors()
+                end
+                frame.__nuzi_castbar_accent:AddAnchor("TOPLEFT", frame, -outerX, -outerY)
+                frame.__nuzi_castbar_accent:AddAnchor("TOPRIGHT", frame, outerX, -outerY)
+                if frame.__nuzi_castbar_accent.SetHeight ~= nil then
+                    frame.__nuzi_castbar_accent:SetHeight(accentHeight)
+                end
+            end)
+            frame.__nuzi_castbar_accent_outer_x = outerX
+            frame.__nuzi_castbar_accent_outer_y = outerY
+            frame.__nuzi_castbar_accent_height = accentHeight
+        end
+    end
+end
+
+local function ensureSolidFill(frame)
+    if frame == nil then
+        return nil
+    end
+    if frame.solidFill == nil and frame.CreateColorDrawable ~= nil then
+        frame.solidFill = safeCall(function()
+            return frame:CreateColorDrawable(
+                CUSTOM_FILL_COLOR[1],
+                CUSTOM_FILL_COLOR[2],
+                CUSTOM_FILL_COLOR[3],
+                CUSTOM_FILL_COLOR[4],
+                "artwork"
+            )
+        end)
+    end
+    return frame.solidFill
+end
+
+local function updateSolidFill(frame, currentMs, totalMs)
+    if frame == nil then
+        return
+    end
+
+    local cfg = getConfig(CastBar.settings)
+    if getCastBarFillStyle(cfg) ~= "solid" then
+        setWidgetVisible(frame.solidFill, false)
+        return
+    end
+
+    local fill = ensureSolidFill(frame)
+    if fill == nil then
+        return
+    end
+
+    local progress = 0
+    totalMs = tonumber(totalMs) or 0
+    currentMs = tonumber(currentMs) or 0
+    if totalMs > 0 then
+        progress = currentMs / totalMs
+    elseif currentMs > 0 then
+        progress = 1
+    end
+    if progress < 0 then
+        progress = 0
+    elseif progress > 1 then
+        progress = 1
+    end
+
+    local width = clampInt(type(cfg) == "table" and cfg.width or nil, MIN_WIDTH, MAX_WIDTH, DEFAULT_WIDTH)
+    local insetX, insetY = getBarInsets(cfg, "casting")
+    local fullWidth = width - (insetX * 2)
+    local fullHeight = CUSTOM_BAR_HEIGHT - (insetY * 2)
+    if fullWidth < 0 then
+        fullWidth = 0
+    end
+    if fullHeight < 1 then
+        fullHeight = 1
+    end
+
+    local fillWidth = math.floor((fullWidth * progress) + 0.5)
+    local hasProgress = fillWidth > 0
+    if progress > 0 and fillWidth < 1 then
+        fillWidth = 1
+        hasProgress = true
+    elseif fillWidth < 1 then
+        fillWidth = 1
+    end
+    frame.__nuzi_castbar_solid_has_progress = hasProgress
+
+    if frame.__nuzi_castbar_solid_x ~= insetX
+        or frame.__nuzi_castbar_solid_y ~= insetY
+        or frame.__nuzi_castbar_solid_width ~= fillWidth
+        or frame.__nuzi_castbar_solid_height ~= fullHeight then
+        safeCall(function()
+            if fill.RemoveAllAnchors ~= nil then
+                fill:RemoveAllAnchors()
+            end
+            fill:AddAnchor("TOPLEFT", frame, insetX, insetY)
+            if fill.SetExtent ~= nil then
+                fill:SetExtent(fillWidth, fullHeight)
+            else
+                if fill.SetWidth ~= nil then
+                    fill:SetWidth(fillWidth)
+                end
+                if fill.SetHeight ~= nil then
+                    fill:SetHeight(fullHeight)
+                end
+            end
+        end)
+        frame.__nuzi_castbar_solid_x = insetX
+        frame.__nuzi_castbar_solid_y = insetY
+        frame.__nuzi_castbar_solid_width = fillWidth
+        frame.__nuzi_castbar_solid_height = fullHeight
+    end
+    setWidgetVisible(fill, hasProgress and (CastBar.state.is_casting or CastBar.preview_visible))
 end
 
 local function setCastingText(frame, text)
@@ -664,10 +843,18 @@ local function styleBar(frame)
     local textOffsetX = clampInt(type(cfg) == "table" and cfg.text_offset_x or nil, -120, 120, DEFAULT_TEXT_OFFSET_X)
     local textOffsetY = clampInt(type(cfg) == "table" and cfg.text_offset_y or nil, -40, 60, DEFAULT_TEXT_OFFSET_Y)
     local textFontSize = clampInt(type(cfg) == "table" and cfg.text_font_size or nil, 10, 24, CUSTOM_TEXT_FONT_SIZE)
+    local fillStyle = getCastBarFillStyle(cfg)
+    local borderThickness = getBorderThickness(cfg)
+    if fillStyle == "solid" and ensureSolidFill(frame) == nil then
+        fillStyle = DEFAULT_FILL_STYLE
+    end
 
-    applyBackdrop(frame)
-    setWidgetVisible(frame.__nuzi_castbar_backdrop, true)
-    setWidgetVisible(frame.__nuzi_castbar_accent, true)
+    frame.__nuzi_castbar_fill_style = fillStyle
+    frame.__nuzi_castbar_border_thickness = borderThickness
+
+    applyBackdrop(frame, borderThickness)
+    setWidgetVisible(frame.__nuzi_castbar_backdrop, borderThickness > 0)
+    setWidgetVisible(frame.__nuzi_castbar_accent, borderThickness > 0)
     setWidgetColor(frame.__nuzi_castbar_backdrop, bgColor, DEFAULT_BG_COLOR_255)
     setWidgetColor(frame.__nuzi_castbar_accent, accentColor, DEFAULT_ACCENT_COLOR_255)
 
@@ -685,6 +872,17 @@ local function styleBar(frame)
                 color01(fillColor[4], DEFAULT_FILL_COLOR_255[4])
             )
         end)
+    end
+    if (fillStyle == "solid" or frame.solidFill ~= nil) and ensureSolidFill(frame) ~= nil then
+        setWidgetColor(frame.solidFill, fillColor, DEFAULT_FILL_COLOR_255)
+        updateSolidFill(frame, CastBar.state.elapsed_ms, CastBar.state.cast_duration)
+    end
+    if fillStyle == "solid" then
+        setWidgetVisible(frame.statusBar, false)
+        setWidgetVisible(frame.lightDeco, false)
+        setWidgetVisible(frame.flashDeco, false)
+    else
+        setWidgetVisible(frame.solidFill, false)
     end
 
     if frame.text ~= nil then
@@ -730,6 +928,7 @@ local function hideFrame(frame, force, isSucceed)
     setWidgetVisible(frame.__nuzi_castbar_backdrop, false)
     setWidgetVisible(frame.__nuzi_castbar_accent, false)
     setWidgetVisible(frame.baseBg, false)
+    setWidgetVisible(frame.solidFill, false)
     setWidgetVisible(frame.statusBar, false)
     setWidgetVisible(frame.lightDeco, false)
     setWidgetVisible(frame.flashDeco, false)
@@ -742,12 +941,15 @@ local function showFrame(frame)
     if frame == nil then
         return
     end
-    setWidgetVisible(frame.__nuzi_castbar_backdrop, true)
-    setWidgetVisible(frame.__nuzi_castbar_accent, true)
+    local useSolid = frame.__nuzi_castbar_fill_style == "solid"
+    local hasBorder = (tonumber(frame.__nuzi_castbar_border_thickness) or DEFAULT_BORDER_THICKNESS) > 0
+    setWidgetVisible(frame.__nuzi_castbar_backdrop, hasBorder)
+    setWidgetVisible(frame.__nuzi_castbar_accent, hasBorder)
     setWidgetVisible(frame.baseBg, true)
-    setWidgetVisible(frame.statusBar, true)
-    setWidgetVisible(frame.lightDeco, true)
-    setWidgetVisible(frame.flashDeco, true)
+    setWidgetVisible(frame.solidFill, useSolid and frame.__nuzi_castbar_solid_has_progress ~= false)
+    setWidgetVisible(frame.statusBar, not useSolid)
+    setWidgetVisible(frame.lightDeco, not useSolid)
+    setWidgetVisible(frame.flashDeco, not useSolid)
     setWidgetVisible(frame.text, true)
     setWidgetVisible(frame.probeLabel, false)
     setWidgetVisible(frame, true)
@@ -768,6 +970,7 @@ local function showPreview(frame)
             frame.statusBar:SetValue(PREVIEW_CURRENT_MS)
         end)
     end
+    updateSolidFill(frame, PREVIEW_CURRENT_MS, PREVIEW_TOTAL_MS)
     setCastingText(
         frame,
         string.format(
@@ -790,7 +993,7 @@ local function syncInteractionState(frame)
     local interactive = frame.__nuzi_castbar_dragging
         or (active and cfg ~= nil and not cfg.lock_position and visible and isShiftDown())
 
-    for _, target in ipairs({ frame, frame.statusBar, frame.text, frame.probeLabel }) do
+    for _, target in ipairs({ frame, frame.statusBar, frame.solidFill, frame.text, frame.probeLabel }) do
         setWidgetInteractive(target, interactive)
     end
 end
@@ -843,6 +1046,7 @@ local function updateCastingDisplay(frame, spellName, currentMs, totalMs, castin
             frame.statusBar:SetValue(currentMs)
         end)
     end
+    updateSolidFill(frame, currentMs, totalMs)
 
     setCastingText(
         frame,
@@ -892,6 +1096,7 @@ local function stopCast(frame, succeeded)
             frame.statusBar:SetMinMaxValues(0, 1)
             frame.statusBar:SetValue(1)
         end)
+        updateSolidFill(frame, 1, 1)
         if frame.FlashAnimation ~= nil then
             frame:FlashAnimation()
         end
@@ -1157,7 +1362,15 @@ local function createFrame()
     function frame:ChangeBarTexture(castingUseable)
         local cfg = getConfig(CastBar.settings)
         local textureMode = getResolvedTextureMode(cfg, castingUseable)
-        if self.statusBar == nil or self.__nuzi_castbar_texture_mode == textureMode then
+        local fillStyle = getCastBarFillStyle(cfg)
+        local insetX, insetY = getBarInsets(cfg, textureMode)
+        if self.statusBar == nil then
+            return
+        end
+        if self.__nuzi_castbar_texture_mode == textureMode
+            and self.__nuzi_castbar_texture_fill_style == fillStyle
+            and self.__nuzi_castbar_texture_inset_x == insetX
+            and self.__nuzi_castbar_texture_inset_y == insetY then
             return
         end
         if textureMode == "charge" then
@@ -1165,8 +1378,8 @@ local function createFrame()
                 if self.statusBar.RemoveAllAnchors ~= nil then
                     self.statusBar:RemoveAllAnchors()
                 end
-                self.statusBar:AddAnchor("TOPLEFT", self, 6, 2)
-                self.statusBar:AddAnchor("BOTTOMRIGHT", self, -6, -2)
+                self.statusBar:AddAnchor("TOPLEFT", self, insetX, insetY)
+                self.statusBar:AddAnchor("BOTTOMRIGHT", self, -insetX, -insetY)
                 self.statusBar:SetBarTextureByKey("charge_bar")
             end)
             if self.lightDeco ~= nil then
@@ -1179,8 +1392,8 @@ local function createFrame()
                 if self.statusBar.RemoveAllAnchors ~= nil then
                     self.statusBar:RemoveAllAnchors()
                 end
-                self.statusBar:AddAnchor("TOPLEFT", self, 6, 3)
-                self.statusBar:AddAnchor("BOTTOMRIGHT", self, -6, -3)
+                self.statusBar:AddAnchor("TOPLEFT", self, insetX, insetY)
+                self.statusBar:AddAnchor("BOTTOMRIGHT", self, -insetX, -insetY)
                 self.statusBar:SetBarTextureByKey("casting_status_bar")
             end)
             if self.lightDeco ~= nil then
@@ -1190,6 +1403,9 @@ local function createFrame()
             end
         end
         self.__nuzi_castbar_texture_mode = textureMode
+        self.__nuzi_castbar_texture_fill_style = fillStyle
+        self.__nuzi_castbar_texture_inset_x = insetX
+        self.__nuzi_castbar_texture_inset_y = insetY
     end
 
     styleBar(frame)
@@ -1375,6 +1591,7 @@ local function showProbe(frame, text)
     end
     setWidgetVisible(frame, true)
     setWidgetVisible(frame.baseBg, true)
+    setWidgetVisible(frame.solidFill, false)
     setWidgetVisible(frame.statusBar, true)
     setWidgetVisible(frame.text, false)
     setWidgetVisible(frame.probeLabel, true)

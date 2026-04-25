@@ -245,45 +245,7 @@ local function SyncSecondaryFrameBinding(frame, runtimeUnit)
         return
     end
 
-    local normalizedUnitId = nil
-    if Runtime ~= nil and Runtime.GetUnitId ~= nil then
-        normalizedUnitId = NormalizeUnitId(Runtime.GetUnitId(unitKey))
-    end
-    local bindingKey = tostring(unitKey) .. ":" .. tostring(normalizedUnitId or "")
-    local changedTarget = type(frame.target) ~= "string" or frame.target ~= unitKey
-    if not changedTarget and frame.__polar_bound_target_key == bindingKey then
-        return
-    end
-
-    if changedTarget then
-        frame.target = unitKey
-    end
-    frame.__polar_bound_target_key = bindingKey
-
-    local invoked = false
-    if unitKey == "watchtarget" and type(frame.SetWatchTarget) == "function" then
-        local ok = pcall(function()
-            frame:SetWatchTarget(unitKey)
-        end)
-        invoked = invoked or ok
-    end
-    if type(frame.SetTarget) == "function" then
-        local ok = pcall(function()
-            frame:SetTarget(unitKey)
-        end)
-        invoked = invoked or ok
-    end
-    if type(frame.TargetChanged) == "function" then
-        local ok = pcall(function()
-            frame:TargetChanged(unitKey)
-        end)
-        invoked = invoked or ok
-    end
-    if (changedTarget or invoked) and type(frame.UpdateAll) == "function" then
-        pcall(function()
-            frame:UpdateAll()
-        end)
-    end
+    frame.__polar_runtime_unit = unitKey
 end
 
 local function ResolveUnitDisplayName(info)
@@ -806,13 +768,6 @@ local function ApplyUnitFramePosition(wnd, settings, key, defaultX, defaultY)
     local x = tonumber(pos.x)
     local y = tonumber(pos.y)
     if x == nil or y == nil then
-        local curX, curY = SafeGetOffset(wnd)
-        if curX ~= nil and curY ~= nil then
-            pos.x = curX
-            pos.y = curY
-            SaveSettingsToFile(settings)
-            return
-        end
         pos.x = ClampNumber(defaultX, -5000, 5000, 10)
         pos.y = ClampNumber(defaultY, -5000, 5000, 300)
         SaveSettingsToFile(settings)
@@ -2009,6 +1964,85 @@ local function ApplyTextLayout(frame, style)
     end
 end
 
+local function RefreshTargetReputationButton(frame)
+    if frame == nil or UI == nil or UI.target == nil or frame ~= UI.target.wnd then
+        return
+    end
+
+    local button = ResolveWidgetCandidate(frame.reputationButton)
+    if button == nil then
+        return
+    end
+
+    local canVote = false
+    if X2Hero ~= nil and type(X2Hero.CanAddReputation) == "function" then
+        local ok, value = pcall(function()
+            return X2Hero:CanAddReputation()
+        end)
+        canVote = ok and value and true or false
+    end
+
+    pcall(function()
+        local visible = nil
+        if button.IsVisible ~= nil then
+            visible = button:IsVisible() and true or false
+        end
+        if button.Show ~= nil and (visible ~= canVote or button.__polar_reputation_visible ~= canVote) then
+            button:Show(canVote)
+            button.__polar_reputation_visible = canVote
+        end
+    end)
+
+    if not canVote then
+        button.__polar_reputation_anchor_target = nil
+        return
+    end
+
+    pcall(function()
+        if button.Enable ~= nil then
+            button:Enable(true)
+        end
+    end)
+
+    local anchorTarget = frame.hpBar or frame
+    if button.__polar_reputation_anchor_target == anchorTarget then
+        return
+    end
+
+    pcall(function()
+        local anchored = false
+        if button.RemoveAllAnchors ~= nil then
+            button:RemoveAllAnchors()
+        end
+        if button.AddAnchor ~= nil and frame.hpBar ~= nil then
+            local ok = pcall(function()
+                button:AddAnchor("TOPRIGHT", frame.hpBar, "TOPLEFT", 0, -7)
+            end)
+            anchored = ok and true or anchored
+            if not ok then
+                ok = pcall(function()
+                    button:AddAnchor("TOPRIGHT", frame.hpBar, 0, -7)
+                end)
+                anchored = ok and true or anchored
+            end
+        elseif button.AddAnchor ~= nil then
+            local ok = pcall(function()
+                button:AddAnchor("TOPRIGHT", frame, "TOPLEFT", -4, 0)
+            end)
+            anchored = ok and true or anchored
+            if not ok then
+                ok = pcall(function()
+                    button:AddAnchor("TOPRIGHT", frame, -4, 0)
+                end)
+                anchored = ok and true or anchored
+            end
+        end
+        if anchored then
+            button.__polar_reputation_anchor_target = anchorTarget
+        end
+    end)
+end
+
 local function ApplyStockFrameDecorations(frame, settings)
     if frame == nil then
         return
@@ -2078,6 +2112,7 @@ local function ApplyStockFrameDecorations(frame, settings)
             end
         end)
         ApplyTargetFallbackBackgroundStyle(frame, style, hideBossBackground)
+        RefreshTargetReputationButton(frame)
 
         pcall(function()
             local gradeStar = ResolveWidgetCandidate(frame.gradeStar)
@@ -2812,10 +2847,7 @@ local function SetFrameStyleHook(frame, settings)
         wrap("UpdateName")
         wrap("UpdateLevel")
         wrap("ShowHeirFrame")
-        wrap("TargetChanged")
         wrap("ChangeTarget")
-        wrap("SetTarget")
-        wrap("SetTargetToTarget")
         wrap("UpdateHpBarTexture_FirstHitByMe")
         wrap("ChangeHpBarTexture_forPc")
         wrap("ChangeHpBarTexture_forNpc")
@@ -2855,10 +2887,7 @@ local function ClearFrameStyleHook(frame)
         restore("UpdateName")
         restore("UpdateLevel")
         restore("ShowHeirFrame")
-        restore("TargetChanged")
         restore("ChangeTarget")
-        restore("SetTarget")
-        restore("SetTargetToTarget")
         restore("UpdateHpBarTexture_FirstHitByMe")
         restore("ChangeHpBarTexture_forPc")
         restore("ChangeHpBarTexture_forNpc")
@@ -4352,6 +4381,7 @@ UI.OnUpdate = function(dt)
     if UI.enabled then
         SyncSecondaryFrameBinding(UI.watchtarget.wnd, "watchtarget")
         SyncSecondaryFrameBinding(UI.target_of_target.wnd, "targettarget")
+        ApplyUnitFramePosition(UI.target.wnd, UI.settings, "target", 10, 380)
         ApplyUnitFramePosition(UI.watchtarget.wnd, UI.settings, "watchtarget", 10, 460)
         ApplyUnitFramePosition(UI.target_of_target.wnd, UI.settings, "target_of_target", 10, 540)
         RefreshStockFrameDecorations(UI.settings)

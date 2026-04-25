@@ -87,6 +87,11 @@ local CASTBAR_TEXTURE_ITEMS = {
     "Charge"
 }
 
+local CASTBAR_FILL_STYLE_ITEMS = {
+    "Texture",
+    "Solid"
+}
+
 SettingsSchema.PAGES = {
     general = {
         sections = {
@@ -106,6 +111,26 @@ SettingsSchema.PAGES = {
                 hint = "Control the floating settings button used to open the addon window in game.",
                 fields = {
                     slider("launcher_size", "polarUiLauncherSize", "Launcher size", 36, 96, 1)
+                }
+            }
+        }
+    },
+    repair = {
+        sections = {
+            {
+                id = "repair_diagnostics",
+                title = "Diagnostics",
+                hint = "Check the client UI scale, screen size, and saved layout positions used by Nuzi UI.",
+                fields = {
+                    custom("ui_repair_diagnostics", { estimate_height = 118 })
+                }
+            },
+            {
+                id = "repair_actions",
+                title = "Repair Actions",
+                hint = "Use these when frames are off screen, drifting, or look wrong after changing UI scale.",
+                fields = {
+                    custom("ui_repair_actions", { estimate_height = 190 })
                 }
             }
         }
@@ -389,7 +414,7 @@ SettingsSchema.PAGES = {
             {
                 id = "castbar_layout",
                 title = "Layout",
-                hint = "Tune the cast bar size and choose the texture preset used for the fill.",
+                hint = "Tune the cast bar size, fill style, texture preset, and border thickness.",
                 fields = {
                     slider(
                         "castbar_width",
@@ -414,6 +439,22 @@ SettingsSchema.PAGES = {
                         "polarUiCastBarTextureMode",
                         "Texture mode",
                         CASTBAR_TEXTURE_ITEMS,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    combo(
+                        "castbar_fill_style",
+                        "polarUiCastBarFillStyle",
+                        "Fill style",
+                        CASTBAR_FILL_STYLE_ITEMS,
+                        { depends_on = { control = "castbar_enabled", checked = true } }
+                    ),
+                    slider(
+                        "castbar_border_thickness",
+                        "polarUiCastBarBorderThickness",
+                        "Border thickness",
+                        0,
+                        12,
+                        1,
                         { depends_on = { control = "castbar_enabled", checked = true } }
                     )
                 }

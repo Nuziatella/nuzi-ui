@@ -11,6 +11,7 @@ Because the stock frames are fine right up until you actually want them to look 
 - supports optional custom nameplates with matching layout controls
 - adds tracked cooldown and effect windows for `player`, `target`, `mount/pet`, `watchtarget`, and `target of target`
 - includes target overlay extras, aura layout controls, and a movable launcher icon
+- includes a `UI Repair` page for UI scale diagnostics and safe layout resets
 - supports backups, imports, and persistent settings in `.data`
 
 ## Install
@@ -28,6 +29,7 @@ Saved data lives in `nuzi-ui/.data` so your layout, cooldown tracking, and setti
 3. Enable only the overlays you actually want visible.
 4. If you want a player cast bar, enable it on the `Cast Bar` page and move it with `Shift + drag`.
 5. If you use cooldown tracking, add effects by ID, search, or scan and place each tracker where it fits your UI.
+6. If frames look wrong after changing UI scale, open `UI Repair` and use Refresh, Reset Frames, or Center Frames.
 
 This is the addon version of looking at the stock UI and saying "we can do better than this."
 
@@ -73,6 +75,8 @@ You can:
 
 - enable or disable it separately from the other frame styling work
 - resize it with width and scale controls
+- switch between textured and solid-color fill styles
+- control the border thickness
 - move it with `Shift + drag`
 - lock its position once it is where you want it
 
@@ -82,6 +86,8 @@ The settings window also handles profile safety tools.
 
 You can:
 
+- check your current screen size and UI scale on the `UI Repair` page
+- reset saved frame, cast bar, launcher, nameplate, or cooldown positions
 - save backups
 - list previous backups
 - import a backup by index
@@ -94,4 +100,4 @@ You can:
 - Backup files live in `.data/backups`.
 - Moving addon windows follows the same `Shift + drag` behavior as the other Nuzi addons.
 
-2.1.13
+3.0.0

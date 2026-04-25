@@ -8,6 +8,12 @@ SettingsCatalog.PAGES = {
         summary = "Core addon toggles and shared runtime behavior."
     },
     {
+        id = "repair",
+        label = "UI Repair",
+        title = "UI Repair",
+        summary = "Screen scale diagnostics and safe layout reset tools."
+    },
+    {
         id = "npc",
         label = "NPC",
         title = "NPC",

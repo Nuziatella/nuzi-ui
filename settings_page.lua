@@ -209,6 +209,11 @@ local CASTBAR_TEXTURE_MODE_LABELS = {
     "Charge"
 }
 
+local CASTBAR_FILL_STYLE_KEYS = {
+    "texture",
+    "solid"
+}
+
 local COOLDOWN_BUFFS_PER_PAGE = 6
 local COOLDOWN_SCAN_ROWS = 10
 local COOLDOWN_SEARCH_ROWS = 8
@@ -216,6 +221,7 @@ local COOLDOWN_SEARCH_BATCH = 1000
 local COOLDOWN_SEARCH_MAX_ID = 250000
 local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAGES) == "table" and SettingsCatalog.PAGES) or {
     { id = "general", label = "General", title = "General", summary = "Core addon toggles and shared runtime behavior." },
+    { id = "repair", label = "UI Repair", title = "UI Repair", summary = "Screen scale diagnostics and safe layout reset tools." },
     { id = "npc", label = "NPC", title = "NPC", summary = "Stock unit-frame art, boss target decorations, target distance, and grade-star placement." },
     { id = "text", label = "Text", title = "Text", summary = "Name, level, role, guild, and number formatting." },
     { id = "bars", label = "Bars", title = "Bars", summary = "Frame sizing, alpha, bar colors, textures, and value placement." },
@@ -238,6 +244,14 @@ end
 
 local function GetCastBarTextureModeFromIndex(idx)
     return SettingsCommon.GetKeyFromIndex(CASTBAR_TEXTURE_MODE_KEYS, idx)
+end
+
+local function GetCastBarFillStyleIndex(key)
+    return SettingsCommon.GetIndexFromKey(CASTBAR_FILL_STYLE_KEYS, tostring(key or "texture"))
+end
+
+local function GetCastBarFillStyleFromIndex(idx)
+    return SettingsCommon.GetKeyFromIndex(CASTBAR_FILL_STYLE_KEYS, idx)
 end
 
 local function GetCooldownDisplayModeFromIndex(idx)
@@ -1322,14 +1336,14 @@ local function SaveSettingsButtonPos(widget)
 
     local ok = false
     local x, y = nil, nil
-    if widget.GetEffectiveOffset ~= nil then
-        ok, x, y = pcall(function()
-            return widget:GetEffectiveOffset()
-        end)
-    end
-    if (not ok or x == nil or y == nil) and widget.GetOffset ~= nil then
+    if widget.GetOffset ~= nil then
         ok, x, y = pcall(function()
             return widget:GetOffset()
+        end)
+    end
+    if (not ok or x == nil or y == nil) and widget.GetEffectiveOffset ~= nil then
+        ok, x, y = pcall(function()
+            return widget:GetEffectiveOffset()
         end)
     end
     if not ok then
@@ -1461,11 +1475,29 @@ local SetControlEnabled = SettingsWidgets.SetControlEnabled
 local EstimateTextHeight = SettingsWidgets.EstimateTextHeight
 local SetWrappedText = SettingsWidgets.SetWrappedText
 
-local SCHEMA_PAGE_IDS = { "general", "npc", "text", "bars", "castbar", "auras", "plates" }
+local RefreshControls
+local ApplyControlsToSettings
+
+local SCHEMA_PAGE_IDS = { "general", "repair", "npc", "text", "bars", "castbar", "auras", "plates" }
 local SCHEMA_PAGE_LEFT = 18
 local SCHEMA_PAGE_TOP = 18
 local SCHEMA_CARD_WIDTH = 580
 local SCHEMA_SECTION_GAP = 16
+
+local REPAIR_FRAME_DEFAULTS = {
+    { key = "player", label = "Player", x = 10, y = 300 },
+    { key = "target", label = "Target", x = 10, y = 380 },
+    { key = "watchtarget", label = "Watchtarget", x = 10, y = 460 },
+    { key = "target_of_target", label = "Target of Target", x = 10, y = 540 }
+}
+
+local REPAIR_COOLDOWN_DEFAULTS = {
+    player = { x = 330, y = 100 },
+    target = { x = 0, y = -8 },
+    playerpet = { x = 0, y = -8 },
+    watchtarget = { x = 0, y = -8 },
+    target_of_target = { x = 0, y = -8 }
+}
 
 SetReadableControlText = function(control, text)
     if control == nil then
@@ -1657,8 +1689,311 @@ local function BuildSchemaPlatesGuildColorEditor(parent, y)
     return y
 end
 
+local function GetInterfaceNumber(methodName)
+    if api == nil or api.Interface == nil or type(api.Interface[methodName]) ~= "function" then
+        return nil
+    end
+    local ok, value = pcall(function()
+        return api.Interface[methodName](api.Interface)
+    end)
+    if ok then
+        return tonumber(value)
+    end
+    return nil
+end
+
+local function RoundRepairNumber(value)
+    local n = tonumber(value)
+    if n == nil then
+        return "?"
+    end
+    return tostring(math.floor(n + 0.5))
+end
+
+local function FormatRepairPair(pos)
+    if type(pos) ~= "table" then
+        return "(?, ?)"
+    end
+    return "(" .. RoundRepairNumber(pos.x) .. ", " .. RoundRepairNumber(pos.y) .. ")"
+end
+
+local function SetRepairStatus(text)
+    SetReadableControlText(SettingsPage.controls.repair_status, tostring(text or ""))
+end
+
+local function RefreshRepairDiagnostics()
+    local width = GetInterfaceNumber("GetScreenWidth")
+    local height = GetInterfaceNumber("GetScreenHeight")
+    local scale = GetInterfaceNumber("GetUIScale")
+    local screenText = "Screen: unavailable"
+    if width ~= nil and height ~= nil then
+        screenText = "Screen: " .. RoundRepairNumber(width) .. " x " .. RoundRepairNumber(height)
+    end
+    if scale ~= nil then
+        if scale > 10 then
+            screenText = screenText .. "  UI scale: " .. RoundRepairNumber(scale) .. "%"
+        else
+            screenText = screenText .. "  UI scale: " .. string.format("%.2f", scale)
+        end
+    else
+        screenText = screenText .. "  UI scale: unavailable"
+    end
+
+    local s = SettingsPage.settings
+    local frameBits = {}
+    if type(s) == "table" then
+        for _, item in ipairs(REPAIR_FRAME_DEFAULTS) do
+            frameBits[#frameBits + 1] = item.label .. " " .. FormatRepairPair(s[item.key])
+        end
+    end
+    if #frameBits == 0 then
+        frameBits[1] = "Frame positions unavailable"
+    end
+
+    local launcherText = "Launcher: unavailable"
+    local castText = "Cast bar: unavailable"
+    if type(s) == "table" then
+        launcherText = "Launcher " .. FormatRepairPair(s.settings_button)
+        if type(s.cast_bar) == "table" then
+            castText = "Cast bar (" ..
+                RoundRepairNumber(s.cast_bar.pos_x) .. ", " ..
+                RoundRepairNumber(s.cast_bar.pos_y) .. ")"
+            if s.cast_bar.position_initialized == false then
+                castText = castText .. " not initialized"
+            end
+        end
+    end
+
+    SetReadableControlText(SettingsPage.controls.repair_display_info, screenText)
+    SetReadableControlText(SettingsPage.controls.repair_frame_info, table.concat(frameBits, "  "))
+    SetReadableControlText(SettingsPage.controls.repair_extra_info, launcherText .. "  " .. castText)
+end
+
+local function SetRepairPosition(settings, key, x, y)
+    if type(settings) ~= "table" or type(key) ~= "string" then
+        return
+    end
+    if type(settings[key]) ~= "table" then
+        settings[key] = {}
+    end
+    settings[key].x = math.floor((tonumber(x) or 0) + 0.5)
+    settings[key].y = math.floor((tonumber(y) or 0) + 0.5)
+end
+
+local function ResetCoreFramePositions(settings)
+    for _, item in ipairs(REPAIR_FRAME_DEFAULTS) do
+        SetRepairPosition(settings, item.key, item.x, item.y)
+    end
+end
+
+local function CenterCoreFramePositions(settings)
+    local screenWidth = GetInterfaceNumber("GetScreenWidth") or 1920
+    local screenHeight = GetInterfaceNumber("GetScreenHeight") or 1080
+    local frameWidth = tonumber(settings.frame_width) or 320
+    local frameHeight = tonumber(settings.frame_height) or 64
+    local frameScale = 1
+    local hasStyleScale = false
+    if type(settings.style) == "table" then
+        if tonumber(settings.style.frame_width) ~= nil then
+            frameWidth = tonumber(settings.style.frame_width)
+        end
+        if tonumber(settings.style.frame_scale) ~= nil then
+            frameScale = tonumber(settings.style.frame_scale)
+            hasStyleScale = true
+        end
+    end
+    if not hasStyleScale and tonumber(settings.frame_scale) ~= nil then
+        frameScale = tonumber(settings.frame_scale)
+    end
+    if frameScale <= 0 then
+        frameScale = 1
+    end
+
+    local scaledWidth = frameWidth * frameScale
+    local rowHeight = math.max(36, (frameHeight * frameScale) + 12)
+    local totalHeight = rowHeight * #REPAIR_FRAME_DEFAULTS
+    local x = math.floor(((screenWidth - scaledWidth) / 2) + 0.5)
+    local y = math.floor(((screenHeight - totalHeight) / 2) + 0.5)
+    if x < 0 then
+        x = 0
+    end
+    if y < 0 then
+        y = 0
+    end
+
+    for index, item in ipairs(REPAIR_FRAME_DEFAULTS) do
+        SetRepairPosition(settings, item.key, x, y + math.floor((index - 1) * rowHeight + 0.5))
+    end
+end
+
+local function ResetCastBarPosition(settings)
+    if type(settings.cast_bar) ~= "table" then
+        settings.cast_bar = {}
+    end
+    settings.cast_bar.pos_x = 0
+    settings.cast_bar.pos_y = 0
+    settings.cast_bar.anchor_mode = nil
+    settings.cast_bar.position_initialized = false
+end
+
+local function ResetLauncherPosition(settings)
+    if type(settings.settings_button) ~= "table" then
+        settings.settings_button = {}
+    end
+    settings.settings_button.x = 10
+    settings.settings_button.y = 200
+    if tonumber(settings.settings_button.size) == nil then
+        settings.settings_button.size = 48
+    end
+end
+
+local function ResetNameplateOffsets(settings)
+    if type(settings.nameplates) ~= "table" then
+        settings.nameplates = {}
+    end
+    settings.nameplates.x_offset = 0
+    settings.nameplates.y_offset = 22
+    settings.nameplates.anchor_to_nametag = true
+end
+
+local function ResetCooldownPositions(settings)
+    if type(settings.cooldown_tracker) ~= "table" then
+        settings.cooldown_tracker = {}
+    end
+    if type(settings.cooldown_tracker.units) ~= "table" then
+        settings.cooldown_tracker.units = {}
+    end
+    for key, pos in pairs(REPAIR_COOLDOWN_DEFAULTS) do
+        if type(settings.cooldown_tracker.units[key]) ~= "table" then
+            settings.cooldown_tracker.units[key] = {}
+        end
+        settings.cooldown_tracker.units[key].pos_x = pos.x
+        settings.cooldown_tracker.units[key].pos_y = pos.y
+    end
+end
+
+local function SaveApplyRepair(message)
+    if type(SettingsPage.on_save) == "function" then
+        pcall(function()
+            SettingsPage.on_save()
+        end)
+    end
+    if type(SettingsPage.on_apply) == "function" then
+        pcall(function()
+            SettingsPage.on_apply()
+        end)
+    end
+    if type(RefreshControls) == "function" then
+        pcall(function()
+            RefreshControls()
+        end)
+    else
+        RefreshRepairDiagnostics()
+    end
+    SetRepairStatus(message)
+end
+
+local function RunRepairAction(action, successMessage)
+    if type(SettingsPage.settings) ~= "table" then
+        SetRepairStatus("Settings are not ready yet.")
+        return
+    end
+    if type(ApplyControlsToSettings) == "function" then
+        pcall(function()
+            ApplyControlsToSettings()
+        end)
+    end
+
+    local ok, err = pcall(function()
+        action(SettingsPage.settings)
+    end)
+    if ok then
+        SaveApplyRepair(successMessage)
+    else
+        SetRepairStatus("Repair failed: " .. tostring(err))
+    end
+end
+
+local function CreateRepairButton(parent, id, text, x, y, width, handler)
+    local button = CreateButton(id, parent, text, x, y)
+    if button ~= nil then
+        pcall(function()
+            button:SetExtent(width or 170, 24)
+        end)
+        if button.SetHandler ~= nil then
+            button:SetHandler("OnClick", handler)
+        end
+    end
+    return button
+end
+
+local function BuildSchemaRepairDiagnostics(parent, y)
+    SettingsPage.controls.repair_display_info = CreateHintLabel(
+        "polarUiRepairDisplayInfo",
+        parent,
+        "",
+        0,
+        y,
+        520
+    )
+    y = y + 30
+    SettingsPage.controls.repair_frame_info = CreateHintLabel("polarUiRepairFrameInfo", parent, "", 0, y, 520)
+    y = y + 46
+    SettingsPage.controls.repair_extra_info = CreateHintLabel("polarUiRepairExtraInfo", parent, "", 0, y, 520)
+    y = y + 34
+    CreateRepairButton(parent, "polarUiRepairRefresh", "Refresh", 0, y, 120, function()
+        RefreshRepairDiagnostics()
+        SetRepairStatus("Diagnostics refreshed.")
+    end)
+    RefreshRepairDiagnostics()
+    return y + 32
+end
+
+local function BuildSchemaRepairActions(parent, y)
+    CreateRepairButton(parent, "polarUiRepairResetFrames", "Reset Frames", 0, y, 170, function()
+        RunRepairAction(ResetCoreFramePositions, "Frame positions reset.")
+    end)
+    CreateRepairButton(parent, "polarUiRepairCenterFrames", "Center Frames", 190, y, 170, function()
+        RunRepairAction(CenterCoreFramePositions, "Frame positions centered.")
+    end)
+    y = y + 32
+
+    CreateRepairButton(parent, "polarUiRepairResetCastBar", "Reset Cast Bar", 0, y, 170, function()
+        RunRepairAction(ResetCastBarPosition, "Cast bar position reset.")
+    end)
+    CreateRepairButton(parent, "polarUiRepairResetLauncher", "Reset Launcher", 190, y, 170, function()
+        RunRepairAction(ResetLauncherPosition, "Launcher position reset.")
+    end)
+    y = y + 32
+
+    CreateRepairButton(parent, "polarUiRepairResetPlates", "Reset Nameplates", 0, y, 170, function()
+        RunRepairAction(ResetNameplateOffsets, "Nameplate offsets reset.")
+    end)
+    CreateRepairButton(parent, "polarUiRepairResetCooldowns", "Reset Cooldowns", 190, y, 170, function()
+        RunRepairAction(ResetCooldownPositions, "Cooldown tracker positions reset.")
+    end)
+    y = y + 32
+
+    CreateRepairButton(parent, "polarUiRepairResetAll", "Reset All Layout", 0, y, 170, function()
+        RunRepairAction(function(settings)
+            ResetCoreFramePositions(settings)
+            ResetCastBarPosition(settings)
+            ResetLauncherPosition(settings)
+            ResetNameplateOffsets(settings)
+            ResetCooldownPositions(settings)
+        end, "All saved layout positions reset.")
+    end)
+    y = y + 38
+
+    SettingsPage.controls.repair_status = CreateHintLabel("polarUiRepairStatus", parent, "", 0, y, 520)
+    SetRepairStatus("")
+    return y + 36
+end
+
 local CUSTOM_SCHEMA_RENDERERS = {
-    plates_guild_colors = BuildSchemaPlatesGuildColorEditor
+    plates_guild_colors = BuildSchemaPlatesGuildColorEditor,
+    ui_repair_diagnostics = BuildSchemaRepairDiagnostics,
+    ui_repair_actions = BuildSchemaRepairActions
 }
 
 local function BuildSchemaField(parent, y, field)
@@ -1812,7 +2147,7 @@ local function SetHpTextureModeChecks(mode)
     end
 end
 
-local function RefreshControls()
+RefreshControls = function()
     local s = SettingsPage.settings
     if s == nil then
         return
@@ -1913,6 +2248,21 @@ local function RefreshControls()
             GetCastBarTextureModeIndex(castBar.bar_texture_mode)
         )
         SettingsPage._refreshing_castbar_texture = false
+    end
+    if SettingsPage.controls.castbar_fill_style ~= nil then
+        SettingsPage._refreshing_castbar_fill_style = true
+        SetComboBoxIndex1Based(
+            SettingsPage.controls.castbar_fill_style,
+            GetCastBarFillStyleIndex(castBar.fill_style)
+        )
+        SettingsPage._refreshing_castbar_fill_style = false
+    end
+    if SettingsPage.controls.castbar_border_thickness ~= nil then
+        refreshSlider(
+            SettingsPage.controls.castbar_border_thickness,
+            SettingsPage.controls.castbar_border_thickness_val,
+            tonumber(castBar.border_thickness) or 4
+        )
     end
     if SettingsPage.controls.castbar_text_font_size ~= nil then
         refreshSlider(
@@ -2563,10 +2913,11 @@ local function RefreshControls()
     RefreshCooldownBuffRows(selectedUnitCfg)
     RefreshCooldownScanRows()
     RefreshSchemaControlStates()
+    RefreshRepairDiagnostics()
 
 end
 
-local function ApplyControlsToSettings()
+ApplyControlsToSettings = function()
     local s = SettingsPage.settings
     if s == nil then
         return
@@ -2615,6 +2966,13 @@ local function ApplyControlsToSettings()
     if SettingsPage.controls.castbar_texture_mode ~= nil then
         local idx = GetComboBoxIndex1Based(SettingsPage.controls.castbar_texture_mode, #CASTBAR_TEXTURE_MODE_KEYS)
         s.cast_bar.bar_texture_mode = GetCastBarTextureModeFromIndex(idx)
+    end
+    if SettingsPage.controls.castbar_fill_style ~= nil then
+        local idx = GetComboBoxIndex1Based(SettingsPage.controls.castbar_fill_style, #CASTBAR_FILL_STYLE_KEYS)
+        s.cast_bar.fill_style = GetCastBarFillStyleFromIndex(idx)
+    end
+    if SettingsPage.controls.castbar_border_thickness ~= nil then
+        s.cast_bar.border_thickness = GetSliderValue(SettingsPage.controls.castbar_border_thickness)
     end
     if SettingsPage.controls.castbar_text_font_size ~= nil then
         s.cast_bar.text_font_size = GetSliderValue(SettingsPage.controls.castbar_text_font_size)
@@ -4933,6 +5291,7 @@ local function EnsureWindow()
         { SettingsPage.controls.launcher_size, SettingsPage.controls.launcher_size_val },
         { SettingsPage.controls.castbar_width, SettingsPage.controls.castbar_width_val },
         { SettingsPage.controls.castbar_scale, SettingsPage.controls.castbar_scale_val },
+        { SettingsPage.controls.castbar_border_thickness, SettingsPage.controls.castbar_border_thickness_val },
         { SettingsPage.controls.castbar_text_font_size, SettingsPage.controls.castbar_text_font_size_val },
         { SettingsPage.controls.castbar_text_offset_x, SettingsPage.controls.castbar_text_offset_x_val },
         { SettingsPage.controls.castbar_text_offset_y, SettingsPage.controls.castbar_text_offset_y_val },
@@ -5462,6 +5821,14 @@ local function EnsureWindow()
     if SettingsPage.controls.castbar_texture_mode ~= nil and SettingsPage.controls.castbar_texture_mode.SetHandler ~= nil then
         SettingsPage.controls.castbar_texture_mode:SetHandler("OnSelChanged", function()
             if SettingsPage._refreshing_castbar_texture then
+                return
+            end
+            sliderChanged()
+        end)
+    end
+    if SettingsPage.controls.castbar_fill_style ~= nil and SettingsPage.controls.castbar_fill_style.SetHandler ~= nil then
+        SettingsPage.controls.castbar_fill_style:SetHandler("OnSelChanged", function()
+            if SettingsPage._refreshing_castbar_fill_style then
                 return
             end
             sliderChanged()

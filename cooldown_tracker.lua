@@ -205,17 +205,17 @@ local function readWindowOffset(window)
     if window == nil then
         return nil, nil
     end
-    if type(window.GetEffectiveOffset) == "function" then
+    if type(window.GetOffset) == "function" then
         local ok, x, y = pcall(function()
-            return window:GetEffectiveOffset()
+            return window:GetOffset()
         end)
         if ok and tonumber(x) ~= nil and tonumber(y) ~= nil then
             return tonumber(x), tonumber(y)
         end
     end
-    if type(window.GetOffset) == "function" then
+    if type(window.GetEffectiveOffset) == "function" then
         local ok, x, y = pcall(function()
-            return window:GetOffset()
+            return window:GetEffectiveOffset()
         end)
         if ok and tonumber(x) ~= nil and tonumber(y) ~= nil then
             return tonumber(x), tonumber(y)
