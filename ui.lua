@@ -1295,6 +1295,7 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
     local mpFill01 = getColor01("mp_fill_color", "mp_bar_color")
     local hpAfter01 = getColor01("hp_after_color", "hp_bar_color")
     local mpAfter01 = getColor01("mp_after_color", "mp_bar_color")
+    local hostileTargetHpColor = NormalizeColor255(style.hostile_target_hp_color, { 255, 54, 40, 255 })
 
     local LARGE_BAR_COORDS = { 0, 120, 300, 19 }
     local SMALL_BAR_COORDS = { 301, 120, 150, 19 }
@@ -1516,11 +1517,16 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
         return hostile and (small and "S_HP_HOSTILE" or "L_HP_HOSTILE") or (small and "S_HP_FRIENDLY" or "L_HP_FRIENDLY")
     end
 
+    local frameUnit = ResolveFrameRuntimeUnit(frame) or frame.__polar_unit
+    local frameHostile = isHostileUnit(frameUnit)
+    local hostileTargetHpEnabled = style.hostile_target_hp_enabled == true
+        and tostring(frameUnit or "") == "target"
+        and frameHostile
+
     pcall(function()
         if frame.hpBar ~= nil then
             if statusbar_style ~= nil and type(statusbar_style) == "table" then
-                local hostile = isHostileUnit(ResolveFrameRuntimeUnit(frame) or frame.__polar_unit)
-                local hpKey = getHpStyleKey(hostile)
+                local hpKey = getHpStyleKey(frameHostile)
                 local textureInfo = buildPerFrameTextureInfo(hpKey, hpAfter01) or statusbar_style[hpKey]
                 frame.hpBar:ApplyBarTexture(textureInfo)
             else
@@ -1541,13 +1547,13 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
     end)
 
     pcall(function()
-        SetStatusBarDynamicState(frame.hpBar, not colorsEnabled)
+        SetStatusBarDynamicState(frame.hpBar, not (colorsEnabled or hostileTargetHpEnabled))
     end)
     pcall(function()
         SetStatusBarDynamicState(frame.mpBar, not colorsEnabled)
     end)
 
-    if not colorsEnabled then
+    if not colorsEnabled and not hostileTargetHpEnabled then
         return
     end
 
@@ -1667,13 +1673,13 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
         return nil
     end
 
-    local hpFill = resolveColor("hp_fill_color", "hp_bar_color")
-    local hpAfter = resolveColor("hp_after_color", "hp_bar_color")
+    local hpFill = hostileTargetHpEnabled and hostileTargetHpColor or resolveColor("hp_fill_color", "hp_bar_color")
+    local hpAfter = hostileTargetHpEnabled and hostileTargetHpColor or resolveColor("hp_after_color", "hp_bar_color")
     local mpFill = resolveColor("mp_fill_color", "mp_bar_color")
     local mpAfter = resolveColor("mp_after_color", "mp_bar_color")
 
     pcall(function()
-        if frame.hpBar ~= nil then
+        if frame.hpBar ~= nil and (colorsEnabled or hostileTargetHpEnabled) then
             if hpFill ~= nil then
                 setBarFillColor(frame.hpBar, hpFill)
             end
@@ -1683,7 +1689,7 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
         end
     end)
     pcall(function()
-        if frame.mpBar ~= nil then
+        if frame.mpBar ~= nil and colorsEnabled then
             if mpFill ~= nil then
                 setBarFillColor(frame.mpBar, mpFill)
             end
@@ -1872,15 +1878,19 @@ local function ApplyBarStyle(frame, style)
     local hpAfter = resolveColor("hp_after_color", "hp_bar_color")
     local mpFill = resolveColor("mp_fill_color", "mp_bar_color")
     local mpAfter = resolveColor("mp_after_color", "mp_bar_color")
+    local frameUnit = ResolveFrameRuntimeUnit(frame) or frame.__polar_unit
+    local frameHostile = isHostileUnit(frameUnit)
+    local hostileTargetHpEnabled = style.hostile_target_hp_enabled == true
+        and tostring(frameUnit or "") == "target"
+        and frameHostile
+    local hostileTargetHpColor = NormalizeColor255(style.hostile_target_hp_color, { 255, 54, 40, 255 })
 
     local hpBar = frame.hpBar
     local mpBar = frame.mpBar
 
     pcall(function()
         if hpBar ~= nil then
-            local unit = ResolveFrameRuntimeUnit(frame) or frame.__polar_unit
-            local hostile = isHostileUnit(unit)
-            local styleKey = getHpStyleKey(hostile)
+            local styleKey = getHpStyleKey(frameHostile)
             local textureInfo = BuildTextureInfo(styleKey, hpAfter or hpFill)
             ApplyTexture(hpBar, textureInfo, styleKey or mode or "default")
         end
@@ -1896,11 +1906,16 @@ local function ApplyBarStyle(frame, style)
     local defaultFill = { 255, 255, 255, 255 }
     pcall(function()
         if hpBar ~= nil then
-            SetStatusBarDynamicState(hpBar, not colorsEnabled)
-            local fillColor = colorsEnabled and NormalizeColor255(hpFill, defaultFill) or defaultFill
-            local afterColor = colorsEnabled
-                and NormalizeColor255(hpAfter or hpFill, fillColor)
-                or GetTextureAfterColor255(hpBar.__polar_applied_texture_info or hpBar.textureInfo, defaultFill)
+            local hpColorOverride = colorsEnabled or hostileTargetHpEnabled
+            SetStatusBarDynamicState(hpBar, not hpColorOverride)
+            local fillColor = hostileTargetHpEnabled
+                and hostileTargetHpColor
+                or (colorsEnabled and NormalizeColor255(hpFill, defaultFill) or defaultFill)
+            local afterColor = hostileTargetHpEnabled
+                and hostileTargetHpColor
+                or (colorsEnabled
+                    and NormalizeColor255(hpAfter or hpFill, fillColor)
+                    or GetTextureAfterColor255(hpBar.__polar_applied_texture_info or hpBar.textureInfo, defaultFill))
             ApplyBarColorState(hpBar, fillColor, afterColor)
         end
     end)

@@ -2011,6 +2011,7 @@ RefreshControls = function()
 
         local hpFill = type(displayStyle.hp_fill_color) == "table" and displayStyle.hp_fill_color or (type(displayStyle.hp_bar_color) == "table" and displayStyle.hp_bar_color or {})
         local hpAfter = type(displayStyle.hp_after_color) == "table" and displayStyle.hp_after_color or (type(displayStyle.hp_bar_color) == "table" and displayStyle.hp_bar_color or {})
+        local hostileTargetHp = type(displayStyle.hostile_target_hp_color) == "table" and displayStyle.hostile_target_hp_color or { 255, 54, 40, 255 }
         local mpFill = type(displayStyle.mp_fill_color) == "table" and displayStyle.mp_fill_color or (type(displayStyle.mp_bar_color) == "table" and displayStyle.mp_bar_color or {})
         local mpAfter = type(displayStyle.mp_after_color) == "table" and displayStyle.mp_after_color or (type(displayStyle.mp_bar_color) == "table" and displayStyle.mp_bar_color or {})
 
@@ -2038,6 +2039,22 @@ RefreshControls = function()
         end
         if SettingsPage.controls.hp_after_a ~= nil then
             refreshSlider(SettingsPage.controls.hp_after_a, SettingsPage.controls.hp_after_a_val, tonumber(hpAfter[4]) or 255)
+        end
+
+        if SettingsPage.controls.hostile_target_hp_enabled ~= nil then
+            SettingsPage.controls.hostile_target_hp_enabled:SetChecked(displayStyle.hostile_target_hp_enabled == true)
+        end
+        if SettingsPage.controls.hostile_target_hp_r ~= nil then
+            refreshSlider(SettingsPage.controls.hostile_target_hp_r, SettingsPage.controls.hostile_target_hp_r_val, tonumber(hostileTargetHp[1]) or 255)
+        end
+        if SettingsPage.controls.hostile_target_hp_g ~= nil then
+            refreshSlider(SettingsPage.controls.hostile_target_hp_g, SettingsPage.controls.hostile_target_hp_g_val, tonumber(hostileTargetHp[2]) or 54)
+        end
+        if SettingsPage.controls.hostile_target_hp_b ~= nil then
+            refreshSlider(SettingsPage.controls.hostile_target_hp_b, SettingsPage.controls.hostile_target_hp_b_val, tonumber(hostileTargetHp[3]) or 40)
+        end
+        if SettingsPage.controls.hostile_target_hp_a ~= nil then
+            refreshSlider(SettingsPage.controls.hostile_target_hp_a, SettingsPage.controls.hostile_target_hp_a_val, tonumber(hostileTargetHp[4]) or 255)
         end
 
         if SettingsPage.controls.mp_r ~= nil then
@@ -2719,6 +2736,9 @@ ApplyControlsToSettings = function()
     if SettingsPage.controls.bar_colors_enabled ~= nil then
         editStyle.bar_colors_enabled = SettingsPage.controls.bar_colors_enabled:GetChecked() and true or false
     end
+    if SettingsPage.controls.hostile_target_hp_enabled ~= nil then
+        editStyle.hostile_target_hp_enabled = SettingsPage.controls.hostile_target_hp_enabled:GetChecked() and true or false
+    end
 
     local function sliderOr(slider, fallback)
         if slider ~= nil then
@@ -2742,6 +2762,16 @@ ApplyControlsToSettings = function()
             GetSliderValue(SettingsPage.controls.hp_after_g),
             GetSliderValue(SettingsPage.controls.hp_after_b),
             sliderOr(SettingsPage.controls.hp_after_a, 255)
+        )
+    end
+    if SettingsPage.controls.hostile_target_hp_r ~= nil
+        and SettingsPage.controls.hostile_target_hp_g ~= nil
+        and SettingsPage.controls.hostile_target_hp_b ~= nil then
+        editStyle.hostile_target_hp_color = colorTable(
+            GetSliderValue(SettingsPage.controls.hostile_target_hp_r),
+            GetSliderValue(SettingsPage.controls.hostile_target_hp_g),
+            GetSliderValue(SettingsPage.controls.hostile_target_hp_b),
+            sliderOr(SettingsPage.controls.hostile_target_hp_a, 255)
         )
     end
 
@@ -2785,6 +2815,8 @@ ApplyControlsToSettings = function()
                         frameStyle.hp_bar_color = nil
                         frameStyle.hp_fill_color = nil
                         frameStyle.hp_after_color = nil
+                        frameStyle.hostile_target_hp_enabled = nil
+                        frameStyle.hostile_target_hp_color = nil
                         frameStyle.mp_bar_color = nil
                         frameStyle.mp_fill_color = nil
                         frameStyle.mp_after_color = nil
@@ -3449,6 +3481,10 @@ local function EnsureWindow()
         { SettingsPage.controls.hp_after_g, SettingsPage.controls.hp_after_g_val },
         { SettingsPage.controls.hp_after_b, SettingsPage.controls.hp_after_b_val },
         { SettingsPage.controls.hp_after_a, SettingsPage.controls.hp_after_a_val },
+        { SettingsPage.controls.hostile_target_hp_r, SettingsPage.controls.hostile_target_hp_r_val },
+        { SettingsPage.controls.hostile_target_hp_g, SettingsPage.controls.hostile_target_hp_g_val },
+        { SettingsPage.controls.hostile_target_hp_b, SettingsPage.controls.hostile_target_hp_b_val },
+        { SettingsPage.controls.hostile_target_hp_a, SettingsPage.controls.hostile_target_hp_a_val },
         { SettingsPage.controls.mp_r, SettingsPage.controls.mp_r_val },
         { SettingsPage.controls.mp_g, SettingsPage.controls.mp_g_val },
         { SettingsPage.controls.mp_b, SettingsPage.controls.mp_b_val },
@@ -3566,6 +3602,7 @@ local function EnsureWindow()
         SettingsPage.controls.gear_loadouts_lock_editor,
         SettingsPage.controls.gear_loadouts_show_icons,
         SettingsPage.controls.bar_colors_enabled,
+        SettingsPage.controls.hostile_target_hp_enabled,
         SettingsPage.controls.overlay_shadow,
         SettingsPage.controls.target_guild_visible,
         SettingsPage.controls.target_class_visible,
