@@ -651,32 +651,12 @@ local function createFrame()
         end
     end)
 
-    if frame.CreateNinePartDrawable ~= nil and TEXTURE_PATH ~= nil and TEXTURE_PATH.HUD ~= nil then
-        frame.background = safeCall(function()
-            return frame:CreateNinePartDrawable(TEXTURE_PATH.HUD, "background")
-        end)
-        if frame.background ~= nil then
-            safeCall(function()
-                frame.background:SetTextureInfo("bg_quest")
-                frame.background:SetColor(0.08, 0.06, 0.04, 0.88)
-                frame.background:AddAnchor("TOPLEFT", frame, 0, 0)
-                frame.background:AddAnchor("BOTTOMRIGHT", frame, 0, 0)
-            end)
-        end
-    elseif frame.CreateColorDrawable ~= nil then
-        frame.background = createColorDrawable(frame, 0.08, 0.06, 0.04, 0.88, "background")
-        frame.background_is_color = true
-        if frame.background ~= nil then
-            setDrawableRect(frame.background, frame, 0, 0, DEFAULT_WIDTH, DEFAULT_HEIGHT)
-        end
-    end
-
     frame.header = createColorDrawable(frame, 0.92, 0.70, 0.32, 0.13, "overlay")
     frame.divider = createColorDrawable(frame, 0.88, 0.70, 0.35, 0.26, "overlay")
     frame.barBorder = createColorDrawable(frame, 0.70, 0.48, 0.22, 0.42, "overlay")
     frame.barBg = createColorDrawable(frame, 0.04, 0.03, 0.02, 0.84, "overlay")
-    frame.barFill = createColorDrawable(frame, 1.00, 0.68, 0.22, 1.00, "artwork")
-    frame.barShine = createColorDrawable(frame, 1.00, 0.96, 0.66, 0.58, "artwork")
+    frame.barFill = createColorDrawable(frame, 1.00, 1.00, 0.44, 1.00, "artwork")
+    frame.barShine = createColorDrawable(frame, 1.00, 1.00, 0.76, 0.72, "artwork")
 
     frame.title = createLabel(frame, "NuziUiTravelSpeedTitle", 12, getAlignLeft())
     frame.value = createLabel(frame, "NuziUiTravelSpeedValue", DEFAULT_FONT_SIZE, getAlignLeft())
@@ -731,6 +711,7 @@ local function applyFrameSettings(frame, cfg)
         if frame.background_is_color then
             setDrawableRect(frame.background, frame, 0, 0, width, windowHeight)
         end
+        setWidgetVisible(frame.background, false)
         setWidgetVisible(frame.header, false)
         setWidgetVisible(frame.divider, false)
         setWidgetVisible(frame.title, false)
@@ -785,13 +766,16 @@ local function renderFrame(frame)
 
     if source == "Vehicle" then
         setLabelColor(frame.source, 1, 0.78, 0.42, 1)
-        setDrawableColor(frame.barFill, 1.00, 0.68, 0.22, 1.00)
+        setDrawableColor(frame.barFill, 1.00, 1.00, 0.44, 1.00)
+        setDrawableColor(frame.barShine, 1.00, 1.00, 0.76, 0.72)
     elseif source == "Travel" then
         setLabelColor(frame.source, 0.70, 0.88, 1, 1)
-        setDrawableColor(frame.barFill, 0.34, 0.86, 1.00, 1.00)
+        setDrawableColor(frame.barFill, 0.68, 1.00, 1.00, 1.00)
+        setDrawableColor(frame.barShine, 0.92, 1.00, 1.00, 0.72)
     else
         setLabelColor(frame.source, 0.62, 0.56, 0.46, 1)
         setDrawableColor(frame.barFill, 0.28, 0.22, 0.16, 0.0)
+        setDrawableColor(frame.barShine, 0.28, 0.22, 0.16, 0.0)
     end
 
     local fontSize = clampInt(type(cfg) == "table" and cfg.font_size or nil, 14, 30, DEFAULT_FONT_SIZE)
