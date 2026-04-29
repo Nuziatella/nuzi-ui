@@ -311,18 +311,6 @@ local function createWindow(id)
         return api.Interface:CreateEmptyWindow(id, "UIParent")
     end)
     applyCommonWindowBehavior(window)
-    if window ~= nil and window.CreateColorDrawable ~= nil then
-        local pad = safeCall(function()
-            return window:CreateColorDrawable(0, 0, 0, 0, "background")
-        end)
-        if pad ~= nil then
-            safeCall(function()
-                pad:AddAnchor("TOPLEFT", window, 0, 0)
-                pad:AddAnchor("BOTTOMRIGHT", window, 0, 0)
-            end)
-            window.__nuzi_drag_pad = pad
-        end
-    end
     return window
 end
 
@@ -1212,10 +1200,14 @@ local function syncWindowInteractionState(window, unitKey)
     local interactive = window.__nuzi_dragging
         or (CooldownTracker.enabled and type(trackerSettings) == "table" and trackerSettings.enabled == true
             and type(unitCfg) == "table" and unitCfg.enabled == true and not unitCfg.lock_position
-            and (type(settings) ~= "table" or settings.drag_requires_shift == false or isShiftDown()))
+            and isShiftDown())
 
     for _, target in ipairs(window.__nuzi_drag_targets) do
         setWidgetInteractive(target, interactive)
+    end
+    if window.__nuzi_drag_pad ~= nil then
+        showWidget(window.__nuzi_drag_pad, interactive)
+        setWidgetInteractive(window.__nuzi_drag_pad, interactive)
     end
 end
 
@@ -1245,7 +1237,7 @@ local function attachDragTarget(window, target, unitKey)
         if type(unitCfg) == "table" and unitCfg.lock_position then
             return
         end
-        if type(CooldownTracker.settings) == "table" and CooldownTracker.settings.drag_requires_shift ~= false and not isShiftDown() then
+        if not isShiftDown() then
             return
         end
         window.__nuzi_dragging = true
@@ -1312,16 +1304,6 @@ local function attachDragTarget(window, target, unitKey)
     if target.SetHandler ~= nil then
         target:SetHandler("OnDragStart", onDragStart)
         target:SetHandler("OnDragStop", onDragStop)
-        target:SetHandler("OnMouseDown", function(_, btn)
-            if btn == nil or btn == "LeftButton" then
-                onDragStart()
-            end
-        end)
-        target:SetHandler("OnMouseUp", function(_, btn)
-            if btn == nil or btn == "LeftButton" then
-                onDragStop()
-            end
-        end)
     end
     setWidgetInteractive(target, false)
     syncWindowInteractionState(window, unitKey)

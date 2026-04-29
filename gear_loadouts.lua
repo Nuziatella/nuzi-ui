@@ -85,6 +85,32 @@ local function showWidget(widget, visible)
     end)
 end
 
+local function setWindowInteractive(widget, enabled)
+    if widget == nil then
+        return
+    end
+    enabled = enabled and true or false
+    if widget.__nuzi_loadouts_interactive == enabled then
+        return
+    end
+    if widget.Clickable ~= nil then
+        safeCall(function()
+            widget:Clickable(enabled)
+        end)
+    end
+    if widget.EnablePick ~= nil then
+        safeCall(function()
+            widget:EnablePick(enabled)
+        end)
+    end
+    if widget.EnableDrag ~= nil then
+        safeCall(function()
+            widget:EnableDrag(enabled)
+        end)
+    end
+    widget.__nuzi_loadouts_interactive = enabled
+end
+
 local function freeWidget(widget)
     if widget == nil then
         return
@@ -148,6 +174,7 @@ local function createWindow(id)
                 window:SetUILayer("game")
             end
         end)
+        setWindowInteractive(window, false)
     end
     return window
 end
@@ -903,26 +930,38 @@ local function processEquipQueue(dt)
     end
 end
 
+local function isShiftDown()
+    if api.Input ~= nil and api.Input.IsShiftKeyDown ~= nil then
+        return safeCall(function()
+            return api.Input:IsShiftKeyDown()
+        end) and true or false
+    end
+    return false
+end
+
+local function syncMoveInteraction(window, cfg, lockKey)
+    if window == nil then
+        return
+    end
+    local interactive = window.__nuzi_loadouts_dragging
+        or (type(cfg) == "table" and not cfg[lockKey] and isShiftDown())
+    setWindowInteractive(window, interactive)
+end
+
 local function attachMoveHandlers(window, cfgKeyX, cfgKeyY, lockKey)
     if window == nil then
         return
     end
-    safeCall(function()
-        window:EnableDrag(true)
-    end)
     if window.SetHandler ~= nil then
         window:SetHandler("OnDragStart", function()
             local cfg = ensureSettings(GearLoadouts.settings)
             if cfg == nil or cfg[lockKey] then
+                syncMoveInteraction(window, cfg, lockKey)
                 return
             end
-            local shiftDown = false
-            if api.Input ~= nil and api.Input.IsShiftKeyDown ~= nil then
-                shiftDown = safeCall(function()
-                    return api.Input:IsShiftKeyDown()
-                end) and true or false
-            end
-            if shiftDown then
+            if isShiftDown() then
+                window.__nuzi_loadouts_dragging = true
+                syncMoveInteraction(window, cfg, lockKey)
                 safeCall(function()
                     window:StartMoving()
                 end)
@@ -938,6 +977,7 @@ local function attachMoveHandlers(window, cfgKeyX, cfgKeyY, lockKey)
             safeCall(function()
                 window:StopMovingOrSizing()
             end)
+            window.__nuzi_loadouts_dragging = false
             local cfg = ensureSettings(GearLoadouts.settings)
             if cfg ~= nil then
                 local x, y = nil, nil
@@ -959,8 +999,10 @@ local function attachMoveHandlers(window, cfgKeyX, cfgKeyY, lockKey)
                     api.Cursor:ClearCursor()
                 end)
             end
+            syncMoveInteraction(window, cfg, lockKey)
         end)
     end
+    syncMoveInteraction(window, ensureSettings(GearLoadouts.settings), lockKey)
 end
 
 local function refreshLoadoutDropdown()
@@ -1470,6 +1512,8 @@ local function applyVisibility()
     showWidget(GearLoadouts.bar, visible)
     if not visible then
         showWidget(GearLoadouts.editor, false)
+        setWindowInteractive(GearLoadouts.bar, false)
+        setWindowInteractive(GearLoadouts.editor, false)
     end
 end
 
@@ -1563,6 +1607,8 @@ function GearLoadouts.OnUpdate(dt, settings)
     if GearLoadouts.editor ~= nil and GearLoadouts.editor.__nuzi_layout_ui_scale ~= uiScale then
         anchorTopLeft(GearLoadouts.editor, cfg.editor_pos_x, cfg.editor_pos_y)
     end
+    syncMoveInteraction(GearLoadouts.bar, cfg, "lock_bar")
+    syncMoveInteraction(GearLoadouts.editor, cfg, "lock_editor")
     processEquipQueue(dt)
     if GearLoadouts.pending_check_ms ~= nil then
         GearLoadouts.pending_check_ms = GearLoadouts.pending_check_ms - (tonumber(dt) or 0)
