@@ -65,6 +65,19 @@ local function IsFieldEnabled(style, key)
     return style[key] ~= false
 end
 
+local function FormatGuildFamilyText(guild, family)
+    guild = tostring(guild or "")
+    family = tostring(family or "")
+    if guild ~= "" and family ~= "" then
+        return string.format("<%s> (%s)", guild, family)
+    elseif guild ~= "" then
+        return string.format("<%s>", guild)
+    elseif family ~= "" then
+        return string.format("(%s)", family)
+    end
+    return ""
+end
+
 local function ResetAnchors(widget)
     if widget ~= nil and widget.RemoveAllAnchors ~= nil then
         widget:RemoveAllAnchors()
@@ -357,6 +370,14 @@ function TargetExtras.Update(ctx, settings)
         guild = ctx.TrimText(targetInfoById.expeditionName or targetInfoById.guildName or targetInfoById.guild or "")
     end
 
+    local family = ""
+    if isCharacter and type(targetUnitInfo) == "table" then
+        family = ctx.TrimText(targetUnitInfo.family_name or "")
+    end
+    if family == "" and isCharacter and type(targetInfoById) == "table" then
+        family = ctx.TrimText(targetInfoById.family_name or "")
+    end
+
     if GetNormalizedTargetId(ctx, api) ~= normalizedTargetId then
         return
     end
@@ -375,10 +396,7 @@ function TargetExtras.Update(ctx, settings)
     SetCachedText(UI.target.class_name, className)
     SetCachedVisible(UI.target.class_name, showClassField and className ~= "")
 
-    local guildText = ""
-    if guild ~= "" then
-        guildText = "<" .. guild .. ">"
-    end
+    local guildText = FormatGuildFamilyText(guild, family)
     SetCachedText(UI.target.guild, guildText)
     SetCachedVisible(UI.target.guild, showGuildField and guildText ~= "")
 

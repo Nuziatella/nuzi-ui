@@ -1,4 +1,5 @@
 local api = require("api")
+local Layout = require("nuzi-ui/layout")
 local SettingsStore = require("nuzi-ui/settings_store")
 local SettingsCommon = require("nuzi-ui/settings_common")
 
@@ -8,6 +9,7 @@ local CooldownTracker = {
     accum_ms = 0,
     windows = {},
     buff_meta_cache = {},
+    duration_cache = {},
     target_cache = {},
     target_cache_unit_id = nil
 }
@@ -53,6 +55,8 @@ local DEFAULT_POSITIONS = {
 
 local READY_TIMER_COLOR = { 144, 255, 172, 255 }
 local MISSING_TIMER_COLOR = { 255, 196, 120, 255 }
+local DEFAULT_BAR_FILL_COLOR = { 207, 74, 22, 255 }
+local DEFAULT_BAR_BG_COLOR = { 18, 18, 18, 220 }
 
 local function safeCall(fn, ...)
     if type(fn) ~= "function" then
@@ -167,6 +171,17 @@ local function normalizeDisplayMode(rawMode)
     return "both"
 end
 
+local function normalizeDisplayStyle(rawStyle)
+    if type(SettingsCommon) == "table" and type(SettingsCommon.NormalizeCooldownDisplayStyle) == "function" then
+        return SettingsCommon.NormalizeCooldownDisplayStyle(rawStyle)
+    end
+    local style = string.lower(tostring(rawStyle or "icons"))
+    if style == "bars" or style == "bar" then
+        return "bars"
+    end
+    return "icons"
+end
+
 local function normalizeTrackedEntry(raw)
     if type(SettingsCommon) == "table" and type(SettingsCommon.NormalizeCooldownTrackedEntry) == "function" then
         return SettingsCommon.NormalizeCooldownTrackedEntry(raw)
@@ -201,9 +216,19 @@ local function getDefaultPosition(unitKey)
     return defaults.x, defaults.y
 end
 
-local function readWindowOffset(window)
+local function getUiScale()
+    if Layout ~= nil and type(Layout.GetUiScale) == "function" then
+        return Layout.GetUiScale()
+    end
+    return 1
+end
+
+local function readWindowUiOffset(window)
     if window == nil then
         return nil, nil
+    end
+    if Layout ~= nil and type(Layout.ReadUiOffset) == "function" then
+        return Layout.ReadUiOffset(window)
     end
     if type(window.GetOffset) == "function" then
         local ok, x, y = pcall(function()
@@ -224,9 +249,25 @@ local function readWindowOffset(window)
     return nil, nil
 end
 
-local function anchorTopLeft(window, x, y)
+local function readWindowScreenOffset(window)
+    if window == nil then
+        return nil, nil
+    end
+    if Layout ~= nil and type(Layout.ReadScreenOffset) == "function" then
+        return Layout.ReadScreenOffset(window)
+    end
+    return readWindowUiOffset(window)
+end
+
+local function anchorTopLeft(window, x, y, screenCoords)
     if window == nil or window.AddAnchor == nil then
         return false
+    end
+    if screenCoords and Layout ~= nil and type(Layout.AnchorTopLeftScreen) == "function" then
+        return Layout.AnchorTopLeftScreen(window, x, y, false)
+    end
+    if Layout ~= nil and type(Layout.AnchorTopLeftUi) == "function" then
+        return Layout.AnchorTopLeftUi(window, x, y, false)
     end
     local ok = pcall(function()
         window:AddAnchor("TOPLEFT", "UIParent", tonumber(x) or 0, tonumber(y) or 0)
@@ -366,6 +407,35 @@ local function showWidget(widget, visible)
     end
 end
 
+local function setWidgetInteractive(widget, enabled)
+    if widget == nil then
+        return
+    end
+
+    enabled = enabled and true or false
+    if widget.__nuzi_interactive == enabled then
+        return
+    end
+
+    if widget.Clickable ~= nil then
+        safeCall(function()
+            widget:Clickable(enabled)
+        end)
+    end
+    if widget.EnablePick ~= nil then
+        safeCall(function()
+            widget:EnablePick(enabled)
+        end)
+    end
+    if widget.EnableDrag ~= nil then
+        safeCall(function()
+            widget:EnableDrag(enabled)
+        end)
+    end
+
+    widget.__nuzi_interactive = enabled
+end
+
 local function setWidgetAlpha(widget, alpha)
     if widget == nil or widget.SetAlpha == nil then
         return
@@ -382,6 +452,68 @@ local function setWidgetAlpha(widget, alpha)
             widget:SetAlpha(value)
         end)
     end
+end
+
+local function createColorDrawable(parent, rgba, layer)
+    if parent == nil or parent.CreateColorDrawable == nil then
+        return nil
+    end
+    local color = normalizeColor01(rgba)
+    local drawable = safeCall(function()
+        return parent:CreateColorDrawable(color[1], color[2], color[3], color[4], layer or "artwork")
+    end)
+    setWidgetInteractive(drawable, false)
+    return drawable
+end
+
+local function setDrawableColor(drawable, rgba)
+    if drawable == nil then
+        return
+    end
+    local color = normalizeColor01(rgba)
+    local sig = string.format("%.3f:%.3f:%.3f:%.3f", color[1], color[2], color[3], color[4])
+    if drawable.__nuzi_color_sig == sig then
+        return
+    end
+    drawable.__nuzi_color_sig = sig
+    safeCall(function()
+        if drawable.SetColor ~= nil then
+            drawable:SetColor(color[1], color[2], color[3], color[4])
+        elseif drawable.SetTextureColor ~= nil then
+            drawable:SetTextureColor(color[1], color[2], color[3], color[4])
+        end
+    end)
+end
+
+local function setDrawableRect(drawable, parent, x, y, width, height)
+    if drawable == nil or parent == nil then
+        return
+    end
+    local left = roundPixel(x)
+    local top = roundPixel(y)
+    local w = math.max(1, roundPixel(width))
+    local h = math.max(1, roundPixel(height))
+    local sig = string.format("%d:%d:%d:%d", left, top, w, h)
+    if drawable.__nuzi_rect_sig == sig then
+        return
+    end
+    drawable.__nuzi_rect_sig = sig
+    safeCall(function()
+        if drawable.RemoveAllAnchors ~= nil then
+            drawable:RemoveAllAnchors()
+        end
+        drawable:AddAnchor("TOPLEFT", parent, left, top)
+        if drawable.SetExtent ~= nil then
+            drawable:SetExtent(w, h)
+        else
+            if drawable.SetWidth ~= nil then
+                drawable:SetWidth(w)
+            end
+            if drawable.SetHeight ~= nil then
+                drawable:SetHeight(h)
+            end
+        end
+    end)
 end
 
 local function createIconSlot(id, parent)
@@ -416,6 +548,9 @@ local function createIconSlot(id, parent)
     local timerLabel = createLabel(icon, id .. "Timer", 16, (ALIGN ~= nil and ALIGN.CENTER) or nil)
     local stackLabel = createLabel(icon, id .. "Stack", 12, (ALIGN ~= nil and ALIGN.RIGHT) or nil)
     local nameLabel = createLabel(parent, id .. "Name", 12, (ALIGN ~= nil and ALIGN.CENTER) or nil)
+    local barTimerLabel = createLabel(parent, id .. "BarTimer", 12, (ALIGN ~= nil and ALIGN.RIGHT) or nil)
+    local barBg = createColorDrawable(parent, DEFAULT_BAR_BG_COLOR, "background")
+    local barFill = createColorDrawable(parent, DEFAULT_BAR_FILL_COLOR, "artwork")
 
     if timerLabel ~= nil then
         safeCall(function()
@@ -432,7 +567,10 @@ local function createIconSlot(id, parent)
         icon = icon,
         timer = timerLabel,
         stack = stackLabel,
-        name = nameLabel
+        name = nameLabel,
+        bar_timer = barTimerLabel,
+        bar_bg = barBg,
+        bar_fill = barFill
     }
 end
 
@@ -471,6 +609,9 @@ end
 
 local function safeGetUnitId(unit)
     if api == nil or api.Unit == nil or api.Unit.GetUnitId == nil then
+        return nil
+    end
+    if type(unit) ~= "string" or tostring(unit) == "" then
         return nil
     end
     local ok, value = pcall(function()
@@ -609,6 +750,13 @@ local function safeGetAuraTimeLeftMs(aura)
         return nil
     end
     return normalizeMs(aura.timeLeft or aura.leftTime or aura.remainTime)
+end
+
+local function safeGetAuraDurationMs(aura)
+    if type(aura) ~= "table" then
+        return nil
+    end
+    return normalizeMs(aura.duration or aura.durationTime or aura.totalTime or aura.maxTime)
 end
 
 local function safeGetAuraStacks(aura)
@@ -762,6 +910,7 @@ local function scanTrackedEffects(unitToken, trackedEntries)
             name = resolveAuraName(aura, buffId),
             icon_path = resolveAuraIconPath(aura, buffId),
             time_left_ms = timeLeftMs,
+            duration_ms = safeGetAuraDurationMs(aura),
             stacks = safeGetAuraStacks(aura)
         }
     end
@@ -826,6 +975,7 @@ local function updateTargetCache(currentUnitId, liveFound, trackedEntries, unitC
                 kind = live.kind,
                 name = live.name,
                 icon_path = live.icon_path,
+                duration_ms = live.duration_ms,
                 stacks = live.stacks,
                 expire_at_ms = ttl > 0 and (nowMs + ttl) or nil,
                 cache_expire_at_ms = nowMs + cacheTimeoutMs
@@ -850,6 +1000,7 @@ local function updateTargetCache(currentUnitId, liveFound, trackedEntries, unitC
                         kind = cached.kind,
                         name = cached.name,
                         icon_path = cached.icon_path,
+                        duration_ms = cached.duration_ms,
                         stacks = cached.stacks,
                         time_left_ms = timeLeftMs
                     }
@@ -883,6 +1034,7 @@ local function buildMissingEntry(unitKey, trackedEntry)
         name = (type(meta) == "table" and tostring(meta.name or "") ~= "") and tostring(meta.name or "") or ("Buff #" .. tostring(trackedEntry.id)),
         icon_path = type(meta) == "table" and tostring(meta.path or "") or nil,
         time_left_ms = nil,
+        duration_ms = nil,
         stacks = nil,
         state = missingState
     }
@@ -946,6 +1098,66 @@ local function formatTimeLeftMs(timeLeftMs)
     return string.format("%d:%02d", minutes, remain)
 end
 
+local function getDurationCacheKey(entry)
+    if type(entry) ~= "table" then
+        return nil
+    end
+    local id = tonumber(entry.buff_id)
+    if id == nil then
+        return nil
+    end
+    return tostring(entry.kind or entry.track_kind or "any") .. ":" .. tostring(math.floor(id + 0.5))
+end
+
+local function rememberEntryDuration(entry)
+    local key = getDurationCacheKey(entry)
+    if key == nil then
+        return nil
+    end
+    local current = tonumber(entry.time_left_ms)
+    local duration = tonumber(entry.duration_ms)
+    if current ~= nil and (duration == nil or duration < current) then
+        duration = current
+    end
+    if duration ~= nil and duration > 0 then
+        local cached = tonumber(CooldownTracker.duration_cache[key])
+        if cached == nil or duration > cached then
+            CooldownTracker.duration_cache[key] = duration
+            cached = duration
+        end
+        entry.duration_ms = cached
+        return cached
+    end
+    return tonumber(CooldownTracker.duration_cache[key])
+end
+
+local function getBarProgress(entry)
+    if type(entry) ~= "table" then
+        return 0
+    end
+    if entry.state == "ready" then
+        return 1
+    end
+    if entry.state == "missing" then
+        return 0
+    end
+    local timeLeft = tonumber(entry.time_left_ms)
+    if timeLeft == nil then
+        return 1
+    end
+    local duration = rememberEntryDuration(entry)
+    if duration == nil or duration <= 0 then
+        return 1
+    end
+    local progress = timeLeft / duration
+    if progress < 0 then
+        return 0
+    elseif progress > 1 then
+        return 1
+    end
+    return progress
+end
+
 local function applyWindowPosition(window, unitKey, unitCfg, windowWidth, windowHeight)
     if window == nil or type(unitCfg) ~= "table" then
         return true
@@ -958,7 +1170,8 @@ local function applyWindowPosition(window, unitKey, unitCfg, windowWidth, window
     local x = clampInt(unitCfg.pos_x, -5000, 5000, defaultX)
     local y = clampInt(unitCfg.pos_y, -5000, 5000, defaultY)
 
-    if isAnchoredUnit(unitKey) then
+    local anchoredUnit = isAnchoredUnit(unitKey)
+    if anchoredUnit then
         local baseX, baseY = computeAnchoredTopLeft(unitKey, windowWidth, windowHeight)
         if baseX == nil or baseY == nil then
             return false
@@ -972,23 +1185,56 @@ local function applyWindowPosition(window, unitKey, unitCfg, windowWidth, window
         window.__nuzi_anchor_base_y = nil
     end
 
-    if window.__nuzi_pos_x ~= x or window.__nuzi_pos_y ~= y then
+    local anchorScale = anchoredUnit and nil or getUiScale()
+    if window.__nuzi_pos_x ~= x or window.__nuzi_pos_y ~= y or window.__nuzi_pos_ui_scale ~= anchorScale then
         safeCall(function()
             if window.RemoveAllAnchors ~= nil then
                 window:RemoveAllAnchors()
             end
-            anchorTopLeft(window, x, y)
+            anchorTopLeft(window, x, y, not anchoredUnit)
         end)
         window.__nuzi_pos_x = x
         window.__nuzi_pos_y = y
+        window.__nuzi_pos_ui_scale = anchorScale
     end
     return true
+end
+
+local function syncWindowInteractionState(window, unitKey)
+    if window == nil or type(window.__nuzi_drag_targets) ~= "table" then
+        return
+    end
+
+    local settings = CooldownTracker.settings
+    local trackerSettings = type(settings) == "table" and settings.cooldown_tracker or nil
+    local units = type(trackerSettings) == "table" and trackerSettings.units or nil
+    local unitCfg = type(units) == "table" and units[unitKey] or nil
+    local interactive = window.__nuzi_dragging
+        or (CooldownTracker.enabled and type(trackerSettings) == "table" and trackerSettings.enabled == true
+            and type(unitCfg) == "table" and unitCfg.enabled == true and not unitCfg.lock_position
+            and (type(settings) ~= "table" or settings.drag_requires_shift == false or isShiftDown()))
+
+    for _, target in ipairs(window.__nuzi_drag_targets) do
+        setWidgetInteractive(target, interactive)
+    end
+end
+
+local function syncAllWindowInteractionStates()
+    for unitKey, state in pairs(CooldownTracker.windows or {}) do
+        if type(state) == "table" then
+            syncWindowInteractionState(state.window, unitKey)
+        end
+    end
 end
 
 local function attachDragTarget(window, target, unitKey)
     if window == nil or target == nil then
         return
     end
+    if type(window.__nuzi_drag_targets) ~= "table" then
+        window.__nuzi_drag_targets = {}
+    end
+    table.insert(window.__nuzi_drag_targets, target)
 
     local function onDragStart()
         if CooldownTracker.settings == nil or type(CooldownTracker.settings.cooldown_tracker) ~= "table" then
@@ -1003,6 +1249,7 @@ local function attachDragTarget(window, target, unitKey)
             return
         end
         window.__nuzi_dragging = true
+        syncWindowInteractionState(window, unitKey)
         if type(window.StartMoving) == "function" then
             window:StartMoving()
         end
@@ -1013,20 +1260,27 @@ local function attachDragTarget(window, target, unitKey)
             window:StopMovingOrSizing()
         end
         window.__nuzi_dragging = false
-        local x, y = readWindowOffset(window)
+        local anchoredUnit = isAnchoredUnit(unitKey)
+        local x, y = nil, nil
+        if anchoredUnit then
+            x, y = readWindowUiOffset(window)
+        else
+            x, y = readWindowScreenOffset(window)
+        end
         if x == nil or y == nil then
+            syncWindowInteractionState(window, unitKey)
             return
         end
         safeCall(function()
             if window.RemoveAllAnchors ~= nil then
                 window:RemoveAllAnchors()
             end
-            anchorTopLeft(window, x, y)
+            anchorTopLeft(window, x, y, not anchoredUnit)
         end)
         if CooldownTracker.settings ~= nil and type(CooldownTracker.settings.cooldown_tracker) == "table" then
             local units = CooldownTracker.settings.cooldown_tracker.units
             if type(units) == "table" and type(units[unitKey]) == "table" then
-                if isAnchoredUnit(unitKey) then
+                if anchoredUnit then
                     local defaultX, defaultY = getDefaultPosition(unitKey)
                     local baseX, baseY = computeAnchoredTopLeft(
                         unitKey,
@@ -1046,13 +1300,10 @@ local function attachDragTarget(window, target, unitKey)
         end
         window.__nuzi_pos_x = x
         window.__nuzi_pos_y = y
+        window.__nuzi_pos_ui_scale = anchoredUnit and nil or getUiScale()
+        syncWindowInteractionState(window, unitKey)
     end
 
-    safeCall(function()
-        if target.EnableDrag ~= nil then
-            target:EnableDrag(true)
-        end
-    end)
     safeCall(function()
         if target.RegisterForDrag ~= nil then
             target:RegisterForDrag("LeftButton")
@@ -1072,6 +1323,8 @@ local function attachDragTarget(window, target, unitKey)
             end
         end)
     end
+    setWidgetInteractive(target, false)
+    syncWindowInteractionState(window, unitKey)
 end
 
 local function ensureUnitWindow(unitKey)
@@ -1138,6 +1391,19 @@ local function trimLabel(text, limit)
     return string.sub(value, 1, maxChars - 3) .. "..."
 end
 
+local function hideSlot(slot)
+    if slot == nil then
+        return
+    end
+    showWidget(slot.icon, false)
+    showWidget(slot.timer, false)
+    showWidget(slot.stack, false)
+    showWidget(slot.name, false)
+    showWidget(slot.bar_timer, false)
+    showWidget(slot.bar_bg, false)
+    showWidget(slot.bar_fill, false)
+end
+
 local function updateWindow(unitKey, unitCfg, entries)
     local state = ensureUnitWindow(unitKey)
     if state == nil or type(unitCfg) ~= "table" then
@@ -1145,6 +1411,7 @@ local function updateWindow(unitKey, unitCfg, entries)
     end
 
     local count = math.min(#entries, clampInt(unitCfg.max_icons, 1, 16, 10))
+    local displayStyle = normalizeDisplayStyle(unitCfg.display_style)
     local iconSize = clampInt(unitCfg.icon_size, 12, 80, 40)
     local spacing = clampInt(unitCfg.icon_spacing, 0, 24, 5)
     local showTimer = unitCfg.show_timer ~= false
@@ -1153,9 +1420,22 @@ local function updateWindow(unitKey, unitCfg, entries)
     local labelColor = normalizeColor01(unitCfg.label_color)
     local timerFontSize = clampInt(unitCfg.timer_font_size, 8, 40, 16)
     local labelFontSize = clampInt(unitCfg.label_font_size, 8, 32, 14)
+    local barWidth = clampInt(unitCfg.bar_width, 60, 360, 180)
+    local barHeight = clampInt(unitCfg.bar_height, 4, 32, 14)
+    local barFillColor = type(unitCfg.bar_fill_color) == "table" and unitCfg.bar_fill_color or DEFAULT_BAR_FILL_COLOR
+    local barBgColor = type(unitCfg.bar_bg_color) == "table" and unitCfg.bar_bg_color or DEFAULT_BAR_BG_COLOR
     local labelHeight = showLabel and (labelFontSize + 8) or 0
-    local windowWidth = math.max(iconSize, (count > 0 and ((count * iconSize) + ((count - 1) * spacing)) or iconSize))
-    local windowHeight = iconSize + labelHeight
+    local rowLabelHeight = showLabel and (labelFontSize + 4) or 0
+    local rowHeight = math.max(iconSize, rowLabelHeight + barHeight)
+    local windowWidth
+    local windowHeight
+    if displayStyle == "bars" then
+        windowWidth = iconSize + spacing + barWidth
+        windowHeight = count > 0 and ((count * rowHeight) + ((count - 1) * spacing)) or rowHeight
+    else
+        windowWidth = math.max(iconSize, (count > 0 and ((count * iconSize) + ((count - 1) * spacing)) or iconSize))
+        windowHeight = iconSize + labelHeight
+    end
 
     safeCall(function()
         if state.window.SetExtent ~= nil then
@@ -1171,10 +1451,7 @@ local function updateWindow(unitKey, unitCfg, entries)
         setLabelColor(state.placeholder, { 200, 200, 200, 255 })
         showWidget(state.placeholder, false)
         for _, slot in ipairs(state.slots) do
-            showWidget(slot.icon, false)
-            showWidget(slot.timer, false)
-            showWidget(slot.stack, false)
-            showWidget(slot.name, false)
+            hideSlot(slot)
         end
         showWidget(state.window, false)
         return
@@ -1182,10 +1459,7 @@ local function updateWindow(unitKey, unitCfg, entries)
 
     if not applyWindowPosition(state.window, unitKey, unitCfg, windowWidth, windowHeight) then
         for _, slot in ipairs(state.slots) do
-            showWidget(slot.icon, false)
-            showWidget(slot.timer, false)
-            showWidget(slot.stack, false)
-            showWidget(slot.name, false)
+            hideSlot(slot)
         end
         showWidget(state.window, false)
         return
@@ -1198,25 +1472,6 @@ local function updateWindow(unitKey, unitCfg, entries)
         local entry = entries[index]
         local slot = ensureSlot(state, unitKey, index)
         if slot ~= nil and entry ~= nil then
-            local x = (index - 1) * (iconSize + spacing)
-            safeCall(function()
-                if slot.icon.SetExtent ~= nil then
-                    slot.icon:SetExtent(iconSize, iconSize)
-                end
-                if slot.icon.RemoveAllAnchors ~= nil then
-                    slot.icon:RemoveAllAnchors()
-                end
-                slot.icon:AddAnchor("TOPLEFT", state.window, x, 0)
-            end)
-            if slot.name ~= nil then
-                safeCall(function()
-                    slot.name:SetExtent(iconSize + 20, labelHeight)
-                    if slot.name.RemoveAllAnchors ~= nil then
-                        slot.name:RemoveAllAnchors()
-                    end
-                    slot.name:AddAnchor("TOPLEFT", state.window, x - 10, iconSize + 2)
-                end)
-            end
             setIconPath(slot, entry.icon_path)
             showWidget(slot.icon, true)
             if entry.state == "ready" or entry.state == "missing" then
@@ -1225,20 +1480,125 @@ local function updateWindow(unitKey, unitCfg, entries)
                 setWidgetAlpha(slot.icon, 1)
             end
 
-            if slot.timer ~= nil then
-                setLabelFontSize(slot.timer, timerFontSize)
+            if displayStyle == "bars" then
+                local rowY = (index - 1) * (rowHeight + spacing)
+                local iconY = math.max(0, math.floor((rowHeight - iconSize) / 2))
+                local textX = iconSize + spacing
+                local barY = rowY + rowLabelHeight
+                safeCall(function()
+                    if slot.icon.SetExtent ~= nil then
+                        slot.icon:SetExtent(iconSize, iconSize)
+                    end
+                    if slot.icon.RemoveAllAnchors ~= nil then
+                        slot.icon:RemoveAllAnchors()
+                    end
+                    slot.icon:AddAnchor("TOPLEFT", state.window, 0, rowY + iconY)
+                end)
+                if slot.name ~= nil then
+                    safeCall(function()
+                        slot.name:SetExtent(barWidth, rowLabelHeight)
+                        if slot.name.RemoveAllAnchors ~= nil then
+                            slot.name:RemoveAllAnchors()
+                        end
+                        slot.name:AddAnchor("TOPLEFT", state.window, textX, rowY)
+                    end)
+                    setLabelFontSize(slot.name, labelFontSize)
+                    setLabelColor(slot.name, labelColor)
+                    setLabelText(slot.name, showLabel and trimLabel(entry.name, math.max(12, math.floor(barWidth / 6))) or "")
+                    showWidget(slot.name, showLabel)
+                end
+
+                setDrawableColor(slot.bar_bg, barBgColor)
+                setDrawableRect(slot.bar_bg, state.window, textX, barY, barWidth, barHeight)
+                showWidget(slot.bar_bg, true)
+
+                local progress = getBarProgress(entry)
+                local fillWidth = math.floor((barWidth * progress) + 0.5)
+                if progress > 0 and fillWidth < 1 then
+                    fillWidth = 1
+                end
+                local fillColor = barFillColor
                 if entry.state == "ready" then
-                    setLabelColor(slot.timer, READY_TIMER_COLOR)
-                    setLabelText(slot.timer, showTimer and "Ready" or "")
-                    showWidget(slot.timer, showTimer)
+                    fillColor = READY_TIMER_COLOR
                 elseif entry.state == "missing" then
-                    setLabelColor(slot.timer, MISSING_TIMER_COLOR)
-                    setLabelText(slot.timer, showTimer and "Missing" or "")
-                    showWidget(slot.timer, showTimer)
-                else
-                    setLabelColor(slot.timer, timerColor)
-                    setLabelText(slot.timer, showTimer and formatTimeLeftMs(entry.time_left_ms) or "")
-                    showWidget(slot.timer, showTimer and entry.time_left_ms ~= nil)
+                    fillColor = MISSING_TIMER_COLOR
+                end
+                setDrawableColor(slot.bar_fill, fillColor)
+                setDrawableRect(slot.bar_fill, state.window, textX, barY, math.max(1, fillWidth), barHeight)
+                showWidget(slot.bar_fill, progress > 0)
+
+                showWidget(slot.timer, false)
+
+                if slot.bar_timer ~= nil then
+                    safeCall(function()
+                        slot.bar_timer:SetExtent(math.max(20, barWidth - 6), barHeight)
+                        if slot.bar_timer.RemoveAllAnchors ~= nil then
+                            slot.bar_timer:RemoveAllAnchors()
+                        end
+                        slot.bar_timer:AddAnchor("TOPLEFT", state.window, textX + 3, barY - 1)
+                    end)
+                    setLabelFontSize(slot.bar_timer, math.max(8, math.min(timerFontSize, barHeight + 6)))
+                    if entry.state == "ready" then
+                        setLabelColor(slot.bar_timer, READY_TIMER_COLOR)
+                        setLabelText(slot.bar_timer, showTimer and "Ready" or "")
+                        showWidget(slot.bar_timer, showTimer)
+                    elseif entry.state == "missing" then
+                        setLabelColor(slot.bar_timer, MISSING_TIMER_COLOR)
+                        setLabelText(slot.bar_timer, showTimer and "Missing" or "")
+                        showWidget(slot.bar_timer, showTimer)
+                    else
+                        setLabelColor(slot.bar_timer, timerColor)
+                        setLabelText(slot.bar_timer, showTimer and formatTimeLeftMs(entry.time_left_ms) or "")
+                        showWidget(slot.bar_timer, showTimer and entry.time_left_ms ~= nil)
+                    end
+                end
+            else
+                local x = (index - 1) * (iconSize + spacing)
+                safeCall(function()
+                    if slot.icon.SetExtent ~= nil then
+                        slot.icon:SetExtent(iconSize, iconSize)
+                    end
+                    if slot.icon.RemoveAllAnchors ~= nil then
+                        slot.icon:RemoveAllAnchors()
+                    end
+                    slot.icon:AddAnchor("TOPLEFT", state.window, x, 0)
+                end)
+                if slot.name ~= nil then
+                    safeCall(function()
+                        slot.name:SetExtent(iconSize + 20, labelHeight)
+                        if slot.name.RemoveAllAnchors ~= nil then
+                            slot.name:RemoveAllAnchors()
+                        end
+                        slot.name:AddAnchor("TOPLEFT", state.window, x - 10, iconSize + 2)
+                    end)
+                end
+
+                showWidget(slot.bar_timer, false)
+                showWidget(slot.bar_bg, false)
+                showWidget(slot.bar_fill, false)
+
+                if slot.timer ~= nil then
+                    setLabelFontSize(slot.timer, timerFontSize)
+                    if entry.state == "ready" then
+                        setLabelColor(slot.timer, READY_TIMER_COLOR)
+                        setLabelText(slot.timer, showTimer and "Ready" or "")
+                        showWidget(slot.timer, showTimer)
+                    elseif entry.state == "missing" then
+                        setLabelColor(slot.timer, MISSING_TIMER_COLOR)
+                        setLabelText(slot.timer, showTimer and "Missing" or "")
+                        showWidget(slot.timer, showTimer)
+                    else
+                        setLabelColor(slot.timer, timerColor)
+                        setLabelText(slot.timer, showTimer and formatTimeLeftMs(entry.time_left_ms) or "")
+                        showWidget(slot.timer, showTimer and entry.time_left_ms ~= nil)
+                    end
+                end
+
+                if slot.name ~= nil then
+                    setLabelFontSize(slot.name, labelFontSize)
+                    setLabelColor(slot.name, labelColor)
+                    setLabelText(slot.name, showLabel and trimLabel(entry.name, math.max(8, math.floor((iconSize + 20) / 5))) or "")
+                    showWidget(slot.name, showLabel)
                 end
             end
 
@@ -1250,24 +1610,12 @@ local function updateWindow(unitKey, unitCfg, entries)
                 setLabelText(slot.stack, showStacks and tostring(stacks) or "")
                 showWidget(slot.stack, showStacks)
             end
-
-            if slot.name ~= nil then
-                setLabelFontSize(slot.name, labelFontSize)
-                setLabelColor(slot.name, labelColor)
-                setLabelText(slot.name, showLabel and trimLabel(entry.name, math.max(8, math.floor((iconSize + 20) / 5))) or "")
-                showWidget(slot.name, showLabel)
-            end
         end
     end
 
     for index = count + 1, #state.slots do
         local slot = state.slots[index]
-        if slot ~= nil then
-            showWidget(slot.icon, false)
-            showWidget(slot.timer, false)
-            showWidget(slot.stack, false)
-            showWidget(slot.name, false)
-        end
+        hideSlot(slot)
     end
 end
 
@@ -1277,10 +1625,7 @@ local function hideAllWindows()
             showWidget(state.window, false)
             if type(state.slots) == "table" then
                 for _, slot in ipairs(state.slots) do
-                    showWidget(slot.icon, false)
-                    showWidget(slot.timer, false)
-                    showWidget(slot.stack, false)
-                    showWidget(slot.name, false)
+                    hideSlot(slot)
                 end
             end
         end
@@ -1328,6 +1673,7 @@ function CooldownTracker.ApplySettings(settings)
     CooldownTracker.settings = settings
     if type(settings) ~= "table" or type(settings.cooldown_tracker) ~= "table" then
         hideAllWindows()
+        syncAllWindowInteractionStates()
         return
     end
 
@@ -1347,6 +1693,7 @@ function CooldownTracker.ApplySettings(settings)
             end
         end
     end
+    syncAllWindowInteractionStates()
 end
 
 function CooldownTracker.SetEnabled(enabled)
@@ -1354,6 +1701,7 @@ function CooldownTracker.SetEnabled(enabled)
     if not CooldownTracker.enabled then
         hideAllWindows()
     end
+    syncAllWindowInteractionStates()
 end
 
 function CooldownTracker.OnUpdate(dt, settings)
@@ -1363,10 +1711,12 @@ function CooldownTracker.OnUpdate(dt, settings)
     if type(CooldownTracker.settings) ~= "table" then
         return
     end
+    syncAllWindowInteractionStates()
 
     local trackerSettings = CooldownTracker.settings.cooldown_tracker
     if type(trackerSettings) ~= "table" then
         hideAllWindows()
+        syncAllWindowInteractionStates()
         return
     end
 
@@ -1398,6 +1748,7 @@ function CooldownTracker.Unload()
     end
     CooldownTracker.windows = {}
     CooldownTracker.buff_meta_cache = {}
+    CooldownTracker.duration_cache = {}
     CooldownTracker.settings = nil
     CooldownTracker.accum_ms = 0
 end

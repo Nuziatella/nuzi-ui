@@ -2,11 +2,13 @@ local api = require("api")
 local SafeRequire = require("nuzi-ui/safe_require")
 local Compat = SafeRequire("nuzi-ui/compat")
 local Runtime = SafeRequire("nuzi-ui/runtime")
+local DebuffEffects = SafeRequire("nuzi-ui/debuff_effects", "nuzi-ui.debuff_effects")
 
 local Nameplates = {
     settings = nil,
     enabled = false,
     frames = {},
+    debuff_frames = {},
     unit_keys = {},
     unit_state = {},
     target_unitframe = nil,
@@ -23,6 +25,17 @@ local FAST_UNITS = {
 
 local DISCOVERY_BATCH_SIZE = 10
 local STATIC_INFO_RETRY_TICKS = 30
+local DEBUFF_SCAN_INTERVAL_MS = 250
+local DEBUFF_ICON_COUNT = 4
+local DEBUFF_DISPEL_SLOT_COLOR = { 0.7059, 0.2824, 1, 1 }
+local DEBUFF_CATEGORY_SETTINGS = {
+    hard = "show_hard",
+    silence = "show_silence",
+    root = "show_root",
+    slow = "show_slow",
+    dot = "show_dot",
+    misc = "show_misc"
+}
 
 local function NormalizeUnitToken(unit)
     if type(unit) ~= "string" then
@@ -66,6 +79,24 @@ local function SafeGetUnitInfoById(unitId)
         return info
     end
     return nil
+end
+
+local function TrimText(value)
+    local text = tostring(value or "")
+    return string.match(text, "^%s*(.-)%s*$") or text
+end
+
+local function FormatGuildFamilyText(guild, family)
+    guild = TrimText(guild)
+    family = TrimText(family)
+    if guild ~= "" and family ~= "" then
+        return string.format("<%s> (%s)", guild, family)
+    elseif guild ~= "" then
+        return string.format("<%s>", guild)
+    elseif family ~= "" then
+        return string.format("(%s)", family)
+    end
+    return ""
 end
 
 local function ClampNumber(v, lo, hi, default)
@@ -188,6 +219,19 @@ local function RoundPixel(value)
     return math.ceil(n - 0.5)
 end
 
+local function SafeUiNowMs()
+    if api.Time == nil or api.Time.GetUiMsec == nil then
+        return 0
+    end
+    local ok, value = pcall(function()
+        return api.Time:GetUiMsec()
+    end)
+    if not ok then
+        return 0
+    end
+    return tonumber(value) or 0
+end
+
 local function GetUnitState(unit)
     local state = Nameplates.unit_state[unit]
     if state ~= nil then
@@ -197,9 +241,13 @@ local function GetUnitState(unit)
         unit_id = nil,
         name = "",
         guild = "",
+        family = "",
         is_character = true,
         next_info_retry_tick = 0,
-        visible = false
+        visible = false,
+        debuff_visible = false,
+        debuff_effects = {},
+        debuff_last_scan_ms = 0
     }
     Nameplates.unit_state[unit] = state
     return state
@@ -212,6 +260,36 @@ local function HideUnit(unit, state)
     end
     if type(state) == "table" then
         state.visible = false
+    end
+end
+
+local function HideDebuffs(unit, state)
+    local frame = Nameplates.debuff_frames[unit]
+    if frame ~= nil then
+        SafeShow(frame, false)
+    end
+    if type(state) == "table" then
+        state.debuff_visible = false
+    end
+end
+
+local function HideAllFrames()
+    for unit, frame in pairs(Nameplates.frames) do
+        SafeShow(frame, false)
+        local state = Nameplates.unit_state[unit]
+        if type(state) == "table" then
+            state.visible = false
+        end
+    end
+end
+
+local function HideAllDebuffs()
+    for unit, frame in pairs(Nameplates.debuff_frames) do
+        SafeShow(frame, false)
+        local state = Nameplates.unit_state[unit]
+        if type(state) == "table" then
+            state.debuff_visible = false
+        end
     end
 end
 
@@ -304,6 +382,45 @@ local function SafeSetAnchorTopLeft(wnd, x, y)
     wnd.__polar_anchor_y = y
 end
 
+local function SafeSetExtent(wnd, width, height)
+    if wnd == nil or wnd.SetExtent == nil then
+        return
+    end
+    width = tonumber(width) or 0
+    height = tonumber(height) or 0
+    if wnd.__polar_extent_w == width and wnd.__polar_extent_h == height then
+        return
+    end
+    pcall(function()
+        wnd:SetExtent(width, height)
+    end)
+    wnd.__polar_extent_w = width
+    wnd.__polar_extent_h = height
+end
+
+local function SafeAnchor(wnd, point, relative, relativePoint, x, y)
+    if wnd == nil or wnd.AddAnchor == nil then
+        return
+    end
+    local key = table.concat({
+        tostring(point or ""),
+        tostring(relative or ""),
+        tostring(relativePoint or ""),
+        tostring(x or 0),
+        tostring(y or 0)
+    }, ":")
+    if wnd.__polar_anchor_key == key then
+        return
+    end
+    pcall(function()
+        if wnd.RemoveAllAnchors ~= nil then
+            wnd:RemoveAllAnchors()
+        end
+        wnd:AddAnchor(point, relative, relativePoint, x or 0, y or 0)
+    end)
+    wnd.__polar_anchor_key = key
+end
+
 local function SafeSetBarValue(statusBar, maxValue, value)
     if statusBar == nil then
         return
@@ -345,6 +462,70 @@ local function ShouldShowUnit(unit, cfg)
         return cfg.show_raid_party and true or false
     end
     return false
+end
+
+local function GetDebuffCfg(cfg)
+    if type(cfg) ~= "table" or type(cfg.debuffs) ~= "table" then
+        return {}
+    end
+    return cfg.debuffs
+end
+
+local function DebuffsEnabled(cfg)
+    local debuffs = GetDebuffCfg(cfg)
+    return debuffs.enabled and true or false
+end
+
+local function ShouldTrackDebuffUnit(unit, cfg, debuffCfg)
+    if not ShouldShowUnit(unit, cfg) then
+        return false
+    end
+    if unit == "target" or unit == "player" or unit == "watchtarget" then
+        return true
+    end
+    if string.match(unit or "", "^team%d+$") then
+        return tostring(debuffCfg.tracking_scope or "focus") == "raid"
+    end
+    return false
+end
+
+local function IsDebuffCategoryEnabled(cfg, category)
+    local key = DEBUFF_CATEGORY_SETTINGS[tostring(category or "")]
+    if key == nil then
+        return true
+    end
+    return cfg[key] ~= false
+end
+
+local function FilterDebuffEffects(cfg, effects)
+    if type(effects) ~= "table" or #effects == 0 then
+        return {}
+    end
+    local filtered = {}
+    for _, effect in ipairs(effects) do
+        if type(effect) == "table" and IsDebuffCategoryEnabled(cfg, effect.category) then
+            filtered[#filtered + 1] = effect
+        end
+    end
+    return filtered
+end
+
+local function GetCachedDebuffEffects(state, unit)
+    if DebuffEffects == nil then
+        return {}
+    end
+    local nowMs = SafeUiNowMs()
+    local last = tonumber(state.debuff_last_scan_ms) or 0
+    if type(state.debuff_effects) == "table"
+        and nowMs > 0
+        and last > 0
+        and (nowMs - last) < DEBUFF_SCAN_INTERVAL_MS then
+        return state.debuff_effects
+    end
+    local effects = DebuffEffects.ScanUnit(unit)
+    state.debuff_effects = effects
+    state.debuff_last_scan_ms = nowMs
+    return effects
 end
 
 local function ApplyLayout(frame, cfg)
@@ -606,6 +787,302 @@ local function EnsureFrame(unit)
     return frame
 end
 
+local function CloneSlotStyle(style)
+    if type(style) ~= "table" then
+        return style
+    end
+    local out = {}
+    for key, value in pairs(style) do
+        if type(value) == "table" then
+            local nested = {}
+            for nestedKey, nestedValue in pairs(value) do
+                nested[nestedKey] = nestedValue
+            end
+            out[key] = nested
+        else
+            out[key] = value
+        end
+    end
+    return out
+end
+
+local function GetDebuffSlotStyle(isDispellable)
+    local base = DEBUFF or (SLOT_STYLE ~= nil and (SLOT_STYLE.BUFF or SLOT_STYLE.DEFAULT or SLOT_STYLE.ITEM)) or nil
+    if not isDispellable or type(base) ~= "table" then
+        return base
+    end
+    local style = CloneSlotStyle(base)
+    style.color = {
+        DEBUFF_DISPEL_SLOT_COLOR[1],
+        DEBUFF_DISPEL_SLOT_COLOR[2],
+        DEBUFF_DISPEL_SLOT_COLOR[3],
+        DEBUFF_DISPEL_SLOT_COLOR[4]
+    }
+    return style
+end
+
+local function ApplyDebuffIconStyle(icon, isDispellable)
+    if icon == nil or icon.back == nil or F_SLOT == nil or F_SLOT.ApplySlotSkin == nil then
+        return
+    end
+    local style = GetDebuffSlotStyle(isDispellable == true)
+    if style == nil then
+        return
+    end
+    pcall(function()
+        F_SLOT.ApplySlotSkin(icon, icon.back, style)
+    end)
+end
+
+local function SetDebuffIconPath(icon, path)
+    if icon == nil then
+        return
+    end
+    path = tostring(path or "")
+    if icon.__polar_debuff_icon_path == path then
+        return
+    end
+    icon.__polar_debuff_icon_path = path
+    if path == "" then
+        pcall(function()
+            if icon.SetTexture ~= nil then
+                icon:SetTexture("")
+            end
+            if icon.back ~= nil and icon.back.SetTexture ~= nil then
+                icon.back:SetTexture("")
+            end
+        end)
+        return
+    end
+    pcall(function()
+        if F_SLOT ~= nil and F_SLOT.SetIconBackGround ~= nil then
+            F_SLOT.SetIconBackGround(icon, path)
+        elseif icon.SetIconPath ~= nil then
+            icon:SetIconPath(path)
+        elseif icon.SetTexture ~= nil then
+            icon:SetTexture(path)
+        end
+    end)
+end
+
+local function CreateDebuffIcon(id, parent)
+    if parent == nil then
+        return nil
+    end
+    local icon = nil
+    if type(CreateItemIconButton) == "function" then
+        pcall(function()
+            icon = CreateItemIconButton(id, parent)
+        end)
+    end
+    if icon == nil and api.Interface ~= nil and api.Interface.CreateWidget ~= nil then
+        pcall(function()
+            icon = api.Interface:CreateWidget("button", id, parent)
+        end)
+    end
+    if icon == nil then
+        return nil
+    end
+    SafeClickable(icon, false)
+    SafeShow(icon, false)
+    ApplyDebuffIconStyle(icon, false)
+    return icon
+end
+
+local function CreateDebuffTimerLabel(id, parent)
+    if parent == nil or api.Interface == nil or api.Interface.CreateWidget == nil then
+        return nil
+    end
+    local label = nil
+    pcall(function()
+        label = api.Interface:CreateWidget("label", id, parent)
+    end)
+    if label == nil then
+        return nil
+    end
+    SafeClickable(label, false)
+    SafeShow(label, false)
+    pcall(function()
+        if label.style ~= nil then
+            if label.style.SetAlign ~= nil and ALIGN ~= nil then
+                label.style:SetAlign(ALIGN.CENTER)
+            end
+            if label.style.SetShadow ~= nil then
+                label.style:SetShadow(true)
+            end
+            if label.style.SetColor ~= nil then
+                label.style:SetColor(1, 1, 1, 1)
+            end
+        end
+    end)
+    return label
+end
+
+local function SetDebuffTimerStyle(label, fontSize)
+    if label == nil then
+        return
+    end
+    local size = ClampNumber(fontSize, 8, 24, 11)
+    if label.__polar_debuff_timer_size == size then
+        return
+    end
+    SafeSetExtent(label, 56, size + 6)
+    pcall(function()
+        if label.style ~= nil and label.style.SetFontSize ~= nil then
+            label.style:SetFontSize(size)
+        end
+    end)
+    label.__polar_debuff_timer_size = size
+end
+
+local function EnsureDebuffFrame(unit)
+    if Nameplates.debuff_frames[unit] ~= nil then
+        return Nameplates.debuff_frames[unit]
+    end
+    if api.Interface == nil or api.Interface.CreateEmptyWindow == nil then
+        return nil
+    end
+
+    local frameId = "polarUiPlateDebuffs_" .. unit
+    local frame = api.Interface:CreateEmptyWindow(frameId, "UIParent")
+    if frame == nil then
+        return nil
+    end
+    pcall(function()
+        if frame.SetUILayer ~= nil then
+            frame:SetUILayer("hud")
+        end
+    end)
+    SafeClickable(frame, false)
+    SafeShow(frame, false)
+
+    frame.icons = {}
+    for index = 1, DEBUFF_ICON_COUNT do
+        local icon = CreateDebuffIcon(frameId .. ".icon" .. tostring(index), frame)
+        local timer = CreateDebuffTimerLabel(frameId .. ".timer" .. tostring(index), icon)
+        frame.icons[index] = {
+            icon = icon,
+            timer = timer
+        }
+    end
+
+    Nameplates.debuff_frames[unit] = frame
+    return frame
+end
+
+local function PositionDebuffFrame(frame, cfg, rowWidth, rowHeight, screenX, screenY)
+    local anchor = tostring(cfg.anchor or "top")
+    local gap = ClampNumber(cfg.gap, 0, 12, 4)
+    local offsetX = ClampNumber(cfg.offset_x, -120, 120, 0)
+    local offsetY = ClampNumber(cfg.offset_y, -120, 120, -8)
+    local rootX = screenX - (rowWidth / 2) + offsetX
+    local rootY = screenY - rowHeight - gap + offsetY
+
+    if anchor == "left" then
+        rootX = screenX - rowWidth - gap + offsetX
+        rootY = screenY - (rowHeight / 2) + offsetY
+    elseif anchor == "right" then
+        rootX = screenX + gap + offsetX
+        rootY = screenY - (rowHeight / 2) + offsetY
+    end
+
+    SafeSetExtent(frame, rowWidth, rowHeight)
+    SafeSetAnchorTopLeft(frame, RoundPixel(rootX), RoundPixel(rootY))
+end
+
+local function LayoutDebuffIcons(frame, cfg, count)
+    local anchor = tostring(cfg.anchor or "top")
+    local iconSize = ClampNumber(cfg.icon_size, 16, 48, 30)
+    local secondarySize = ClampNumber(cfg.secondary_icon_size, 10, 32, 18)
+    secondarySize = math.min(secondarySize, math.max(10, iconSize - 4))
+    local gap = ClampNumber(cfg.gap, 0, 12, 4)
+    local rowWidth = iconSize
+    if count > 1 then
+        rowWidth = iconSize + ((count - 1) * (secondarySize + gap))
+    end
+    local rowHeight = iconSize
+
+    local primaryX = anchor == "left" and (rowWidth - iconSize) or 0
+    local layoutKey = table.concat({
+        tostring(anchor),
+        tostring(count),
+        tostring(iconSize),
+        tostring(secondarySize),
+        tostring(gap)
+    }, ":")
+    if frame.__polar_debuff_layout_key ~= layoutKey then
+        for index, entry in ipairs(frame.icons or {}) do
+            local icon = entry.icon
+            if icon ~= nil then
+                local size = index == 1 and iconSize or secondarySize
+                local x = primaryX
+                if index > 1 then
+                    if anchor == "left" then
+                        x = primaryX - ((index - 1) * (secondarySize + gap))
+                    else
+                        x = iconSize + gap + ((index - 2) * (secondarySize + gap))
+                    end
+                end
+                local y = index == 1 and 0 or RoundPixel((iconSize - secondarySize) / 2)
+                SafeSetExtent(icon, size, size)
+                SafeAnchor(icon, "TOPLEFT", frame, "TOPLEFT", RoundPixel(x), y)
+                if entry.timer ~= nil then
+                    SafeAnchor(entry.timer, "CENTER", icon, "CENTER", 0, 0)
+                end
+            end
+        end
+        frame.__polar_debuff_layout_key = layoutKey
+    end
+
+    return rowWidth, rowHeight
+end
+
+local function UpdateDebuffWidgets(frame, cfg, effects, screenX, screenY)
+    if frame == nil or type(frame.icons) ~= "table" then
+        return false
+    end
+
+    effects = FilterDebuffEffects(cfg, effects)
+    if type(effects) ~= "table" or #effects == 0 then
+        for _, entry in ipairs(frame.icons) do
+            SafeShow(entry.icon, false)
+            SafeShow(entry.timer, false)
+        end
+        SafeShow(frame, false)
+        return false
+    end
+
+    local maxIcons = ClampNumber(cfg.max_icons, 1, DEBUFF_ICON_COUNT, 4)
+    if cfg.show_secondary == false then
+        maxIcons = 1
+    end
+    local count = math.min(#effects, maxIcons, #frame.icons)
+    local rowWidth, rowHeight = LayoutDebuffIcons(frame, cfg, count)
+    PositionDebuffFrame(frame, cfg, rowWidth, rowHeight, screenX, screenY)
+
+    for index, entry in ipairs(frame.icons) do
+        local effect = effects[index]
+        if index <= count and effect ~= nil then
+            ApplyDebuffIconStyle(entry.icon, effect.dispellable == true)
+            SetDebuffIconPath(entry.icon, effect.path)
+            SafeShow(entry.icon, true)
+            if cfg.show_timer ~= false and entry.timer ~= nil then
+                SetDebuffTimerStyle(entry.timer, cfg.timer_font_size)
+                SafeSetText(entry.timer, string.format("%.1f", math.max(0, (tonumber(effect.time_left_ms) or 0) / 1000)))
+                SafeShow(entry.timer, true)
+            else
+                SafeShow(entry.timer, false)
+            end
+        else
+            SafeShow(entry.icon, false)
+            SafeShow(entry.timer, false)
+        end
+    end
+
+    SafeShow(frame, true)
+    return true
+end
+
 local function GetCfg(settings)
     if type(settings) ~= "table" or type(settings.nameplates) ~= "table" then
         return {}
@@ -622,6 +1099,7 @@ local function RefreshStaticState(state, id, unit, cfg)
         state.unit_id = id
         state.name = ""
         state.guild = ""
+        state.family = ""
         state.is_character = true
         state.next_info_retry_tick = 0
     end
@@ -650,11 +1128,78 @@ local function RefreshStaticState(state, id, unit, cfg)
     if infoName ~= "" then
         state.name = infoName
     end
-    state.guild = tostring(info.expeditionName or "")
+    state.guild = TrimText(info.expeditionName or info.guildName or info.guild or "")
+    state.family = TrimText(info.family_name or "")
     if info.type ~= nil then
         state.is_character = (tostring(info.type) == "character")
     end
     state.next_info_retry_tick = math.huge
+end
+
+local function UpdateDebuffsForUnit(unit, settings)
+    unit = NormalizeUnitToken(unit)
+    if unit == nil then
+        return
+    end
+
+    local state = GetUnitState(unit)
+    local cfg = GetCfg(settings)
+    local debuffCfg = GetDebuffCfg(cfg)
+    if not (Nameplates.enabled and DebuffsEnabled(cfg)) then
+        HideDebuffs(unit, state)
+        return
+    end
+    if not ShouldTrackDebuffUnit(unit, cfg, debuffCfg) then
+        HideDebuffs(unit, state)
+        return
+    end
+
+    local id = nil
+    pcall(function()
+        id = api.Unit:GetUnitId(unit)
+    end)
+    if NormalizeUnitId(id) == nil then
+        HideDebuffs(unit, state)
+        return
+    end
+
+    local offsetX = nil
+    local offsetY = nil
+    local offsetZ = nil
+    if api.Unit.GetUnitScreenNameTagOffset ~= nil then
+        pcall(function()
+            offsetX, offsetY, offsetZ = api.Unit:GetUnitScreenNameTagOffset(unit)
+        end)
+    end
+    if offsetX == nil or offsetY == nil or offsetZ == nil then
+        pcall(function()
+            offsetX, offsetY, offsetZ = api.Unit:GetUnitScreenPosition(unit)
+        end)
+    end
+    if offsetX == nil or offsetY == nil or offsetZ == nil or offsetZ < 0 then
+        HideDebuffs(unit, state)
+        return
+    end
+
+    local dist = nil
+    pcall(function()
+        if api.Unit.UnitDistance ~= nil then
+            dist = api.Unit:UnitDistance(unit)
+        end
+    end)
+    local maxDist = ClampNumber(cfg.max_distance, 1, 500, 130)
+    if type(dist) == "number" and dist > maxDist then
+        HideDebuffs(unit, state)
+        return
+    end
+
+    local frame = EnsureDebuffFrame(unit)
+    if frame == nil then
+        return
+    end
+
+    local shown = UpdateDebuffWidgets(frame, debuffCfg, GetCachedDebuffEffects(state, unit), RoundPixel(offsetX), RoundPixel(offsetY))
+    state.debuff_visible = shown and true or false
 end
 
 local function UpdateOne(unit, settings)
@@ -761,10 +1306,11 @@ local function UpdateOne(unit, settings)
     RefreshStaticState(state, id, unit, cfg)
     SafeSetText(frame.nameLabel, state.name or "")
 
-    if cfg.show_guild and state.is_character and state.guild ~= "" then
+    local guildText = FormatGuildFamilyText(state.guild, state.family)
+    if cfg.show_guild and state.is_character and guildText ~= "" then
         ApplyGuildTextColor(frame.guildLabel, cfg, state.guild)
         SafeShow(frame.guildLabel, true)
-        SafeSetText(frame.guildLabel, "<" .. state.guild .. ">")
+        SafeSetText(frame.guildLabel, guildText)
     else
         ApplyGuildTextColor(frame.guildLabel, cfg, nil)
         SafeSetText(frame.guildLabel, "")
@@ -828,9 +1374,8 @@ end
 Nameplates.SetEnabled = function(enabled)
     Nameplates.enabled = enabled and true or false
     if not Nameplates.enabled then
-        for _, frame in pairs(Nameplates.frames) do
-            SafeShow(frame, false)
-        end
+        HideAllFrames()
+        HideAllDebuffs()
     end
 end
 
@@ -839,17 +1384,22 @@ Nameplates.OnUpdate = function(settings)
         return
     end
     if Compat ~= nil and not Compat.NameplatesSupported() then
-        for _, frame in pairs(Nameplates.frames) do
-            SafeShow(frame, false)
-        end
+        HideAllFrames()
+        HideAllDebuffs()
         return
     end
 
     local cfg = GetCfg(settings)
-    if not (Nameplates.enabled and cfg.enabled) then
-        for _, frame in pairs(Nameplates.frames) do
-            SafeShow(frame, false)
-        end
+    local customEnabled = Nameplates.enabled and cfg.enabled
+    local debuffsEnabled = Nameplates.enabled and DebuffsEnabled(cfg)
+
+    if not customEnabled then
+        HideAllFrames()
+    end
+    if not debuffsEnabled then
+        HideAllDebuffs()
+    end
+    if not customEnabled and not debuffsEnabled then
         return
     end
 
@@ -858,8 +1408,13 @@ Nameplates.OnUpdate = function(settings)
     local processed = {}
     for _, unit in ipairs(Nameplates.unit_keys) do
         local state = GetUnitState(unit)
-        if FAST_UNITS[unit] or state.visible then
-            UpdateOne(unit, settings)
+        if FAST_UNITS[unit] or state.visible or state.debuff_visible then
+            if customEnabled then
+                UpdateOne(unit, settings)
+            end
+            if debuffsEnabled then
+                UpdateDebuffsForUnit(unit, settings)
+            end
             processed[unit] = true
         end
     end
@@ -882,8 +1437,13 @@ Nameplates.OnUpdate = function(settings)
 
         if not processed[unit] then
             local state = GetUnitState(unit)
-            if not state.visible then
-                UpdateOne(unit, settings)
+            if not state.visible and not state.debuff_visible then
+                if customEnabled then
+                    UpdateOne(unit, settings)
+                end
+                if debuffsEnabled then
+                    UpdateDebuffsForUnit(unit, settings)
+                end
                 processedHidden = processedHidden + 1
             end
         end
@@ -901,7 +1461,16 @@ Nameplates.Unload = function()
             end
         end)
     end
+    for _, frame in pairs(Nameplates.debuff_frames) do
+        SafeShow(frame, false)
+        pcall(function()
+            if api.Interface ~= nil and api.Interface.Free ~= nil and frame ~= nil then
+                api.Interface:Free(frame)
+            end
+        end)
+    end
     Nameplates.frames = {}
+    Nameplates.debuff_frames = {}
     Nameplates.settings = nil
     Nameplates.target_unitframe = nil
     Nameplates.unit_keys = {}

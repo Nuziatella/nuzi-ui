@@ -15,6 +15,11 @@ local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
         label_font_size = 14,
         label_color = { 255, 255, 255, 255 },
         display_mode = "both",
+        display_style = "icons",
+        bar_width = 180,
+        bar_height = 14,
+        bar_fill_color = { 207, 74, 22, 255 },
+        bar_bg_color = { 18, 18, 18, 220 },
         tracked_buffs = {}
     },
     target = {
@@ -32,6 +37,11 @@ local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
         label_font_size = 14,
         label_color = { 255, 255, 255, 255 },
         display_mode = "both",
+        display_style = "icons",
+        bar_width = 180,
+        bar_height = 14,
+        bar_fill_color = { 207, 74, 22, 255 },
+        bar_bg_color = { 18, 18, 18, 220 },
         cache_timeout_s = 300,
         tracked_buffs = {}
     },
@@ -50,6 +60,11 @@ local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
         label_font_size = 14,
         label_color = { 255, 255, 255, 255 },
         display_mode = "both",
+        display_style = "icons",
+        bar_width = 180,
+        bar_height = 14,
+        bar_fill_color = { 207, 74, 22, 255 },
+        bar_bg_color = { 18, 18, 18, 220 },
         tracked_buffs = {}
     },
     watchtarget = {
@@ -67,6 +82,11 @@ local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
         label_font_size = 14,
         label_color = { 255, 255, 255, 255 },
         display_mode = "both",
+        display_style = "icons",
+        bar_width = 180,
+        bar_height = 14,
+        bar_fill_color = { 207, 74, 22, 255 },
+        bar_bg_color = { 18, 18, 18, 220 },
         tracked_buffs = {}
     },
     target_of_target = {
@@ -84,6 +104,11 @@ local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
         label_font_size = 14,
         label_color = { 255, 255, 255, 255 },
         display_mode = "both",
+        display_style = "icons",
+        bar_width = 180,
+        bar_height = 14,
+        bar_fill_color = { 207, 74, 22, 255 },
+        bar_bg_color = { 18, 18, 18, 220 },
         tracked_buffs = {}
     }
 }
@@ -161,6 +186,14 @@ function SettingsCommon.NormalizeCooldownDisplayMode(rawMode)
     return "both"
 end
 
+function SettingsCommon.NormalizeCooldownDisplayStyle(rawStyle)
+    local style = string.lower(tostring(rawStyle or "icons"))
+    if style == "bars" or style == "bar" then
+        return "bars"
+    end
+    return "icons"
+end
+
 function SettingsCommon.NormalizeCooldownTrackedEntry(raw)
     local id = nil
     local kind = "any"
@@ -220,6 +253,11 @@ function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)
             label_font_size = 14,
             label_color = { 255, 255, 255, 255 },
             display_mode = "both",
+            display_style = "icons",
+            bar_width = 180,
+            bar_height = 14,
+            bar_fill_color = { 207, 74, 22, 255 },
+            bar_bg_color = { 18, 18, 18, 220 },
             tracked_buffs = {}
         }
         EnsureTableDefault(s.cooldown_tracker.units, key, defaults)
@@ -228,6 +266,9 @@ function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)
         end
         s.cooldown_tracker.units[key].display_mode = SettingsCommon.NormalizeCooldownDisplayMode(
             s.cooldown_tracker.units[key].display_mode
+        )
+        s.cooldown_tracker.units[key].display_style = SettingsCommon.NormalizeCooldownDisplayStyle(
+            s.cooldown_tracker.units[key].display_style
         )
     end
 end

@@ -92,6 +92,12 @@ local CASTBAR_FILL_STYLE_ITEMS = {
     "Solid"
 }
 
+local DEBUFF_ANCHOR_ITEMS = {
+    "Top",
+    "Left",
+    "Right"
+}
+
 SettingsSchema.PAGES = {
     general = {
         sections = {
@@ -130,7 +136,7 @@ SettingsSchema.PAGES = {
                 title = "Repair Actions",
                 hint = "Use these when frames are off screen, drifting, or look wrong after changing UI scale.",
                 fields = {
-                    custom("ui_repair_actions", { estimate_height = 190 })
+                    custom("ui_repair_actions", { estimate_height = 254 })
                 }
             }
         }
@@ -222,7 +228,7 @@ SettingsSchema.PAGES = {
                 title = "Target Overlay Fields",
                 hint = "Choose which extra target details remain visible on the overlay.",
                 fields = {
-                    checkbox("target_guild_visible", "polarUiTargetGuildVisible", "Show guild text"),
+                    checkbox("target_guild_visible", "polarUiTargetGuildVisible", "Show guild/family text"),
                     checkbox("target_class_visible", "polarUiTargetClassVisible", "Show class text"),
                     checkbox("target_pdef_visible", "polarUiTargetPdefVisible", "Show PDEF text"),
                     checkbox("target_mdef_visible", "polarUiTargetMdefVisible", "Show MDEF text"),
@@ -269,7 +275,7 @@ SettingsSchema.PAGES = {
             {
                 id = "text_value_offsets",
                 title = "HP/MP Value Offsets",
-                hint = "Fine tune where the HP, MP, and target guild text sit on the frame.",
+                hint = "Fine tune where the HP, MP, and target guild/family text sit on the frame.",
                 fields = {
                     slider("hp_value_offset_x", "polarUiHpValueOffsetX", "HP value offset X", -200, 200, 1),
                     slider("hp_value_offset_y", "polarUiHpValueOffsetY", "HP value offset Y", -120, 120, 1),
@@ -670,6 +676,144 @@ SettingsSchema.PAGES = {
             }
         }
     },
+    travel = {
+        sections = {
+            {
+                id = "travel_behavior",
+                title = "Travel Speed",
+                hint = "Show a compact ArcheAge-style speed meter for vehicles and general movement.",
+                fields = {
+                    checkbox("travel_speed_enabled", "polarUiTravelSpeedEnabled", "Enable travel speed meter"),
+                    hint(
+                        "travel_speed_move_hint",
+                        "polarUiTravelSpeedMoveHint",
+                        "Use Shift + drag in game to move the speed meter. Position saves automatically.",
+                        { width = 520, depends_on = { control = "travel_speed_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "travel_speed_lock_position",
+                        "polarUiTravelSpeedLockPosition",
+                        "Lock speed meter position",
+                        { depends_on = { control = "travel_speed_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "travel_speed_only_vehicle_or_mount",
+                        "polarUiTravelSpeedOnlyVehicleOrMount",
+                        "Only show on vehicle or mount",
+                        { depends_on = { control = "travel_speed_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "travel_speed_show_bar",
+                        "polarUiTravelSpeedShowBar",
+                        "Show speed bar",
+                        { depends_on = { control = "travel_speed_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "travel_speed_show_state_text",
+                        "polarUiTravelSpeedShowStateText",
+                        "Show state text",
+                        { depends_on = { control = "travel_speed_enabled", checked = true } }
+                    )
+                }
+            },
+            {
+                id = "travel_layout",
+                title = "Layout",
+                hint = "Tune the compact travel speed panel without changing the rest of the UI.",
+                fields = {
+                    slider(
+                        "travel_speed_width",
+                        "polarUiTravelSpeedWidth",
+                        "Panel width",
+                        160,
+                        360,
+                        1,
+                        { depends_on = { control = "travel_speed_enabled", checked = true } }
+                    ),
+                    slider(
+                        "travel_speed_scale",
+                        "polarUiTravelSpeedScale",
+                        "Panel scale (75-160)",
+                        75,
+                        160,
+                        1,
+                        { depends_on = { control = "travel_speed_enabled", checked = true } }
+                    ),
+                    slider(
+                        "travel_speed_font_size",
+                        "polarUiTravelSpeedFontSize",
+                        "Speed text size",
+                        14,
+                        30,
+                        1,
+                        { depends_on = { control = "travel_speed_enabled", checked = true } }
+                    )
+                }
+            }
+        }
+    },
+    loadouts = {
+        sections = {
+            {
+                id = "loadouts_behavior",
+                title = "Gear Loadouts",
+                hint = "Show a per-character loadout bar and editor for saving gear sets.",
+                fields = {
+                    checkbox("gear_loadouts_enabled", "polarUiGearLoadoutsEnabled", "Enable gear loadouts"),
+                    hint(
+                        "gear_loadouts_move_hint",
+                        "polarUiGearLoadoutsMoveHint",
+                        "Use Shift + drag in game to move the bar or editor. Positions save automatically.",
+                        { width = 520, depends_on = { control = "gear_loadouts_enabled", checked = true } }
+                    ),
+                    custom("gear_loadouts_editor_button", { estimate_height = 34 }),
+                    checkbox(
+                        "gear_loadouts_lock_bar",
+                        "polarUiGearLoadoutsLockBar",
+                        "Lock loadout bar position",
+                        { depends_on = { control = "gear_loadouts_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "gear_loadouts_lock_editor",
+                        "polarUiGearLoadoutsLockEditor",
+                        "Lock editor position",
+                        { depends_on = { control = "gear_loadouts_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "gear_loadouts_show_icons",
+                        "polarUiGearLoadoutsShowIcons",
+                        "Show loadout icons on bar",
+                        { depends_on = { control = "gear_loadouts_enabled", checked = true } }
+                    )
+                }
+            },
+            {
+                id = "loadouts_layout",
+                title = "Bar Layout",
+                hint = "Tune the clickable loadout bar without changing saved loadouts.",
+                fields = {
+                    slider(
+                        "gear_loadouts_button_size",
+                        "polarUiGearLoadoutsButtonSize",
+                        "Icon size",
+                        28,
+                        58,
+                        1,
+                        { depends_on = { control = "gear_loadouts_enabled", checked = true } }
+                    ),
+                    slider(
+                        "gear_loadouts_button_width",
+                        "polarUiGearLoadoutsButtonWidth",
+                        "Name button width",
+                        80,
+                        220,
+                        1,
+                        { depends_on = { control = "gear_loadouts_enabled", checked = true } }
+                    )
+                }
+            }
+        }
+    },
     auras = {
         sections = {
             {
@@ -720,7 +864,7 @@ SettingsSchema.PAGES = {
                     checkbox("plates_show_raid_party", "polarUiPlatesShowRaid", "Show raid/party (team1..team50)"),
                     checkbox("plates_show_watchtarget", "polarUiPlatesShowWatch", "Show watchtarget"),
                     checkbox("plates_show_mount", "polarUiPlatesShowMount", "Show mount/pet (playerpet1)"),
-                    checkbox("plates_show_guild", "polarUiPlatesShowGuild", "Show guild/expedition"),
+                    checkbox("plates_show_guild", "polarUiPlatesShowGuild", "Show guild/family"),
                     label(
                         "plates_runtime_note",
                         "polarUiPlatesRuntimeNote",
@@ -750,10 +894,118 @@ SettingsSchema.PAGES = {
             {
                 id = "plates_text",
                 title = "Text",
-                hint = "Adjust the font size used for names and guild text on overhead plates.",
+                hint = "Adjust the font size used for names and guild/family text on overhead plates.",
                 fields = {
                     slider("plates_name_fs", "polarUiPlatesNameFontSize", "Name font size", 6, 32, 1),
                     slider("plates_guild_fs", "polarUiPlatesGuildFontSize", "Guild font size", 6, 32, 1)
+                }
+            },
+            {
+                id = "plates_debuffs",
+                title = "Debuffs",
+                hint = "Show Gharka-style priority debuffs near the stock overhead nameplate.",
+                fields = {
+                    checkbox("plates_debuffs_enabled", "polarUiPlatesDebuffsEnabled", "Enable stock-nameplate debuffs"),
+                    checkbox(
+                        "plates_debuffs_track_raid",
+                        "polarUiPlatesDebuffsTrackRaid",
+                        "Track raid/party units",
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "plates_debuffs_show_timer",
+                        "polarUiPlatesDebuffsShowTimer",
+                        "Show timers",
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "plates_debuffs_show_secondary",
+                        "polarUiPlatesDebuffsShowSecondary",
+                        "Show secondary icons",
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    combo(
+                        "plates_debuffs_anchor",
+                        "polarUiPlatesDebuffsAnchor",
+                        "Anchor",
+                        DEBUFF_ANCHOR_ITEMS,
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true }, width = 160 }
+                    ),
+                    slider(
+                        "plates_debuffs_max_icons",
+                        "polarUiPlatesDebuffsMaxIcons",
+                        "Max icons",
+                        1,
+                        4,
+                        1,
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    slider(
+                        "plates_debuffs_icon_size",
+                        "polarUiPlatesDebuffsIconSize",
+                        "Main size",
+                        16,
+                        48,
+                        1,
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    slider(
+                        "plates_debuffs_secondary_size",
+                        "polarUiPlatesDebuffsSecondarySize",
+                        "Small size",
+                        10,
+                        32,
+                        1,
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    slider(
+                        "plates_debuffs_timer_size",
+                        "polarUiPlatesDebuffsTimerSize",
+                        "Timer size",
+                        8,
+                        24,
+                        1,
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    slider(
+                        "plates_debuffs_gap",
+                        "polarUiPlatesDebuffsGap",
+                        "Gap",
+                        0,
+                        12,
+                        1,
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    slider(
+                        "plates_debuffs_offset_x",
+                        "polarUiPlatesDebuffsOffsetX",
+                        "Offset X",
+                        -120,
+                        120,
+                        1,
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    slider(
+                        "plates_debuffs_offset_y",
+                        "polarUiPlatesDebuffsOffsetY",
+                        "Offset Y",
+                        -120,
+                        120,
+                        1,
+                        { depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    label(
+                        "plates_debuffs_categories_label",
+                        "polarUiPlatesDebuffsCategoriesLabel",
+                        "Categories",
+                        { font_size = 15, advance = 28, depends_on = { control = "plates_debuffs_enabled", checked = true } }
+                    ),
+                    checkbox("plates_debuffs_show_hard", "polarUiPlatesDebuffsShowHard", "Hard CC", { depends_on = { control = "plates_debuffs_enabled", checked = true } }),
+                    checkbox("plates_debuffs_show_silence", "polarUiPlatesDebuffsShowSilence", "Silence / disarm", { depends_on = { control = "plates_debuffs_enabled", checked = true } }),
+                    checkbox("plates_debuffs_show_root", "polarUiPlatesDebuffsShowRoot", "Root / snare", { depends_on = { control = "plates_debuffs_enabled", checked = true } }),
+                    checkbox("plates_debuffs_show_slow", "polarUiPlatesDebuffsShowSlow", "Slows", { depends_on = { control = "plates_debuffs_enabled", checked = true } }),
+                    checkbox("plates_debuffs_show_dot", "polarUiPlatesDebuffsShowDot", "DoTs", { depends_on = { control = "plates_debuffs_enabled", checked = true } }),
+                    checkbox("plates_debuffs_show_misc", "polarUiPlatesDebuffsShowMisc", "Misc CC", { depends_on = { control = "plates_debuffs_enabled", checked = true } })
                 }
             },
             {

@@ -8,6 +8,8 @@ Because the stock frames are fine right up until you actually want them to look 
 
 - styles the stock `player`, `target`, `watchtarget`, `target of target`, and stock `party` frames
 - adds an optional movable player cast bar built on the stock X2 casting widget
+- adds an optional travel speed meter for vehicles, mounts, gliders, and on-foot movement
+- adds optional per-character gear loadouts with a clickable swap bar and drag/drop editor
 - supports optional custom nameplates with matching layout controls
 - adds tracked cooldown and effect windows for `player`, `target`, `mount/pet`, `watchtarget`, and `target of target`
 - includes target overlay extras, aura layout controls, and a movable launcher icon
@@ -27,7 +29,7 @@ Saved data lives in `nuzi-ui/.data` so your layout, cooldown tracking, and setti
 1. Open the `Nuzi UI` settings from the launcher icon.
 2. Pick which frame group you want to edit and adjust text, bars, auras, or plates.
 3. Enable only the overlays you actually want visible.
-4. If you want a player cast bar, enable it on the `Cast Bar` page and move it with `Shift + drag`.
+4. If you want a player cast bar, travel speed meter, or gear loadouts, enable them on their pages and move them with `Shift + drag`.
 5. If you use cooldown tracking, add effects by ID, search, or scan and place each tracker where it fits your UI.
 6. If frames look wrong after changing UI scale, open `UI Repair` and use Refresh, Reset Frames, or Center Frames.
 
@@ -65,7 +67,10 @@ You can:
 - track buffs or debuffs on `player`, `target`, `mount/pet`, `watchtarget`, and `target of target`
 - add tracked effects by ID, by search, or by scanning a unit
 - show active effects, missing effects, or both
+- switch each tracker between compact icons and icon-plus-bar rows
 - attach non-player trackers near their nameplate and move them with offsets
+
+Mount and glider ability buttons use internal client cooldown APIs that are not exposed to addons. Track their visible buff/debuff effects through `player` or `mount/pet`; direct mount/glider action cooldown rows need a client API hook first.
 
 ### Cast Bar
 
@@ -80,6 +85,30 @@ You can:
 - move it with `Shift + drag`
 - lock its position once it is where you want it
 
+### Travel Speed
+
+The travel page adds a compact speed meter styled to sit with the ArcheAge HUD.
+
+You can:
+
+- show live vehicle speed when the siege/vehicle API reports it
+- fall back to movement speed measured from player world-position deltas
+- resize and scale the panel
+- move it with `Shift + drag`
+- lock its position once it is where you want it
+
+### Gear Loadouts
+
+The loadouts page enables a per-character gear swap bar and in-game editor.
+
+You can:
+
+- create, name, save, and delete gear loadouts per character
+- drag bag gear onto character-style equipment slots in the editor
+- save the currently equipped gear into the selected loadout
+- show loadout buttons as names or chosen item icons
+- warn on missing items or slot mismatches before a swap runs
+
 ### Settings And Backups
 
 The settings window also handles profile safety tools.
@@ -87,7 +116,7 @@ The settings window also handles profile safety tools.
 You can:
 
 - check your current screen size and UI scale on the `UI Repair` page
-- reset saved frame, cast bar, launcher, nameplate, or cooldown positions
+- reset saved frame, cast bar, travel speed, loadout, launcher, nameplate, or cooldown positions
 - save backups
 - list previous backups
 - import a backup by index
@@ -95,7 +124,7 @@ You can:
 
 ## Notes
 
-- The launcher icon, settings window, overlays, cooldown trackers, and cast bar all save their positions.
+- The launcher icon, settings window, overlays, cooldown trackers, cast bar, travel speed meter, and loadout UI all save their positions.
 - Cooldown tracker windows for non-player units use nameplate-relative offsets instead of fixed screen coordinates.
 - Backup files live in `.data/backups`.
 - Moving addon windows follows the same `Shift + drag` behavior as the other Nuzi addons.

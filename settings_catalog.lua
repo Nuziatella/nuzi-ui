@@ -38,6 +38,18 @@ SettingsCatalog.PAGES = {
         summary = "Movable player cast bar with customizable colors, text, and textures."
     },
     {
+        id = "travel",
+        label = "Travel",
+        title = "Travel Speed",
+        summary = "Movable speed meter for vehicles, mounts, gliders, and on-foot travel."
+    },
+    {
+        id = "loadouts",
+        label = "Loadouts",
+        title = "Gear Loadouts",
+        summary = "Per-character gear loadout bar with a drag/drop equipment editor."
+    },
+    {
         id = "auras",
         label = "Auras",
         title = "Auras",
@@ -47,7 +59,7 @@ SettingsCatalog.PAGES = {
         id = "plates",
         label = "Nameplates",
         title = "Nameplates",
-        summary = "Visibility rules, offsets, colors, and runtime nameplate behavior."
+        summary = "Visibility rules, offsets, debuff icons, colors, and runtime nameplate behavior."
     },
     {
         id = "cooldown",

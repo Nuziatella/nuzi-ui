@@ -3,15 +3,21 @@ local SafeRequire = require("nuzi-ui/safe_require")
 
 local Nameplates = SafeRequire("nuzi-ui/nameplates", "nuzi-ui.nameplates")
 local Runtime = SafeRequire("nuzi-ui/runtime", "nuzi-ui.runtime")
+local Layout = SafeRequire("nuzi-ui/layout", "nuzi-ui.layout")
 local AlignmentModule = SafeRequire("nuzi-ui/ui_alignment", "nuzi-ui.ui_alignment")
 local TargetExtrasModule = SafeRequire("nuzi-ui/ui_target_extras", "nuzi-ui.ui_target_extras")
 local CooldownTracker = SafeRequire("nuzi-ui/cooldown_tracker", "nuzi-ui.cooldown_tracker")
 local CastBar = SafeRequire("nuzi-ui/castbar", "nuzi-ui.castbar")
+local TravelSpeed = SafeRequire("nuzi-ui/travel_speed", "nuzi-ui.travel_speed")
+local GearLoadouts = SafeRequire("nuzi-ui/gear_loadouts", "nuzi-ui.gear_loadouts")
 local SettingsStore = SafeRequire("nuzi-ui/settings_store", "nuzi-ui.settings_store")
 
 local function AnchorTopLeft(wnd, x, y)
     if wnd == nil or wnd.AddAnchor == nil then
         return false
+    end
+    if Layout ~= nil and type(Layout.AnchorTopLeftScreen) == "function" then
+        return Layout.AnchorTopLeftScreen(wnd, x, y, false)
     end
 
     local anchored = false
@@ -693,21 +699,28 @@ local function GetOrCreatePosTable(settings, key)
 end
 
 local function SafeGetOffset(wnd)
+    if Layout ~= nil and type(Layout.ReadScreenOffset) == "function" then
+        return Layout.ReadScreenOffset(wnd)
+    end
+    local ok, x, y = pcall(function()
+        return wnd:GetEffectiveOffset()
+    end)
+    if ok and tonumber(x) ~= nil and tonumber(y) ~= nil then
+        return tonumber(x), tonumber(y)
+    end
     if wnd == nil or wnd.GetOffset == nil then
         return nil, nil
     end
-    local ok, x, y = pcall(function()
+    ok, x, y = pcall(function()
         return wnd:GetOffset()
     end)
-    if not ok then
+    if not ok or tonumber(x) == nil or tonumber(y) == nil then
         return nil, nil
     end
-    x = tonumber(x)
-    y = tonumber(y)
-    if x == nil or y == nil then
-        return nil, nil
+    if Layout ~= nil and type(Layout.ToScreen) == "function" then
+        return Layout.ToScreen(x), Layout.ToScreen(y)
     end
-    return x, y
+    return tonumber(x), tonumber(y)
 end
 
 local function SaveSettingsToFile(settings)
@@ -861,16 +874,20 @@ local function SetFramePositionHook(frame, settings, key, defaultX, defaultY)
     end)
 end
 
+local SyncUnitFrameDragState
+
 local function HookUnitFrameDrag(wnd, settings, key)
     if wnd == nil or type(settings) ~= "table" then
         return
     end
+    wnd.__polar_drag_settings = settings
     local hookTarget = wnd
     if wnd.eventWindow ~= nil then
         hookTarget = wnd.eventWindow
     end
 
     local hookTargets = { hookTarget }
+    wnd.__polar_drag_targets = hookTargets
 
     if not wnd.__polar_drag_hooked then
         wnd.__polar_drag_hooked = true
@@ -885,7 +902,8 @@ local function HookUnitFrameDrag(wnd, settings, key)
         end
 
         wnd.__polar_drag_start = function(self, ...)
-            if settings.drag_requires_shift then
+            local activeSettings = wnd.__polar_drag_settings or settings
+            if activeSettings.drag_requires_shift then
                 if api.Input ~= nil and api.Input.IsShiftKeyDown ~= nil and not api.Input:IsShiftKeyDown() then
                     return
                 end
@@ -960,13 +978,14 @@ local function HookUnitFrameDrag(wnd, settings, key)
                 return
             end
 
-            local pos = GetOrCreatePosTable(settings, key)
+            local activeSettings = wnd.__polar_drag_settings or settings
+            local pos = GetOrCreatePosTable(activeSettings, key)
             if pos == nil then
                 return
             end
             pos.x = saveX
             pos.y = saveY
-            SaveSettingsToFile(settings)
+            SaveSettingsToFile(activeSettings)
 
             wnd.__polar_last_pos_x = saveX
             wnd.__polar_last_pos_y = saveY
@@ -982,11 +1001,38 @@ local function HookUnitFrameDrag(wnd, settings, key)
             if t ~= nil and t.RegisterForDrag ~= nil then
                 t:RegisterForDrag("LeftButton")
             end
-            if t ~= nil and t.EnableDrag ~= nil then
-                t:EnableDrag(true)
-            end
         end
     end)
+    SyncUnitFrameDragState(wnd, settings)
+end
+
+SyncUnitFrameDragState = function(wnd, settings)
+    if wnd == nil or type(wnd.__polar_drag_targets) ~= "table" then
+        return
+    end
+
+    local enabled = UI.enabled and type(settings) == "table"
+    if enabled and settings.drag_requires_shift then
+        enabled = api.Input ~= nil and api.Input.IsShiftKeyDown ~= nil and api.Input:IsShiftKeyDown() and true or false
+    end
+
+    for _, t in ipairs(wnd.__polar_drag_targets) do
+        if t ~= nil and t.EnableDrag ~= nil and t.__polar_drag_enabled ~= enabled then
+            local ok = pcall(function()
+                t:EnableDrag(enabled)
+            end)
+            if ok then
+                t.__polar_drag_enabled = enabled
+            end
+        end
+    end
+end
+
+local function SyncAllUnitFrameDragState(settings)
+    SyncUnitFrameDragState(UI.player.wnd, settings)
+    SyncUnitFrameDragState(UI.target.wnd, settings)
+    SyncUnitFrameDragState(UI.watchtarget.wnd, settings)
+    SyncUnitFrameDragState(UI.target_of_target.wnd, settings)
 end
 
 local function GetStockContent(contentId)
@@ -1979,10 +2025,18 @@ local function RefreshTargetReputationButton(frame)
         local ok, value = pcall(function()
             return X2Hero:CanAddReputation()
         end)
+        if not ok then
+            ok, value = pcall(function()
+                return X2Hero.CanAddReputation()
+            end)
+        end
         canVote = ok and value and true or false
     end
 
     pcall(function()
+        if button.SetAlpha ~= nil then
+            button:SetAlpha(canVote and 1 or 0)
+        end
         local visible = nil
         if button.IsVisible ~= nil then
             visible = button:IsVisible() and true or false
@@ -1995,6 +2049,7 @@ local function RefreshTargetReputationButton(frame)
 
     if not canVote then
         button.__polar_reputation_anchor_target = nil
+        button.__polar_reputation_anchor_key = nil
         return
     end
 
@@ -2002,10 +2057,37 @@ local function RefreshTargetReputationButton(frame)
         if button.Enable ~= nil then
             button:Enable(true)
         end
+        if button.Clickable ~= nil then
+            button:Clickable(true)
+        end
+        if button.EnablePick ~= nil then
+            button:EnablePick(true)
+        end
+        if button.Raise ~= nil then
+            button:Raise()
+        end
     end)
 
+    pcall(function()
+        if not button.__polar_reputation_skin_applied then
+            local skin = BUTTON_HUD ~= nil and BUTTON_HUD.REPUTATION or nil
+            if skin ~= nil then
+                if api ~= nil and api.Interface ~= nil and type(api.Interface.ApplyButtonSkin) == "function" then
+                    api.Interface:ApplyButtonSkin(button, skin)
+                elseif type(ApplyButtonSkin) == "function" then
+                    ApplyButtonSkin(button, skin)
+                end
+            end
+            button.__polar_reputation_skin_applied = true
+        end
+    end)
+
+    local style = ResolveFrameStyleTable ~= nil and ResolveFrameStyleTable(frame) or nil
+    local offsetX = tonumber(type(style) == "table" and style.target_reputation_offset_x or nil) or -2
+    local offsetY = tonumber(type(style) == "table" and style.target_reputation_offset_y or nil) or -7
     local anchorTarget = frame.hpBar or frame
-    if button.__polar_reputation_anchor_target == anchorTarget then
+    local anchorKey = tostring(anchorTarget) .. ":" .. tostring(offsetX) .. ":" .. tostring(offsetY)
+    if button.__polar_reputation_anchor_key == anchorKey then
         return
     end
 
@@ -2016,29 +2098,29 @@ local function RefreshTargetReputationButton(frame)
         end
         if button.AddAnchor ~= nil and frame.hpBar ~= nil then
             local ok = pcall(function()
-                button:AddAnchor("TOPRIGHT", frame.hpBar, "TOPLEFT", 0, -7)
+                button:AddAnchor("TOPRIGHT", frame.hpBar, "TOPRIGHT", offsetX, offsetY)
             end)
             anchored = ok and true or anchored
             if not ok then
                 ok = pcall(function()
-                    button:AddAnchor("TOPRIGHT", frame.hpBar, 0, -7)
+                    button:AddAnchor("TOPRIGHT", frame.hpBar, offsetX, offsetY)
                 end)
                 anchored = ok and true or anchored
             end
         elseif button.AddAnchor ~= nil then
             local ok = pcall(function()
-                button:AddAnchor("TOPRIGHT", frame, "TOPLEFT", -4, 0)
+                button:AddAnchor("TOPRIGHT", frame, "TOPRIGHT", offsetX, offsetY)
             end)
             anchored = ok and true or anchored
             if not ok then
                 ok = pcall(function()
-                    button:AddAnchor("TOPRIGHT", frame, -4, 0)
+                    button:AddAnchor("TOPRIGHT", frame, offsetX, offsetY)
                 end)
                 anchored = ok and true or anchored
             end
         end
         if anchored then
-            button.__polar_reputation_anchor_target = anchorTarget
+            button.__polar_reputation_anchor_key = anchorKey
         end
     end)
 end
@@ -2227,8 +2309,23 @@ local function HideLegacyPolarDistanceOverlay(frame)
 end
 
 SetNotClickable = function(widget)
-    if widget ~= nil and widget.Clickable ~= nil then
-        widget:Clickable(false)
+    if widget == nil then
+        return
+    end
+    if widget.Clickable ~= nil then
+        pcall(function()
+            widget:Clickable(false)
+        end)
+    end
+    if widget.EnablePick ~= nil then
+        pcall(function()
+            widget:EnablePick(false)
+        end)
+    end
+    if widget.EnableDrag ~= nil then
+        pcall(function()
+            widget:EnableDrag(false)
+        end)
     end
 end
 
@@ -3902,6 +3999,7 @@ local function EnsureUi(settings)
     HookUnitFrameDrag(UI.target.wnd, settings, "target")
     HookUnitFrameDrag(UI.watchtarget.wnd, settings, "watchtarget")
     HookUnitFrameDrag(UI.target_of_target.wnd, settings, "target_of_target")
+    SyncAllUnitFrameDragState(settings)
 
     SetFramePositionHook(UI.player.wnd, settings, "player", 10, 300)
     SetFramePositionHook(UI.target.wnd, settings, "target", 10, 380)
@@ -4098,6 +4196,16 @@ UI.ApplySettings = function(settings)
             CastBar.ApplySettings(settings)
         end)
     end
+    if TravelSpeed ~= nil and TravelSpeed.ApplySettings ~= nil then
+        pcall(function()
+            TravelSpeed.ApplySettings(settings)
+        end)
+    end
+    if GearLoadouts ~= nil and GearLoadouts.ApplySettings ~= nil then
+        pcall(function()
+            GearLoadouts.ApplySettings(settings)
+        end)
+    end
 
     local wantEnabled = settings.enabled and true or false
     local enabledChanged = (UI.enabled and true or false) ~= wantEnabled
@@ -4135,6 +4243,16 @@ UI.Init = function(settings)
             CastBar.Init(settings)
         end)
     end
+    if TravelSpeed ~= nil and TravelSpeed.Init ~= nil then
+        pcall(function()
+            TravelSpeed.Init(settings)
+        end)
+    end
+    if GearLoadouts ~= nil and GearLoadouts.Init ~= nil then
+        pcall(function()
+            GearLoadouts.Init(settings)
+        end)
+    end
     UI.SetEnabled(UI.enabled)
 end
 
@@ -4152,6 +4270,16 @@ UI.UnLoad = function()
     if CastBar ~= nil and CastBar.Unload ~= nil then
         pcall(function()
             CastBar.Unload()
+        end)
+    end
+    if TravelSpeed ~= nil and TravelSpeed.Unload ~= nil then
+        pcall(function()
+            TravelSpeed.Unload()
+        end)
+    end
+    if GearLoadouts ~= nil and GearLoadouts.Unload ~= nil then
+        pcall(function()
+            GearLoadouts.Unload()
         end)
     end
     if AlignmentModule ~= nil and AlignmentModule.Reset ~= nil then
@@ -4214,6 +4342,16 @@ UI.SetEnabled = function(enabled)
     if CastBar ~= nil and CastBar.SetEnabled ~= nil then
         pcall(function()
             CastBar.SetEnabled(UI.enabled)
+        end)
+    end
+    if TravelSpeed ~= nil and TravelSpeed.SetEnabled ~= nil then
+        pcall(function()
+            TravelSpeed.SetEnabled(UI.enabled)
+        end)
+    end
+    if GearLoadouts ~= nil and GearLoadouts.SetEnabled ~= nil then
+        pcall(function()
+            GearLoadouts.SetEnabled(UI.enabled)
         end)
     end
 
@@ -4324,6 +4462,7 @@ UI.OnUpdate = function(dt)
     end
 
     EnsureAlignmentGrid(UI.settings)
+    SyncAllUnitFrameDragState(UI.settings)
     if UI.needs_full_apply
         or UI.player.wnd == nil
         or UI.target.wnd == nil
@@ -4367,6 +4506,24 @@ UI.OnUpdate = function(dt)
         end)
         if not ok and api.Log ~= nil and api.Log.Err ~= nil then
             api.Log:Err("[Nuzi UI] CastBar.OnUpdate failed: " .. tostring(err))
+        end
+    end
+
+    if TravelSpeed ~= nil and TravelSpeed.OnUpdate ~= nil then
+        local ok, err = pcall(function()
+            TravelSpeed.OnUpdate(dt, UI.settings)
+        end)
+        if not ok and api.Log ~= nil and api.Log.Err ~= nil then
+            api.Log:Err("[Nuzi UI] TravelSpeed.OnUpdate failed: " .. tostring(err))
+        end
+    end
+
+    if GearLoadouts ~= nil and GearLoadouts.OnUpdate ~= nil then
+        local ok, err = pcall(function()
+            GearLoadouts.OnUpdate(dt, UI.settings)
+        end)
+        if not ok and api.Log ~= nil and api.Log.Err ~= nil then
+            api.Log:Err("[Nuzi UI] GearLoadouts.OnUpdate failed: " .. tostring(err))
         end
     end
 

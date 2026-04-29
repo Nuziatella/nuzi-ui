@@ -1,5 +1,6 @@
 local api = require("api")
 local Runtime = require("nuzi-ui/runtime")
+local Layout = require("nuzi-ui/layout")
 local SettingsStore = require("nuzi-ui/settings_store")
 
 local CastBar = {
@@ -272,6 +273,23 @@ local function setWidgetInteractive(widget, enabled)
     widget.__nuzi_castbar_interactive = enabled
 end
 
+local function setVisualWidgetsNotInteractive(frame)
+    if frame == nil then
+        return
+    end
+    for _, target in ipairs({
+        frame.baseBg,
+        frame.solidFill,
+        frame.lightDeco,
+        frame.flashDeco,
+        frame.probeLabel,
+        frame.__nuzi_castbar_backdrop,
+        frame.__nuzi_castbar_accent
+    }) do
+        setWidgetInteractive(target, false)
+    end
+end
+
 local function isShiftDown()
     if api ~= nil and api.Input ~= nil and api.Input.IsShiftKeyDown ~= nil then
         local ok, down = pcall(function()
@@ -317,6 +335,9 @@ local function readWindowOffset(window)
     if window == nil then
         return nil, nil
     end
+    if Layout ~= nil and type(Layout.ReadScreenOffset) == "function" then
+        return Layout.ReadScreenOffset(window)
+    end
     if type(window.GetOffset) == "function" then
         local ok, x, y = pcall(function()
             return window:GetOffset()
@@ -342,7 +363,8 @@ local function anchorTopLeft(window, x, y)
     end
     x = tonumber(x) or 0
     y = tonumber(y) or 0
-    if window.__nuzi_castbar_x == x and window.__nuzi_castbar_y == y then
+    local uiScale = (Layout ~= nil and type(Layout.GetUiScale) == "function") and Layout.GetUiScale() or 1
+    if window.__nuzi_castbar_x == x and window.__nuzi_castbar_y == y and window.__nuzi_castbar_ui_scale == uiScale then
         return true
     end
     safeCall(function()
@@ -350,13 +372,18 @@ local function anchorTopLeft(window, x, y)
             window:RemoveAllAnchors()
         end
     end)
-    local ok = pcall(function()
-        window:AddAnchor("TOPLEFT", "UIParent", x, y)
-    end)
-    if not ok then
+    local ok = false
+    if Layout ~= nil and type(Layout.AnchorTopLeftScreen) == "function" then
+        ok = Layout.AnchorTopLeftScreen(window, x, y, false)
+    else
         ok = pcall(function()
-            window:AddAnchor("TOPLEFT", "UIParent", "TOPLEFT", x, y)
+            window:AddAnchor("TOPLEFT", "UIParent", x, y)
         end)
+        if not ok then
+            ok = pcall(function()
+                window:AddAnchor("TOPLEFT", "UIParent", "TOPLEFT", x, y)
+            end)
+        end
     end
     if ok then
         window.__nuzi_castbar_anchor_mode = "screen"
@@ -365,6 +392,7 @@ local function anchorTopLeft(window, x, y)
         window.__nuzi_castbar_rel_y = nil
         window.__nuzi_castbar_x = x
         window.__nuzi_castbar_y = y
+        window.__nuzi_castbar_ui_scale = uiScale
     end
     return ok and true or false
 end
@@ -415,6 +443,9 @@ local function anchorToPlayerFrame(window)
 end
 
 local function getScreenSize()
+    if Layout ~= nil and type(Layout.GetScreenSize) == "function" then
+        return Layout.GetScreenSize(1920, 1080)
+    end
     local width = 1920
     local height = 1080
     if api ~= nil and api.Interface ~= nil then
@@ -460,8 +491,14 @@ local function getDefaultPosition(cfg)
     local width = clampInt(type(cfg) == "table" and cfg.width or nil, MIN_WIDTH, MAX_WIDTH, DEFAULT_WIDTH)
     local scale = clampNumber(type(cfg) == "table" and cfg.scale or nil, MIN_SCALE, MAX_SCALE, DEFAULT_SCALE)
     local screenWidth, screenHeight = getScreenSize()
-    local x = math.floor(((screenWidth - (width * scale)) / 2) + 0.5)
-    local y = math.floor((screenHeight - (DEFAULT_OFFSET_FROM_BOTTOM * scale)) + 0.5)
+    local scaledWidth = width * scale
+    local bottomOffset = DEFAULT_OFFSET_FROM_BOTTOM * scale
+    if Layout ~= nil and type(Layout.ToScreen) == "function" then
+        scaledWidth = Layout.ToScreen(scaledWidth)
+        bottomOffset = Layout.ToScreen(bottomOffset)
+    end
+    local x = math.floor(((screenWidth - scaledWidth) / 2) + 0.5)
+    local y = math.floor((screenHeight - bottomOffset) + 0.5)
     if x < 0 then
         x = 0
     end
@@ -491,6 +528,10 @@ end
 local function getAbsoluteClampBounds(cfg)
     local screenWidth, screenHeight = getScreenSize()
     local barWidth, barHeight = getScaledBarExtent(cfg)
+    if Layout ~= nil and type(Layout.ToScreen) == "function" then
+        barWidth = Layout.ToScreen(barWidth)
+        barHeight = Layout.ToScreen(barHeight)
+    end
     local maxX = math.max(0, screenWidth - barWidth)
     local maxY = math.max(0, screenHeight - barHeight)
     return 0, maxX, 0, maxY
@@ -499,6 +540,10 @@ end
 local function getPlayerRelativeClampBounds(cfg)
     local screenWidth, screenHeight = getScreenSize()
     local barWidth, barHeight = getScaledBarExtent(cfg)
+    if Layout ~= nil and type(Layout.ToUi) == "function" then
+        screenWidth = Layout.ToUi(screenWidth)
+        screenHeight = Layout.ToUi(screenHeight)
+    end
     local minX = -screenWidth
     local minY = -screenHeight
     local maxX = screenWidth - math.floor(barWidth / 2)
@@ -576,8 +621,14 @@ local function updateDragPosition(frame, cfg)
 
     if drag.anchor_mode == "player_frame_relative" and getPlayerFrame() ~= nil then
         local minX, maxX, minY, maxY = getPlayerRelativeClampBounds(cfg)
-        local nextX = clampInt(drag.pos_x + deltaX, minX, maxX, drag.pos_x)
-        local nextY = clampInt(drag.pos_y + deltaY, minY, maxY, drag.pos_y)
+        local relDeltaX = deltaX
+        local relDeltaY = deltaY
+        if Layout ~= nil and type(Layout.ToUi) == "function" then
+            relDeltaX = Layout.ToUi(deltaX)
+            relDeltaY = Layout.ToUi(deltaY)
+        end
+        local nextX = clampInt(drag.pos_x + relDeltaX, minX, maxX, drag.pos_x)
+        local nextY = clampInt(drag.pos_y + relDeltaY, minY, maxY, drag.pos_y)
         local changed = cfg.pos_x ~= nextX or cfg.pos_y ~= nextY or cfg.anchor_mode ~= "player_frame_relative"
         cfg.pos_x = nextX
         cfg.pos_y = nextY
@@ -708,6 +759,7 @@ local function applyBackdrop(frame, borderThickness)
             frame.__nuzi_castbar_accent_height = accentHeight
         end
     end
+    setVisualWidgetsNotInteractive(frame)
 end
 
 local function ensureSolidFill(frame)
@@ -724,6 +776,7 @@ local function ensureSolidFill(frame)
                 "artwork"
             )
         end)
+        setWidgetInteractive(frame.solidFill, false)
     end
     return frame.solidFill
 end
@@ -993,9 +1046,10 @@ local function syncInteractionState(frame)
     local interactive = frame.__nuzi_castbar_dragging
         or (active and cfg ~= nil and not cfg.lock_position and visible and isShiftDown())
 
-    for _, target in ipairs({ frame, frame.statusBar, frame.solidFill, frame.text, frame.probeLabel }) do
+    for _, target in ipairs({ frame, frame.statusBar, frame.text }) do
         setWidgetInteractive(target, interactive)
     end
+    setVisualWidgetsNotInteractive(frame)
 end
 
 local function refreshIdleFrame(frame)
@@ -1515,6 +1569,7 @@ local function attachDragHandlers(frame)
             frame.__nuzi_castbar_dragging = false
             frame.__nuzi_castbar_drag_state = nil
             clearCursor()
+            syncInteractionState(frame)
             return
         end
 
@@ -1523,6 +1578,7 @@ local function attachDragHandlers(frame)
         frame.__nuzi_castbar_drag_state = nil
         clearCursor()
         saveSettings(CastBar.settings)
+        syncInteractionState(frame)
     end
 
     for _, target in ipairs(dragTargets) do

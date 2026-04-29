@@ -1,11 +1,16 @@
 local api = require("api")
 local SafeRequire = require("nuzi-ui/safe_require")
 local Compat = SafeRequire("nuzi-ui/compat", "nuzi-ui.compat")
+local Layout = SafeRequire("nuzi-ui/layout", "nuzi-ui.layout")
 local SettingsCommon = SafeRequire("nuzi-ui/settings_common", "nuzi-ui.settings_common")
+local SettingsCooldown = SafeRequire("nuzi-ui/settings_cooldown", "nuzi-ui.settings_cooldown")
+local SettingsCooldownPage = SafeRequire("nuzi-ui/settings_cooldown_page", "nuzi-ui.settings_cooldown_page")
 local SettingsWidgets = SafeRequire("nuzi-ui/settings_widgets", "nuzi-ui.settings_widgets")
 local SettingsCatalog = SafeRequire("nuzi-ui/settings_catalog", "nuzi-ui.settings_catalog")
 local SettingsSchema = SafeRequire("nuzi-ui/settings_schema", "nuzi-ui.settings_schema")
+local SettingsSchemaCustom = SafeRequire("nuzi-ui/settings_schema_custom", "nuzi-ui.settings_schema_custom")
 local CastBar = SafeRequire("nuzi-ui/castbar", "nuzi-ui.castbar")
+local GearLoadouts = SafeRequire("nuzi-ui/gear_loadouts", "nuzi-ui.gear_loadouts")
 
 local SettingsPage = {
     settings = nil,
@@ -169,33 +174,10 @@ local STYLE_TARGET_KEYS = {
     "party"
 }
 
-local COOLDOWN_UNIT_KEYS = {
-    "player",
-    "target",
-    "playerpet",
-    "watchtarget",
-    "target_of_target"
-}
-
-local COOLDOWN_UNIT_LABELS = {
-    "Player",
-    "Target",
-    "Mount/Pet",
-    "Watchtarget",
-    "Target of Target"
-}
-
-local COOLDOWN_DISPLAY_MODE_LABELS = {
-    "Active only",
-    "Missing only",
-    "Both"
-}
-
-local COOLDOWN_TRACK_KIND_LABELS = {
-    "Any",
-    "Buff",
-    "Debuff"
-}
+local COOLDOWN_UNIT_KEYS = SettingsCooldown.UNIT_KEYS
+local COOLDOWN_DISPLAY_MODE_LABELS = SettingsCooldown.DISPLAY_MODE_LABELS
+local COOLDOWN_DISPLAY_STYLE_LABELS = SettingsCooldown.DISPLAY_STYLE_LABELS
+local COOLDOWN_TRACK_KIND_LABELS = SettingsCooldown.TRACK_KIND_LABELS
 
 local CASTBAR_TEXTURE_MODE_KEYS = {
     "auto",
@@ -214,11 +196,12 @@ local CASTBAR_FILL_STYLE_KEYS = {
     "solid"
 }
 
-local COOLDOWN_BUFFS_PER_PAGE = 6
-local COOLDOWN_SCAN_ROWS = 10
-local COOLDOWN_SEARCH_ROWS = 8
-local COOLDOWN_SEARCH_BATCH = 1000
-local COOLDOWN_SEARCH_MAX_ID = 250000
+local DEBUFF_ANCHOR_KEYS = {
+    "top",
+    "left",
+    "right"
+}
+
 local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAGES) == "table" and SettingsCatalog.PAGES) or {
     { id = "general", label = "General", title = "General", summary = "Core addon toggles and shared runtime behavior." },
     { id = "repair", label = "UI Repair", title = "UI Repair", summary = "Screen scale diagnostics and safe layout reset tools." },
@@ -226,17 +209,16 @@ local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAG
     { id = "text", label = "Text", title = "Text", summary = "Name, level, role, guild, and number formatting." },
     { id = "bars", label = "Bars", title = "Bars", summary = "Frame sizing, alpha, bar colors, textures, and value placement." },
     { id = "castbar", label = "Cast Bar", title = "Cast Bar", summary = "Movable player cast bar with customizable colors, text, and textures." },
+    { id = "travel", label = "Travel", title = "Travel Speed", summary = "Movable speed meter for vehicles, mounts, gliders, and on-foot travel." },
+    { id = "loadouts", label = "Loadouts", title = "Gear Loadouts", summary = "Per-character gear loadout bar with a drag/drop equipment editor." },
     { id = "auras", label = "Auras", title = "Auras", summary = "Aura windows, icon layout, and buff or debuff anchor controls." },
-    { id = "plates", label = "Nameplates", title = "Nameplates", summary = "Visibility rules, offsets, colors, and runtime nameplate behavior." },
+    { id = "plates", label = "Nameplates", title = "Nameplates", summary = "Visibility rules, offsets, debuff icons, colors, and runtime nameplate behavior." },
     { id = "cooldown", label = "Cooldowns", title = "Cooldown Tracker", summary = "Tracked buff and debuff icons for player, target, pet, watchtarget, and target of target." }
 }
 
 local ClampInt = SettingsCommon.ClampInt
 local FormatBuffId = SettingsCommon.FormatBuffId
 local PruneStyleFrameOverrides = SettingsCommon.PruneStyleFrameOverrides
-local NormalizeCooldownTrackKind = SettingsCommon.NormalizeCooldownTrackKind
-local NormalizeCooldownDisplayMode = SettingsCommon.NormalizeCooldownDisplayMode
-local NormalizeCooldownTrackedEntry = SettingsCommon.NormalizeCooldownTrackedEntry
 
 local function GetCastBarTextureModeIndex(key)
     return SettingsCommon.GetIndexFromKey(CASTBAR_TEXTURE_MODE_KEYS, tostring(key or "auto"))
@@ -254,208 +236,48 @@ local function GetCastBarFillStyleFromIndex(idx)
     return SettingsCommon.GetKeyFromIndex(CASTBAR_FILL_STYLE_KEYS, idx)
 end
 
+local function GetDebuffAnchorIndex(anchor)
+    return SettingsCommon.GetIndexFromKey(DEBUFF_ANCHOR_KEYS, tostring(anchor or "top"))
+end
+
+local function GetDebuffAnchorFromIndex(idx)
+    return SettingsCommon.GetKeyFromIndex(DEBUFF_ANCHOR_KEYS, idx)
+end
+
 local function GetCooldownDisplayModeFromIndex(idx)
-    idx = tonumber(idx) or 1
-    if idx == 2 then
-        return "missing"
-    elseif idx == 3 then
-        return "both"
-    end
-    return "active"
+    return SettingsCooldown.GetDisplayModeFromIndex(idx)
 end
 
 local function GetCooldownDisplayModeIndex(mode)
-    mode = NormalizeCooldownDisplayMode(mode)
-    if mode == "missing" then
-        return 2
-    elseif mode == "both" then
-        return 3
-    end
-    return 1
+    return SettingsCooldown.GetDisplayModeIndex(mode)
+end
+
+local function GetCooldownDisplayStyleFromIndex(idx)
+    return SettingsCooldown.GetDisplayStyleFromIndex(idx)
+end
+
+local function GetCooldownDisplayStyleIndex(style)
+    return SettingsCooldown.GetDisplayStyleIndex(style)
 end
 
 local function GetCooldownTrackKindFromIndex(idx)
-    idx = tonumber(idx) or 1
-    if idx == 2 then
-        return "buff"
-    elseif idx == 3 then
-        return "debuff"
-    end
-    return "any"
+    return SettingsCooldown.GetTrackKindFromIndex(idx)
 end
 
 local function GetCooldownTrackKindIndex(kind)
-    kind = NormalizeCooldownTrackKind(kind)
-    if kind == "buff" then
-        return 2
-    elseif kind == "debuff" then
-        return 3
-    end
-    return 1
-end
-
-local function ScanTargetEffects()
-    local results = {}
-    local seen = {}
-    SettingsPage.cooldown_scan_results = results
-
-    if api == nil or api.Unit == nil then
-        return
-    end
-
-    local function getName(id, raw)
-        local id_str = tostring(id or "")
-        local id_num = tonumber(id_str)
-
-        if type(raw) == "table" and raw.name ~= nil then
-            local n = tostring(raw.name)
-            if n ~= "" and n ~= id_str then
-                return n
-            end
-        end
-
-        if api ~= nil and api.Ability ~= nil and id_num ~= nil then
-            local ok, tooltip = pcall(function()
-                if type(api.Ability.GetBuffTooltip) == "function" then
-                    return api.Ability:GetBuffTooltip(id_num, 1)
-                end
-                return nil
-            end)
-            if ok and type(tooltip) == "table" and tooltip.name ~= nil then
-                local n = tostring(tooltip.name)
-                if n ~= "" and n ~= id_str then
-                    return n
-                end
-            end
-        end
-
-        if id_str ~= "" then
-            return "Buff #" .. id_str
-        end
-        return ""
-    end
-
-    local function push(kind, eff)
-        if type(eff) ~= "table" or eff.buff_id == nil then
-            return
-        end
-        local id = FormatBuffId(eff.buff_id)
-        if id == "" then
-            return
-        end
-        local seenKey = tostring(kind or "buff") .. ":" .. id
-        if seen[seenKey] then
-            return
-        end
-        seen[seenKey] = true
-        table.insert(results, {
-            kind = kind,
-            id = id,
-            name = getName(id, eff)
-        })
-    end
-
-    local ok = pcall(function()
-        local bc = api.Unit:UnitBuffCount("target") or 0
-        for i = 1, bc do
-            push("buff", api.Unit:UnitBuff("target", i))
-        end
-        local dc = api.Unit:UnitDeBuffCount("target") or 0
-        for i = 1, dc do
-            push("debuff", api.Unit:UnitDeBuff("target", i))
-        end
-    end)
-    if not ok then
-        SettingsPage.cooldown_scan_results = {}
-        return
-    end
-
-    table.sort(results, function(a, b)
-        local kindA = tostring(a.kind or "buff")
-        local kindB = tostring(b.kind or "buff")
-        if kindA ~= kindB then
-            return kindA < kindB
-        end
-        local nameA = string.lower(tostring(a.name or ""))
-        local nameB = string.lower(tostring(b.name or ""))
-        if nameA ~= nameB then
-            return nameA < nameB
-        end
-        return tostring(a.id or "") < tostring(b.id or "")
-    end)
+    return SettingsCooldown.GetTrackKindIndex(kind)
 end
 
 local function GetCooldownUnitKeyFromIndex(idx)
-    return SettingsCommon.GetKeyFromIndex(COOLDOWN_UNIT_KEYS, idx)
+    return SettingsCooldown.GetUnitKeyFromIndex(idx)
 end
 
 local function GetCooldownUnitIndexFromKey(key)
-    return SettingsCommon.GetIndexFromKey(COOLDOWN_UNIT_KEYS, key)
+    return SettingsCooldown.GetUnitIndexFromKey(key)
 end
 
 local function EnsureCooldownTrackerTables(s)
-    return SettingsCommon.EnsureCooldownTrackerTables(s, COOLDOWN_UNIT_KEYS)
-end
-
-local function SetWidgetEnabled(widget, enabled)
-    if widget == nil then
-        return
-    end
-    pcall(function()
-        if widget.Enable ~= nil then
-            widget:Enable(enabled and true or false)
-        elseif widget.SetEnabled ~= nil then
-            widget:SetEnabled(enabled and true or false)
-        end
-    end)
-end
-
-local function RefreshCooldownScanRows()
-    if SettingsPage.controls == nil then
-        return
-    end
-    local rows = SettingsPage.controls.ct_scan_rows
-    if type(rows) ~= "table" then
-        return
-    end
-
-    local results = SettingsPage.cooldown_scan_results
-    if type(results) ~= "table" then
-        results = {}
-        SettingsPage.cooldown_scan_results = results
-    end
-
-    if SettingsPage.controls.ct_scan_status ~= nil and SettingsPage.controls.ct_scan_status.SetText ~= nil then
-        SettingsPage.controls.ct_scan_status:SetText(string.format("Found %d effect(s) on target", #results))
-    end
-
-    for i, row in ipairs(rows) do
-        local entry = results[i]
-        local show = type(entry) == "table"
-        if type(row) == "table" then
-            if row.label ~= nil and row.label.SetText ~= nil then
-                if show then
-                    local kind = tostring(entry.kind or "buff")
-                    local prefix = (kind == "debuff") and "[D]" or "[B]"
-                    local id = tostring(entry.id or "")
-                    local name = tostring(entry.name or "")
-                    local text = string.format("%s %s %s", prefix, id, name)
-                    row.label:SetText(text)
-                else
-                    row.label:SetText("")
-                end
-            end
-            if row.label ~= nil and row.label.Show ~= nil then
-                row.label:Show(show)
-            end
-            if row.add ~= nil and row.add.Show ~= nil then
-                row.add:Show(show)
-            end
-            if row.add ~= nil then
-                row.add.__polar_scan_index = i
-            end
-        end
-    end
+    return SettingsCooldown.EnsureTables(s)
 end
 
 local function GetEditText(field)
@@ -479,77 +301,8 @@ local function ParseEditNumber(field)
     return n
 end
 
-local GetCooldownBuffMetaById
-
 local function RefreshCooldownBuffRows(unit_cfg)
-    if SettingsPage.controls == nil then
-        return
-    end
-    local rows = SettingsPage.controls.ct_buff_rows
-    if type(rows) ~= "table" then
-        return
-    end
-
-    local tracked = type(unit_cfg) == "table" and unit_cfg.tracked_buffs or nil
-    if type(tracked) ~= "table" then
-        tracked = {}
-    end
-
-    local total = #tracked
-    local pages = math.max(1, math.ceil(total / COOLDOWN_BUFFS_PER_PAGE))
-    if SettingsPage.cooldown_buff_page < 1 then
-        SettingsPage.cooldown_buff_page = 1
-    elseif SettingsPage.cooldown_buff_page > pages then
-        SettingsPage.cooldown_buff_page = pages
-    end
-
-    local start_idx = ((SettingsPage.cooldown_buff_page - 1) * COOLDOWN_BUFFS_PER_PAGE) + 1
-    for i = 1, COOLDOWN_BUFFS_PER_PAGE do
-        local idx = start_idx + (i - 1)
-        local row = rows[i]
-        if type(row) == "table" then
-            local rawEntry = tracked[idx]
-            local entry = NormalizeCooldownTrackedEntry(rawEntry)
-            local show = entry ~= nil
-            if row.label ~= nil and row.label.SetText ~= nil then
-                if show then
-                    local meta = GetCooldownBuffMetaById(entry.id)
-                    local prefix = "[A]"
-                    if entry.kind == "buff" then
-                        prefix = "[B]"
-                    elseif entry.kind == "debuff" then
-                        prefix = "[D]"
-                    end
-                    local text = string.format("%s %s", prefix, tostring(entry.id))
-                    if type(meta) == "table" and tostring(meta.name or "") ~= "" then
-                        text = string.format("%s %s %s", prefix, tostring(entry.id), tostring(meta.name or ""))
-                    end
-                    row.label:SetText(text)
-                else
-                    row.label:SetText("")
-                end
-            end
-            if row.label ~= nil and row.label.Show ~= nil then
-                row.label:Show(show)
-            end
-            if row.remove ~= nil and row.remove.Show ~= nil then
-                row.remove:Show(show)
-            end
-            if row.remove ~= nil then
-                row.remove.__polar_buff_index = idx
-            end
-        end
-    end
-
-    if SettingsPage.controls.ct_page_label ~= nil and SettingsPage.controls.ct_page_label.SetText ~= nil then
-        SettingsPage.controls.ct_page_label:SetText(string.format("%d / %d", SettingsPage.cooldown_buff_page, pages))
-    end
-    if SettingsPage.controls.ct_prev_page ~= nil and SettingsPage.controls.ct_prev_page.SetEnable ~= nil then
-        SettingsPage.controls.ct_prev_page:SetEnable(SettingsPage.cooldown_buff_page > 1)
-    end
-    if SettingsPage.controls.ct_next_page ~= nil and SettingsPage.controls.ct_next_page.SetEnable ~= nil then
-        SettingsPage.controls.ct_next_page:SetEnable(SettingsPage.cooldown_buff_page < pages)
-    end
+    SettingsCooldown.RefreshTrackedRows(SettingsPage, unit_cfg)
 end
 
 local GetComboBoxIndexRaw = SettingsWidgets.GetComboBoxIndexRaw
@@ -724,27 +477,6 @@ local function GetTargetFrameStyleTables(settings)
     end
 
     return EffectiveStyle(base, base.frames.target), base.frames.target
-end
-
-local DeepCopySimple = SettingsCommon.DeepCopySimple
-local CopyTableInto = SettingsCommon.CopyTableInto
-
-local function CopyStatusbarCoords(dstKey, srcKey)
-    if STATUSBAR_STYLE == nil or type(STATUSBAR_STYLE) ~= "table" then
-        return
-    end
-    if type(dstKey) ~= "string" or type(srcKey) ~= "string" then
-        return
-    end
-    local dst = STATUSBAR_STYLE[dstKey]
-    local src = STATUSBAR_STYLE[srcKey]
-    if type(dst) ~= "table" or type(src) ~= "table" then
-        return
-    end
-    if type(src.coords) ~= "table" then
-        return
-    end
-    dst.coords = DeepCopySimple(src.coords)
 end
 
 local CreatePage = SettingsWidgets.CreatePage
@@ -984,7 +716,7 @@ local function EnsureRestartNotice()
     pcall(function()
         overlay:AddAnchor("TOPLEFT", SettingsPage.window, 0, 0)
         overlay:AddAnchor("BOTTOMRIGHT", SettingsPage.window, 0, 0)
-        overlay:SetExtent(820, 760)
+        overlay:SetExtent(920, 760)
         if overlay.Show ~= nil then
             overlay:Show(false)
         end
@@ -1084,219 +816,16 @@ UpdateNavigationState = function(activePageId)
     SetReadableControlText(SettingsPage.controls.page_header_summary, meta.summary or "")
 end
 
-GetCooldownBuffMetaById = function(rawId)
-    local id = tonumber(rawId)
-    if id == nil then
-        return nil
-    end
-    id = math.floor(id + 0.5)
-
-    if SettingsPage.cooldown_buff_meta_cache[id] ~= nil then
-        return SettingsPage.cooldown_buff_meta_cache[id] ~= false and SettingsPage.cooldown_buff_meta_cache[id] or nil
-    end
-
-    if api == nil or api.Ability == nil or type(api.Ability.GetBuffTooltip) ~= "function" then
-        SettingsPage.cooldown_buff_meta_cache[id] = false
-        return nil
-    end
-
-    local ok, tooltip = pcall(function()
-        return api.Ability:GetBuffTooltip(id, 1)
-    end)
-    if not ok or type(tooltip) ~= "table" then
-        SettingsPage.cooldown_buff_meta_cache[id] = false
-        return nil
-    end
-
-    local name = tostring(tooltip.name or tooltip.buffName or tooltip.title or "")
-    if name == "" then
-        SettingsPage.cooldown_buff_meta_cache[id] = false
-        return nil
-    end
-
-    local meta = {
-        id = FormatBuffId(id),
-        name = name
-    }
-    SettingsPage.cooldown_buff_meta_cache[id] = meta
-    return meta
-end
-
 local function AddCooldownTrackedBuffToSelectedUnit(rawId, rawKind)
-    if SettingsPage.settings == nil then
-        return false
-    end
-
-    local normalized = NormalizeCooldownTrackedEntry({
-        id = rawId,
-        kind = rawKind
-    })
-    if normalized == nil then
-        return false
-    end
-    local id = FormatBuffId(normalized.id)
-    local kind = normalized.kind
-
-    EnsureCooldownTrackerTables(SettingsPage.settings)
-    local unit_key = tostring(SettingsPage.cooldown_unit_key or "player")
-    local tracker = SettingsPage.settings.cooldown_tracker
-    local unit_cfg = type(tracker) == "table" and type(tracker.units) == "table" and tracker.units[unit_key] or nil
-    if type(unit_cfg) ~= "table" or type(unit_cfg.tracked_buffs) ~= "table" then
-        return false
-    end
-
-    for _, v in ipairs(unit_cfg.tracked_buffs) do
-        local existing = NormalizeCooldownTrackedEntry(v)
-        if existing ~= nil and FormatBuffId(existing.id) == id and existing.kind == kind then
-            return false
-        end
-    end
-
-    table.insert(unit_cfg.tracked_buffs, {
-        id = normalized.id,
-        kind = kind
-    })
-    if type(SettingsPage.on_apply) == "function" then
-        pcall(function()
-            SettingsPage.on_apply()
-        end)
-    end
-    return true
+    return SettingsCooldown.AddTrackedBuff(SettingsPage, rawId, rawKind)
 end
 
 local function RefreshCooldownSearchRows()
-    if SettingsPage.controls == nil then
-        return
-    end
-
-    local rows = SettingsPage.controls.ct_search_rows
-    if type(rows) ~= "table" then
-        return
-    end
-
-    local results = type(SettingsPage.cooldown_search_results) == "table" and SettingsPage.cooldown_search_results or {}
-    local query = tostring(SettingsPage.cooldown_search_query or "")
-    if SettingsPage.controls.ct_search_status ~= nil and SettingsPage.controls.ct_search_status.SetText ~= nil then
-        local status = ""
-        if query ~= "" then
-            if #results > 0 then
-                if SettingsPage.cooldown_search_complete then
-                    status = string.format("Found %d match(es)", #results)
-                else
-                    status = string.format("Found %d match(es), scanned to #%d", #results, math.max(0, (tonumber(SettingsPage.cooldown_search_cursor) or 1) - 1))
-                end
-            elseif SettingsPage.cooldown_search_complete then
-                status = "No matches found"
-            else
-                status = string.format("No matches yet, scanned to #%d", math.max(0, (tonumber(SettingsPage.cooldown_search_cursor) or 1) - 1))
-            end
-        end
-        SettingsPage.controls.ct_search_status:SetText(status)
-    end
-
-    for i, row in ipairs(rows) do
-        local entry = results[i]
-        local show = type(entry) == "table"
-        if type(row) == "table" then
-            if row.label ~= nil and row.label.SetText ~= nil then
-                if show then
-                    row.label:SetText(string.format("%s %s", tostring(entry.id or ""), tostring(entry.name or "")))
-                else
-                    row.label:SetText("")
-                end
-            end
-            if row.label ~= nil and row.label.Show ~= nil then
-                row.label:Show(show)
-            end
-            if row.add ~= nil and row.add.Show ~= nil then
-                row.add:Show(show)
-            end
-            if row.add ~= nil then
-                row.add.__polar_search_id = show and tostring(entry.id or "") or nil
-            end
-        end
-    end
-
-    if SettingsPage.controls.ct_search_more ~= nil and SettingsPage.controls.ct_search_more.Show ~= nil then
-        SettingsPage.controls.ct_search_more:Show(query ~= "" and not SettingsPage.cooldown_search_complete)
-    end
+    SettingsCooldown.RefreshSearchRows(SettingsPage)
 end
 
 local function RunCooldownBuffSearch(loadMore)
-    local query = string.lower(tostring(GetEditText(SettingsPage.controls.ct_search_text) or ""))
-    query = string.match(query, "^%s*(.-)%s*$") or query
-
-    if query == "" then
-        SettingsPage.cooldown_search_query = ""
-        SettingsPage.cooldown_search_results = {}
-        SettingsPage.cooldown_search_cursor = 1
-        SettingsPage.cooldown_search_complete = false
-        RefreshCooldownSearchRows()
-        return
-    end
-
-    local continuing = loadMore and query == tostring(SettingsPage.cooldown_search_query or "")
-    if not continuing then
-        SettingsPage.cooldown_search_query = query
-        SettingsPage.cooldown_search_results = {}
-        SettingsPage.cooldown_search_cursor = 1
-        SettingsPage.cooldown_search_complete = false
-    end
-
-    local results = SettingsPage.cooldown_search_results
-    local seen = {}
-    for _, entry in ipairs(results) do
-        if type(entry) == "table" then
-            seen[tostring(entry.id or "")] = true
-        end
-    end
-
-    local numericQuery = tonumber(query)
-    if numericQuery ~= nil and not continuing then
-        local meta = GetCooldownBuffMetaById(numericQuery)
-        if meta ~= nil then
-            local id = tostring(meta.id or "")
-            if id ~= "" and not seen[id] then
-                table.insert(results, {
-                    id = id,
-                    name = tostring(meta.name or "")
-                })
-                seen[id] = true
-            end
-        end
-    end
-
-    local scanned = 0
-    local cursor = tonumber(SettingsPage.cooldown_search_cursor) or 1
-    if cursor < 1 then
-        cursor = 1
-    end
-
-    while cursor <= COOLDOWN_SEARCH_MAX_ID and #results < COOLDOWN_SEARCH_ROWS and scanned < COOLDOWN_SEARCH_BATCH do
-        local meta = GetCooldownBuffMetaById(cursor)
-        if meta ~= nil then
-            local id = tostring(meta.id or "")
-            local name = string.lower(tostring(meta.name or ""))
-            if id ~= "" and not seen[id] and string.find(name, query, 1, true) ~= nil then
-                table.insert(results, {
-                    id = id,
-                    name = tostring(meta.name or "")
-                })
-                seen[id] = true
-            end
-        end
-        cursor = cursor + 1
-        scanned = scanned + 1
-    end
-
-    SettingsPage.cooldown_search_cursor = cursor
-    if cursor > COOLDOWN_SEARCH_MAX_ID or #results >= COOLDOWN_SEARCH_ROWS then
-        SettingsPage.cooldown_search_complete = cursor > COOLDOWN_SEARCH_MAX_ID
-    else
-        SettingsPage.cooldown_search_complete = false
-    end
-
-    RefreshCooldownSearchRows()
+    SettingsCooldown.RunBuffSearch(SettingsPage, GetEditText(SettingsPage.controls.ct_search_text), loadMore)
 end
 
 local function RestoreSettingsButtonPos(widget)
@@ -1316,11 +845,15 @@ local function RestoreSettingsButtonPos(widget)
     end
 
     pcall(function()
-        if widget.RemoveAllAnchors ~= nil then
-            widget:RemoveAllAnchors()
-        end
-        if widget.AddAnchor ~= nil then
-            widget:AddAnchor("TOPLEFT", "UIParent", x, y)
+        if Layout ~= nil and type(Layout.AnchorTopLeftScreen) == "function" then
+            Layout.AnchorTopLeftScreen(widget, x, y)
+        else
+            if widget.RemoveAllAnchors ~= nil then
+                widget:RemoveAllAnchors()
+            end
+            if widget.AddAnchor ~= nil then
+                widget:AddAnchor("TOPLEFT", "UIParent", x, y)
+            end
         end
     end)
     ApplySettingsButtonLayout()
@@ -1334,20 +867,24 @@ local function SaveSettingsButtonPos(widget)
         return
     end
 
-    local ok = false
     local x, y = nil, nil
-    if widget.GetOffset ~= nil then
-        ok, x, y = pcall(function()
-            return widget:GetOffset()
-        end)
-    end
-    if (not ok or x == nil or y == nil) and widget.GetEffectiveOffset ~= nil then
-        ok, x, y = pcall(function()
-            return widget:GetEffectiveOffset()
-        end)
-    end
-    if not ok then
-        return
+    if Layout ~= nil and type(Layout.ReadScreenOffset) == "function" then
+        x, y = Layout.ReadScreenOffset(widget)
+    else
+        local ok = false
+        if widget.GetEffectiveOffset ~= nil then
+            ok, x, y = pcall(function()
+                return widget:GetEffectiveOffset()
+            end)
+        end
+        if (not ok or x == nil or y == nil) and widget.GetOffset ~= nil then
+            ok, x, y = pcall(function()
+                return widget:GetOffset()
+            end)
+        end
+        if not ok then
+            return
+        end
     end
 
     x = tonumber(x)
@@ -1462,7 +999,6 @@ end
 
 local CreateLabel = SettingsWidgets.CreateLabel
 local CreateHintLabel = SettingsWidgets.CreateHintLabel
-local ApplyCheckButtonSkin = SettingsWidgets.ApplyCheckButtonSkin
 local CreateCheckbox = SettingsWidgets.CreateCheckbox
 local CreateButton = SettingsWidgets.CreateButton
 local CreateEdit = SettingsWidgets.CreateEdit
@@ -1478,26 +1014,11 @@ local SetWrappedText = SettingsWidgets.SetWrappedText
 local RefreshControls
 local ApplyControlsToSettings
 
-local SCHEMA_PAGE_IDS = { "general", "repair", "npc", "text", "bars", "castbar", "auras", "plates" }
+local SCHEMA_PAGE_IDS = { "general", "repair", "npc", "text", "bars", "castbar", "travel", "loadouts", "auras", "plates" }
 local SCHEMA_PAGE_LEFT = 18
 local SCHEMA_PAGE_TOP = 18
-local SCHEMA_CARD_WIDTH = 580
+local SCHEMA_CARD_WIDTH = 650
 local SCHEMA_SECTION_GAP = 16
-
-local REPAIR_FRAME_DEFAULTS = {
-    { key = "player", label = "Player", x = 10, y = 300 },
-    { key = "target", label = "Target", x = 10, y = 380 },
-    { key = "watchtarget", label = "Watchtarget", x = 10, y = 460 },
-    { key = "target_of_target", label = "Target of Target", x = 10, y = 540 }
-}
-
-local REPAIR_COOLDOWN_DEFAULTS = {
-    player = { x = 330, y = 100 },
-    target = { x = 0, y = -8 },
-    playerpet = { x = 0, y = -8 },
-    watchtarget = { x = 0, y = -8 },
-    target_of_target = { x = 0, y = -8 }
-}
 
 SetReadableControlText = function(control, text)
     if control == nil then
@@ -1607,393 +1128,43 @@ local function RefreshSchemaControlStates()
     end
 end
 
-local function BuildSchemaPlatesGuildColorEditor(parent, y)
-    SettingsPage.controls.plates_guild_color_rows = {}
-
-    local guildLabel = CreateLabel("polarUiPlatesGuildColorNameLbl", parent, "Guild", 0, y, 15)
-    if guildLabel ~= nil and guildLabel.SetExtent ~= nil then
-        pcall(function()
-            guildLabel:SetExtent(50, 18)
-        end)
-    end
-    SettingsPage.controls.plates_guild_color_name = CreateEdit("polarUiPlatesGuildColorName", parent, "", 58, y - 4, 180, 22)
-    SettingsPage.controls.plates_guild_color_add = CreateButton("polarUiPlatesGuildColorAdd", parent, "Add", 250, y - 6)
-    SettingsPage.controls.plates_guild_color_add_target = CreateButton("polarUiPlatesGuildColorAddTarget", parent, "Use Target", 328, y - 6)
-    if SettingsPage.controls.plates_guild_color_add ~= nil then
-        pcall(function()
-            SettingsPage.controls.plates_guild_color_add:SetExtent(68, 22)
-        end)
-    end
-    if SettingsPage.controls.plates_guild_color_add_target ~= nil then
-        pcall(function()
-            SettingsPage.controls.plates_guild_color_add_target:SetExtent(102, 22)
-        end)
-    end
-    y = y + 28
-
-    SettingsPage.controls.plates_guild_color_r, SettingsPage.controls.plates_guild_color_r_val = CreateSlider(
-        "polarUiPlatesGuildColorR",
-        parent,
-        "R (0-255)",
-        0,
-        y,
-        0,
-        255,
-        1
-    )
-    y = y + 24
-    SettingsPage.controls.plates_guild_color_g, SettingsPage.controls.plates_guild_color_g_val = CreateSlider(
-        "polarUiPlatesGuildColorG",
-        parent,
-        "G (0-255)",
-        0,
-        y,
-        0,
-        255,
-        1
-    )
-    y = y + 24
-    SettingsPage.controls.plates_guild_color_b, SettingsPage.controls.plates_guild_color_b_val = CreateSlider(
-        "polarUiPlatesGuildColorB",
-        parent,
-        "B (0-255)",
-        0,
-        y,
-        0,
-        255,
-        1
-    )
-    y = y + 30
-
-    for i = 1, 8 do
-        local rowY = y
-        local rowLabel = CreateLabel("polarUiPlatesGuildColorRow" .. tostring(i), parent, "", 15, rowY, 14)
-        if rowLabel ~= nil and rowLabel.SetExtent ~= nil then
-            pcall(function()
-                rowLabel:SetExtent(300, 18)
-            end)
+local function MakeCustomSchemaContext()
+    return {
+        state = SettingsPage,
+        gear_loadouts = GearLoadouts,
+        set_text = SetReadableControlText,
+        apply_controls = function()
+            if type(ApplyControlsToSettings) == "function" then
+                ApplyControlsToSettings()
+            end
+        end,
+        refresh_controls = function()
+            if type(RefreshControls) == "function" then
+                RefreshControls()
+            end
         end
-        local rowRemove = CreateButton("polarUiPlatesGuildColorRemove" .. tostring(i), parent, "Remove", 330, rowY - 6)
-        if rowRemove ~= nil and rowRemove.SetExtent ~= nil then
-            pcall(function()
-                rowRemove:SetExtent(80, 22)
-            end)
-        end
-        SettingsPage.controls.plates_guild_color_rows[i] = {
-            label = rowLabel,
-            remove = rowRemove
-        }
-        y = y + 26
-    end
-
-    return y
-end
-
-local function GetInterfaceNumber(methodName)
-    if api == nil or api.Interface == nil or type(api.Interface[methodName]) ~= "function" then
-        return nil
-    end
-    local ok, value = pcall(function()
-        return api.Interface[methodName](api.Interface)
-    end)
-    if ok then
-        return tonumber(value)
-    end
-    return nil
-end
-
-local function RoundRepairNumber(value)
-    local n = tonumber(value)
-    if n == nil then
-        return "?"
-    end
-    return tostring(math.floor(n + 0.5))
-end
-
-local function FormatRepairPair(pos)
-    if type(pos) ~= "table" then
-        return "(?, ?)"
-    end
-    return "(" .. RoundRepairNumber(pos.x) .. ", " .. RoundRepairNumber(pos.y) .. ")"
-end
-
-local function SetRepairStatus(text)
-    SetReadableControlText(SettingsPage.controls.repair_status, tostring(text or ""))
+    }
 end
 
 local function RefreshRepairDiagnostics()
-    local width = GetInterfaceNumber("GetScreenWidth")
-    local height = GetInterfaceNumber("GetScreenHeight")
-    local scale = GetInterfaceNumber("GetUIScale")
-    local screenText = "Screen: unavailable"
-    if width ~= nil and height ~= nil then
-        screenText = "Screen: " .. RoundRepairNumber(width) .. " x " .. RoundRepairNumber(height)
-    end
-    if scale ~= nil then
-        if scale > 10 then
-            screenText = screenText .. "  UI scale: " .. RoundRepairNumber(scale) .. "%"
-        else
-            screenText = screenText .. "  UI scale: " .. string.format("%.2f", scale)
-        end
-    else
-        screenText = screenText .. "  UI scale: unavailable"
-    end
-
-    local s = SettingsPage.settings
-    local frameBits = {}
-    if type(s) == "table" then
-        for _, item in ipairs(REPAIR_FRAME_DEFAULTS) do
-            frameBits[#frameBits + 1] = item.label .. " " .. FormatRepairPair(s[item.key])
-        end
-    end
-    if #frameBits == 0 then
-        frameBits[1] = "Frame positions unavailable"
-    end
-
-    local launcherText = "Launcher: unavailable"
-    local castText = "Cast bar: unavailable"
-    if type(s) == "table" then
-        launcherText = "Launcher " .. FormatRepairPair(s.settings_button)
-        if type(s.cast_bar) == "table" then
-            castText = "Cast bar (" ..
-                RoundRepairNumber(s.cast_bar.pos_x) .. ", " ..
-                RoundRepairNumber(s.cast_bar.pos_y) .. ")"
-            if s.cast_bar.position_initialized == false then
-                castText = castText .. " not initialized"
-            end
-        end
-    end
-
-    SetReadableControlText(SettingsPage.controls.repair_display_info, screenText)
-    SetReadableControlText(SettingsPage.controls.repair_frame_info, table.concat(frameBits, "  "))
-    SetReadableControlText(SettingsPage.controls.repair_extra_info, launcherText .. "  " .. castText)
-end
-
-local function SetRepairPosition(settings, key, x, y)
-    if type(settings) ~= "table" or type(key) ~= "string" then
-        return
-    end
-    if type(settings[key]) ~= "table" then
-        settings[key] = {}
-    end
-    settings[key].x = math.floor((tonumber(x) or 0) + 0.5)
-    settings[key].y = math.floor((tonumber(y) or 0) + 0.5)
-end
-
-local function ResetCoreFramePositions(settings)
-    for _, item in ipairs(REPAIR_FRAME_DEFAULTS) do
-        SetRepairPosition(settings, item.key, item.x, item.y)
+    local fn = SettingsSchemaCustom ~= nil and SettingsSchemaCustom.RefreshRepairDiagnostics or nil
+    if type(fn) == "function" then
+        fn(MakeCustomSchemaContext())
     end
 end
 
-local function CenterCoreFramePositions(settings)
-    local screenWidth = GetInterfaceNumber("GetScreenWidth") or 1920
-    local screenHeight = GetInterfaceNumber("GetScreenHeight") or 1080
-    local frameWidth = tonumber(settings.frame_width) or 320
-    local frameHeight = tonumber(settings.frame_height) or 64
-    local frameScale = 1
-    local hasStyleScale = false
-    if type(settings.style) == "table" then
-        if tonumber(settings.style.frame_width) ~= nil then
-            frameWidth = tonumber(settings.style.frame_width)
-        end
-        if tonumber(settings.style.frame_scale) ~= nil then
-            frameScale = tonumber(settings.style.frame_scale)
-            hasStyleScale = true
-        end
+local function CallCustomSchemaRenderer(name, parent, y)
+    local fn = SettingsSchemaCustom ~= nil and SettingsSchemaCustom[name] or nil
+    if type(fn) == "function" then
+        return fn(MakeCustomSchemaContext(), parent, y)
     end
-    if not hasStyleScale and tonumber(settings.frame_scale) ~= nil then
-        frameScale = tonumber(settings.frame_scale)
-    end
-    if frameScale <= 0 then
-        frameScale = 1
-    end
-
-    local scaledWidth = frameWidth * frameScale
-    local rowHeight = math.max(36, (frameHeight * frameScale) + 12)
-    local totalHeight = rowHeight * #REPAIR_FRAME_DEFAULTS
-    local x = math.floor(((screenWidth - scaledWidth) / 2) + 0.5)
-    local y = math.floor(((screenHeight - totalHeight) / 2) + 0.5)
-    if x < 0 then
-        x = 0
-    end
-    if y < 0 then
-        y = 0
-    end
-
-    for index, item in ipairs(REPAIR_FRAME_DEFAULTS) do
-        SetRepairPosition(settings, item.key, x, y + math.floor((index - 1) * rowHeight + 0.5))
-    end
+    return y
 end
-
-local function ResetCastBarPosition(settings)
-    if type(settings.cast_bar) ~= "table" then
-        settings.cast_bar = {}
-    end
-    settings.cast_bar.pos_x = 0
-    settings.cast_bar.pos_y = 0
-    settings.cast_bar.anchor_mode = nil
-    settings.cast_bar.position_initialized = false
-end
-
-local function ResetLauncherPosition(settings)
-    if type(settings.settings_button) ~= "table" then
-        settings.settings_button = {}
-    end
-    settings.settings_button.x = 10
-    settings.settings_button.y = 200
-    if tonumber(settings.settings_button.size) == nil then
-        settings.settings_button.size = 48
-    end
-end
-
-local function ResetNameplateOffsets(settings)
-    if type(settings.nameplates) ~= "table" then
-        settings.nameplates = {}
-    end
-    settings.nameplates.x_offset = 0
-    settings.nameplates.y_offset = 22
-    settings.nameplates.anchor_to_nametag = true
-end
-
-local function ResetCooldownPositions(settings)
-    if type(settings.cooldown_tracker) ~= "table" then
-        settings.cooldown_tracker = {}
-    end
-    if type(settings.cooldown_tracker.units) ~= "table" then
-        settings.cooldown_tracker.units = {}
-    end
-    for key, pos in pairs(REPAIR_COOLDOWN_DEFAULTS) do
-        if type(settings.cooldown_tracker.units[key]) ~= "table" then
-            settings.cooldown_tracker.units[key] = {}
-        end
-        settings.cooldown_tracker.units[key].pos_x = pos.x
-        settings.cooldown_tracker.units[key].pos_y = pos.y
-    end
-end
-
-local function SaveApplyRepair(message)
-    if type(SettingsPage.on_save) == "function" then
-        pcall(function()
-            SettingsPage.on_save()
-        end)
-    end
-    if type(SettingsPage.on_apply) == "function" then
-        pcall(function()
-            SettingsPage.on_apply()
-        end)
-    end
-    if type(RefreshControls) == "function" then
-        pcall(function()
-            RefreshControls()
-        end)
-    else
-        RefreshRepairDiagnostics()
-    end
-    SetRepairStatus(message)
-end
-
-local function RunRepairAction(action, successMessage)
-    if type(SettingsPage.settings) ~= "table" then
-        SetRepairStatus("Settings are not ready yet.")
-        return
-    end
-    if type(ApplyControlsToSettings) == "function" then
-        pcall(function()
-            ApplyControlsToSettings()
-        end)
-    end
-
-    local ok, err = pcall(function()
-        action(SettingsPage.settings)
-    end)
-    if ok then
-        SaveApplyRepair(successMessage)
-    else
-        SetRepairStatus("Repair failed: " .. tostring(err))
-    end
-end
-
-local function CreateRepairButton(parent, id, text, x, y, width, handler)
-    local button = CreateButton(id, parent, text, x, y)
-    if button ~= nil then
-        pcall(function()
-            button:SetExtent(width or 170, 24)
-        end)
-        if button.SetHandler ~= nil then
-            button:SetHandler("OnClick", handler)
-        end
-    end
-    return button
-end
-
-local function BuildSchemaRepairDiagnostics(parent, y)
-    SettingsPage.controls.repair_display_info = CreateHintLabel(
-        "polarUiRepairDisplayInfo",
-        parent,
-        "",
-        0,
-        y,
-        520
-    )
-    y = y + 30
-    SettingsPage.controls.repair_frame_info = CreateHintLabel("polarUiRepairFrameInfo", parent, "", 0, y, 520)
-    y = y + 46
-    SettingsPage.controls.repair_extra_info = CreateHintLabel("polarUiRepairExtraInfo", parent, "", 0, y, 520)
-    y = y + 34
-    CreateRepairButton(parent, "polarUiRepairRefresh", "Refresh", 0, y, 120, function()
-        RefreshRepairDiagnostics()
-        SetRepairStatus("Diagnostics refreshed.")
-    end)
-    RefreshRepairDiagnostics()
-    return y + 32
-end
-
-local function BuildSchemaRepairActions(parent, y)
-    CreateRepairButton(parent, "polarUiRepairResetFrames", "Reset Frames", 0, y, 170, function()
-        RunRepairAction(ResetCoreFramePositions, "Frame positions reset.")
-    end)
-    CreateRepairButton(parent, "polarUiRepairCenterFrames", "Center Frames", 190, y, 170, function()
-        RunRepairAction(CenterCoreFramePositions, "Frame positions centered.")
-    end)
-    y = y + 32
-
-    CreateRepairButton(parent, "polarUiRepairResetCastBar", "Reset Cast Bar", 0, y, 170, function()
-        RunRepairAction(ResetCastBarPosition, "Cast bar position reset.")
-    end)
-    CreateRepairButton(parent, "polarUiRepairResetLauncher", "Reset Launcher", 190, y, 170, function()
-        RunRepairAction(ResetLauncherPosition, "Launcher position reset.")
-    end)
-    y = y + 32
-
-    CreateRepairButton(parent, "polarUiRepairResetPlates", "Reset Nameplates", 0, y, 170, function()
-        RunRepairAction(ResetNameplateOffsets, "Nameplate offsets reset.")
-    end)
-    CreateRepairButton(parent, "polarUiRepairResetCooldowns", "Reset Cooldowns", 190, y, 170, function()
-        RunRepairAction(ResetCooldownPositions, "Cooldown tracker positions reset.")
-    end)
-    y = y + 32
-
-    CreateRepairButton(parent, "polarUiRepairResetAll", "Reset All Layout", 0, y, 170, function()
-        RunRepairAction(function(settings)
-            ResetCoreFramePositions(settings)
-            ResetCastBarPosition(settings)
-            ResetLauncherPosition(settings)
-            ResetNameplateOffsets(settings)
-            ResetCooldownPositions(settings)
-        end, "All saved layout positions reset.")
-    end)
-    y = y + 38
-
-    SettingsPage.controls.repair_status = CreateHintLabel("polarUiRepairStatus", parent, "", 0, y, 520)
-    SetRepairStatus("")
-    return y + 36
-end
-
 local CUSTOM_SCHEMA_RENDERERS = {
-    plates_guild_colors = BuildSchemaPlatesGuildColorEditor,
-    ui_repair_diagnostics = BuildSchemaRepairDiagnostics,
-    ui_repair_actions = BuildSchemaRepairActions
+    plates_guild_colors = function(parent, y) return CallCustomSchemaRenderer("BuildPlatesGuildColorEditor", parent, y) end,
+    ui_repair_diagnostics = function(parent, y) return CallCustomSchemaRenderer("BuildRepairDiagnostics", parent, y) end,
+    ui_repair_actions = function(parent, y) return CallCustomSchemaRenderer("BuildRepairActions", parent, y) end,
+    gear_loadouts_editor_button = function(parent, y) return CallCustomSchemaRenderer("BuildGearLoadoutActions", parent, y) end
 }
 
 local function BuildSchemaField(parent, y, field)
@@ -2334,6 +1505,74 @@ RefreshControls = function()
         refreshSlider(SettingsPage.controls.castbar_text_a, SettingsPage.controls.castbar_text_a_val, tonumber(castBarText[4]) or 255)
     end
 
+    local travelSpeed = type(s.travel_speed) == "table" and s.travel_speed or {}
+    if SettingsPage.controls.travel_speed_enabled ~= nil then
+        SettingsPage.controls.travel_speed_enabled:SetChecked(travelSpeed.enabled and true or false)
+    end
+    if SettingsPage.controls.travel_speed_lock_position ~= nil then
+        SettingsPage.controls.travel_speed_lock_position:SetChecked(travelSpeed.lock_position and true or false)
+    end
+    if SettingsPage.controls.travel_speed_only_vehicle_or_mount ~= nil then
+        SettingsPage.controls.travel_speed_only_vehicle_or_mount:SetChecked(travelSpeed.only_vehicle_or_mount and true or false)
+    end
+    if SettingsPage.controls.travel_speed_show_bar ~= nil then
+        SettingsPage.controls.travel_speed_show_bar:SetChecked(travelSpeed.show_bar ~= false)
+    end
+    if SettingsPage.controls.travel_speed_show_state_text ~= nil then
+        SettingsPage.controls.travel_speed_show_state_text:SetChecked(travelSpeed.show_state_text ~= false)
+    end
+    if SettingsPage.controls.travel_speed_width ~= nil then
+        refreshSlider(
+            SettingsPage.controls.travel_speed_width,
+            SettingsPage.controls.travel_speed_width_val,
+            tonumber(travelSpeed.width) or 220
+        )
+    end
+    if SettingsPage.controls.travel_speed_scale ~= nil then
+        local speedScalePct = math.floor(((tonumber(travelSpeed.scale) or 1) * 100) + 0.5)
+        if speedScalePct < 75 then
+            speedScalePct = 75
+        elseif speedScalePct > 160 then
+            speedScalePct = 160
+        end
+        refreshSlider(SettingsPage.controls.travel_speed_scale, SettingsPage.controls.travel_speed_scale_val, speedScalePct)
+    end
+    if SettingsPage.controls.travel_speed_font_size ~= nil then
+        refreshSlider(
+            SettingsPage.controls.travel_speed_font_size,
+            SettingsPage.controls.travel_speed_font_size_val,
+            tonumber(travelSpeed.font_size) or 20
+        )
+    end
+
+    local gearLoadouts = type(s.gear_loadouts) == "table" and s.gear_loadouts or {}
+    if SettingsPage.controls.gear_loadouts_enabled ~= nil then
+        SettingsPage.controls.gear_loadouts_enabled:SetChecked(gearLoadouts.enabled and true or false)
+    end
+    if SettingsPage.controls.gear_loadouts_lock_bar ~= nil then
+        SettingsPage.controls.gear_loadouts_lock_bar:SetChecked(gearLoadouts.lock_bar and true or false)
+    end
+    if SettingsPage.controls.gear_loadouts_lock_editor ~= nil then
+        SettingsPage.controls.gear_loadouts_lock_editor:SetChecked(gearLoadouts.lock_editor and true or false)
+    end
+    if SettingsPage.controls.gear_loadouts_show_icons ~= nil then
+        SettingsPage.controls.gear_loadouts_show_icons:SetChecked(gearLoadouts.show_icons and true or false)
+    end
+    if SettingsPage.controls.gear_loadouts_button_size ~= nil then
+        refreshSlider(
+            SettingsPage.controls.gear_loadouts_button_size,
+            SettingsPage.controls.gear_loadouts_button_size_val,
+            tonumber(gearLoadouts.button_size) or 38
+        )
+    end
+    if SettingsPage.controls.gear_loadouts_button_width ~= nil then
+        refreshSlider(
+            SettingsPage.controls.gear_loadouts_button_width,
+            SettingsPage.controls.gear_loadouts_button_width_val,
+            tonumber(gearLoadouts.button_width) or 126
+        )
+    end
+
     local npcStyle = nil
     npcStyle, _ = GetTargetFrameStyleTables(s)
     if SettingsPage.controls.target_grade_star_offset_x ~= nil then
@@ -2494,6 +1733,64 @@ RefreshControls = function()
         end
         if SettingsPage.controls.plates_guild_fs ~= nil then
             refreshSlider(SettingsPage.controls.plates_guild_fs, SettingsPage.controls.plates_guild_fs_val, tonumber(s.nameplates.guild_font_size) or 11)
+        end
+
+        local debuffs = type(s.nameplates.debuffs) == "table" and s.nameplates.debuffs or {}
+        if SettingsPage.controls.plates_debuffs_enabled ~= nil then
+            SettingsPage.controls.plates_debuffs_enabled:SetChecked(debuffs.enabled and true or false)
+        end
+        if SettingsPage.controls.plates_debuffs_track_raid ~= nil then
+            SettingsPage.controls.plates_debuffs_track_raid:SetChecked(tostring(debuffs.tracking_scope or "focus") == "raid")
+        end
+        if SettingsPage.controls.plates_debuffs_show_timer ~= nil then
+            SettingsPage.controls.plates_debuffs_show_timer:SetChecked(debuffs.show_timer ~= false)
+        end
+        if SettingsPage.controls.plates_debuffs_show_secondary ~= nil then
+            SettingsPage.controls.plates_debuffs_show_secondary:SetChecked(debuffs.show_secondary ~= false)
+        end
+        if SettingsPage.controls.plates_debuffs_anchor ~= nil then
+            SettingsPage._refreshing_debuff_anchor = true
+            SetComboBoxIndex1Based(SettingsPage.controls.plates_debuffs_anchor, GetDebuffAnchorIndex(debuffs.anchor))
+            SettingsPage._refreshing_debuff_anchor = false
+        end
+        if SettingsPage.controls.plates_debuffs_max_icons ~= nil then
+            refreshSlider(SettingsPage.controls.plates_debuffs_max_icons, SettingsPage.controls.plates_debuffs_max_icons_val, tonumber(debuffs.max_icons) or 4)
+        end
+        if SettingsPage.controls.plates_debuffs_icon_size ~= nil then
+            refreshSlider(SettingsPage.controls.plates_debuffs_icon_size, SettingsPage.controls.plates_debuffs_icon_size_val, tonumber(debuffs.icon_size) or 30)
+        end
+        if SettingsPage.controls.plates_debuffs_secondary_size ~= nil then
+            refreshSlider(SettingsPage.controls.plates_debuffs_secondary_size, SettingsPage.controls.plates_debuffs_secondary_size_val, tonumber(debuffs.secondary_icon_size) or 18)
+        end
+        if SettingsPage.controls.plates_debuffs_timer_size ~= nil then
+            refreshSlider(SettingsPage.controls.plates_debuffs_timer_size, SettingsPage.controls.plates_debuffs_timer_size_val, tonumber(debuffs.timer_font_size) or 11)
+        end
+        if SettingsPage.controls.plates_debuffs_gap ~= nil then
+            refreshSlider(SettingsPage.controls.plates_debuffs_gap, SettingsPage.controls.plates_debuffs_gap_val, tonumber(debuffs.gap) or 4)
+        end
+        if SettingsPage.controls.plates_debuffs_offset_x ~= nil then
+            refreshSlider(SettingsPage.controls.plates_debuffs_offset_x, SettingsPage.controls.plates_debuffs_offset_x_val, tonumber(debuffs.offset_x) or 0)
+        end
+        if SettingsPage.controls.plates_debuffs_offset_y ~= nil then
+            refreshSlider(SettingsPage.controls.plates_debuffs_offset_y, SettingsPage.controls.plates_debuffs_offset_y_val, tonumber(debuffs.offset_y) or -8)
+        end
+        if SettingsPage.controls.plates_debuffs_show_hard ~= nil then
+            SettingsPage.controls.plates_debuffs_show_hard:SetChecked(debuffs.show_hard ~= false)
+        end
+        if SettingsPage.controls.plates_debuffs_show_silence ~= nil then
+            SettingsPage.controls.plates_debuffs_show_silence:SetChecked(debuffs.show_silence ~= false)
+        end
+        if SettingsPage.controls.plates_debuffs_show_root ~= nil then
+            SettingsPage.controls.plates_debuffs_show_root:SetChecked(debuffs.show_root ~= false)
+        end
+        if SettingsPage.controls.plates_debuffs_show_slow ~= nil then
+            SettingsPage.controls.plates_debuffs_show_slow:SetChecked(debuffs.show_slow ~= false)
+        end
+        if SettingsPage.controls.plates_debuffs_show_dot ~= nil then
+            SettingsPage.controls.plates_debuffs_show_dot:SetChecked(debuffs.show_dot ~= false)
+        end
+        if SettingsPage.controls.plates_debuffs_show_misc ~= nil then
+            SettingsPage.controls.plates_debuffs_show_misc:SetChecked(debuffs.show_misc ~= false)
         end
 
         if SettingsPage.controls.plates_guild_color_r ~= nil then
@@ -2845,6 +2142,9 @@ RefreshControls = function()
     if SettingsPage.controls.ct_display_mode ~= nil then
         SetComboBoxIndex1Based(SettingsPage.controls.ct_display_mode, GetCooldownDisplayModeIndex(selectedUnitCfg.display_mode))
     end
+    if SettingsPage.controls.ct_display_style ~= nil then
+        SetComboBoxIndex1Based(SettingsPage.controls.ct_display_style, GetCooldownDisplayStyleIndex(selectedUnitCfg.display_style))
+    end
     if SettingsPage.controls.ct_track_kind ~= nil then
         SetComboBoxIndex1Based(SettingsPage.controls.ct_track_kind, GetCooldownTrackKindIndex(SettingsPage.cooldown_track_kind))
     end
@@ -2873,6 +2173,12 @@ RefreshControls = function()
     end
     if SettingsPage.controls.ct_max_icons ~= nil then
         refreshSlider(SettingsPage.controls.ct_max_icons, SettingsPage.controls.ct_max_icons_val, tonumber(selectedUnitCfg.max_icons) or 10)
+    end
+    if SettingsPage.controls.ct_bar_width ~= nil then
+        refreshSlider(SettingsPage.controls.ct_bar_width, SettingsPage.controls.ct_bar_width_val, tonumber(selectedUnitCfg.bar_width) or 180)
+    end
+    if SettingsPage.controls.ct_bar_height ~= nil then
+        refreshSlider(SettingsPage.controls.ct_bar_height, SettingsPage.controls.ct_bar_height_val, tonumber(selectedUnitCfg.bar_height) or 14)
     end
     if SettingsPage.controls.ct_show_timer ~= nil then
         SettingsPage.controls.ct_show_timer:SetChecked(selectedUnitCfg.show_timer ~= false)
@@ -2906,12 +2212,32 @@ RefreshControls = function()
     if SettingsPage.controls.ct_label_b ~= nil then
         refreshSlider(SettingsPage.controls.ct_label_b, SettingsPage.controls.ct_label_b_val, tonumber(labelColor[3]) or 255)
     end
+    local barFillColor = type(selectedUnitCfg.bar_fill_color) == "table" and selectedUnitCfg.bar_fill_color or { 207, 74, 22, 255 }
+    if SettingsPage.controls.ct_bar_fill_r ~= nil then
+        refreshSlider(SettingsPage.controls.ct_bar_fill_r, SettingsPage.controls.ct_bar_fill_r_val, tonumber(barFillColor[1]) or 207)
+    end
+    if SettingsPage.controls.ct_bar_fill_g ~= nil then
+        refreshSlider(SettingsPage.controls.ct_bar_fill_g, SettingsPage.controls.ct_bar_fill_g_val, tonumber(barFillColor[2]) or 74)
+    end
+    if SettingsPage.controls.ct_bar_fill_b ~= nil then
+        refreshSlider(SettingsPage.controls.ct_bar_fill_b, SettingsPage.controls.ct_bar_fill_b_val, tonumber(barFillColor[3]) or 22)
+    end
+    local barBgColor = type(selectedUnitCfg.bar_bg_color) == "table" and selectedUnitCfg.bar_bg_color or { 18, 18, 18, 220 }
+    if SettingsPage.controls.ct_bar_bg_r ~= nil then
+        refreshSlider(SettingsPage.controls.ct_bar_bg_r, SettingsPage.controls.ct_bar_bg_r_val, tonumber(barBgColor[1]) or 18)
+    end
+    if SettingsPage.controls.ct_bar_bg_g ~= nil then
+        refreshSlider(SettingsPage.controls.ct_bar_bg_g, SettingsPage.controls.ct_bar_bg_g_val, tonumber(barBgColor[2]) or 18)
+    end
+    if SettingsPage.controls.ct_bar_bg_b ~= nil then
+        refreshSlider(SettingsPage.controls.ct_bar_bg_b, SettingsPage.controls.ct_bar_bg_b_val, tonumber(barBgColor[3]) or 18)
+    end
     if SettingsPage.controls.ct_cache_timeout ~= nil then
         refreshSlider(SettingsPage.controls.ct_cache_timeout, SettingsPage.controls.ct_cache_timeout_val, tonumber(selectedUnitCfg.cache_timeout_s) or 300)
     end
     RefreshCooldownSearchRows()
     RefreshCooldownBuffRows(selectedUnitCfg)
-    RefreshCooldownScanRows()
+    SettingsCooldown.RefreshScanRows(SettingsPage)
     RefreshSchemaControlStates()
     RefreshRepairDiagnostics()
 
@@ -2982,6 +2308,56 @@ ApplyControlsToSettings = function()
     end
     if SettingsPage.controls.castbar_text_offset_y ~= nil then
         s.cast_bar.text_offset_y = GetSliderValue(SettingsPage.controls.castbar_text_offset_y)
+    end
+
+    if type(s.travel_speed) ~= "table" then
+        s.travel_speed = {}
+    end
+    if SettingsPage.controls.travel_speed_enabled ~= nil then
+        s.travel_speed.enabled = SettingsPage.controls.travel_speed_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.travel_speed_lock_position ~= nil then
+        s.travel_speed.lock_position = SettingsPage.controls.travel_speed_lock_position:GetChecked() and true or false
+    end
+    if SettingsPage.controls.travel_speed_only_vehicle_or_mount ~= nil then
+        s.travel_speed.only_vehicle_or_mount = SettingsPage.controls.travel_speed_only_vehicle_or_mount:GetChecked() and true or false
+    end
+    if SettingsPage.controls.travel_speed_show_bar ~= nil then
+        s.travel_speed.show_bar = SettingsPage.controls.travel_speed_show_bar:GetChecked() and true or false
+    end
+    if SettingsPage.controls.travel_speed_show_state_text ~= nil then
+        s.travel_speed.show_state_text = SettingsPage.controls.travel_speed_show_state_text:GetChecked() and true or false
+    end
+    if SettingsPage.controls.travel_speed_width ~= nil then
+        s.travel_speed.width = GetSliderValue(SettingsPage.controls.travel_speed_width)
+    end
+    if SettingsPage.controls.travel_speed_scale ~= nil then
+        s.travel_speed.scale = GetSliderValue(SettingsPage.controls.travel_speed_scale) / 100
+    end
+    if SettingsPage.controls.travel_speed_font_size ~= nil then
+        s.travel_speed.font_size = GetSliderValue(SettingsPage.controls.travel_speed_font_size)
+    end
+
+    if type(s.gear_loadouts) ~= "table" then
+        s.gear_loadouts = {}
+    end
+    if SettingsPage.controls.gear_loadouts_enabled ~= nil then
+        s.gear_loadouts.enabled = SettingsPage.controls.gear_loadouts_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.gear_loadouts_lock_bar ~= nil then
+        s.gear_loadouts.lock_bar = SettingsPage.controls.gear_loadouts_lock_bar:GetChecked() and true or false
+    end
+    if SettingsPage.controls.gear_loadouts_lock_editor ~= nil then
+        s.gear_loadouts.lock_editor = SettingsPage.controls.gear_loadouts_lock_editor:GetChecked() and true or false
+    end
+    if SettingsPage.controls.gear_loadouts_show_icons ~= nil then
+        s.gear_loadouts.show_icons = SettingsPage.controls.gear_loadouts_show_icons:GetChecked() and true or false
+    end
+    if SettingsPage.controls.gear_loadouts_button_size ~= nil then
+        s.gear_loadouts.button_size = GetSliderValue(SettingsPage.controls.gear_loadouts_button_size)
+    end
+    if SettingsPage.controls.gear_loadouts_button_width ~= nil then
+        s.gear_loadouts.button_width = GetSliderValue(SettingsPage.controls.gear_loadouts_button_width)
     end
 
     EnsureStyleFrames(s)
@@ -3104,6 +2480,64 @@ ApplyControlsToSettings = function()
     end
     if SettingsPage.controls.plates_guild_fs ~= nil then
         s.nameplates.guild_font_size = GetSliderValue(SettingsPage.controls.plates_guild_fs)
+    end
+    if type(s.nameplates.debuffs) ~= "table" then
+        s.nameplates.debuffs = {}
+    end
+    if SettingsPage.controls.plates_debuffs_enabled ~= nil then
+        s.nameplates.debuffs.enabled = SettingsPage.controls.plates_debuffs_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.plates_debuffs_track_raid ~= nil then
+        s.nameplates.debuffs.tracking_scope = SettingsPage.controls.plates_debuffs_track_raid:GetChecked() and "raid" or "focus"
+    end
+    if SettingsPage.controls.plates_debuffs_show_timer ~= nil then
+        s.nameplates.debuffs.show_timer = SettingsPage.controls.plates_debuffs_show_timer:GetChecked() and true or false
+    end
+    if SettingsPage.controls.plates_debuffs_show_secondary ~= nil then
+        s.nameplates.debuffs.show_secondary = SettingsPage.controls.plates_debuffs_show_secondary:GetChecked() and true or false
+    end
+    if SettingsPage.controls.plates_debuffs_anchor ~= nil then
+        local idx = GetComboBoxIndex1Based(SettingsPage.controls.plates_debuffs_anchor, #DEBUFF_ANCHOR_KEYS)
+        s.nameplates.debuffs.anchor = GetDebuffAnchorFromIndex(idx)
+    end
+    if SettingsPage.controls.plates_debuffs_max_icons ~= nil then
+        s.nameplates.debuffs.max_icons = GetSliderValue(SettingsPage.controls.plates_debuffs_max_icons)
+    end
+    if SettingsPage.controls.plates_debuffs_icon_size ~= nil then
+        s.nameplates.debuffs.icon_size = GetSliderValue(SettingsPage.controls.plates_debuffs_icon_size)
+    end
+    if SettingsPage.controls.plates_debuffs_secondary_size ~= nil then
+        s.nameplates.debuffs.secondary_icon_size = GetSliderValue(SettingsPage.controls.plates_debuffs_secondary_size)
+    end
+    if SettingsPage.controls.plates_debuffs_timer_size ~= nil then
+        s.nameplates.debuffs.timer_font_size = GetSliderValue(SettingsPage.controls.plates_debuffs_timer_size)
+    end
+    if SettingsPage.controls.plates_debuffs_gap ~= nil then
+        s.nameplates.debuffs.gap = GetSliderValue(SettingsPage.controls.plates_debuffs_gap)
+    end
+    if SettingsPage.controls.plates_debuffs_offset_x ~= nil then
+        s.nameplates.debuffs.offset_x = GetSliderValue(SettingsPage.controls.plates_debuffs_offset_x)
+    end
+    if SettingsPage.controls.plates_debuffs_offset_y ~= nil then
+        s.nameplates.debuffs.offset_y = GetSliderValue(SettingsPage.controls.plates_debuffs_offset_y)
+    end
+    if SettingsPage.controls.plates_debuffs_show_hard ~= nil then
+        s.nameplates.debuffs.show_hard = SettingsPage.controls.plates_debuffs_show_hard:GetChecked() and true or false
+    end
+    if SettingsPage.controls.plates_debuffs_show_silence ~= nil then
+        s.nameplates.debuffs.show_silence = SettingsPage.controls.plates_debuffs_show_silence:GetChecked() and true or false
+    end
+    if SettingsPage.controls.plates_debuffs_show_root ~= nil then
+        s.nameplates.debuffs.show_root = SettingsPage.controls.plates_debuffs_show_root:GetChecked() and true or false
+    end
+    if SettingsPage.controls.plates_debuffs_show_slow ~= nil then
+        s.nameplates.debuffs.show_slow = SettingsPage.controls.plates_debuffs_show_slow:GetChecked() and true or false
+    end
+    if SettingsPage.controls.plates_debuffs_show_dot ~= nil then
+        s.nameplates.debuffs.show_dot = SettingsPage.controls.plates_debuffs_show_dot:GetChecked() and true or false
+    end
+    if SettingsPage.controls.plates_debuffs_show_misc ~= nil then
+        s.nameplates.debuffs.show_misc = SettingsPage.controls.plates_debuffs_show_misc:GetChecked() and true or false
     end
 
     if SettingsPage.controls.large_hpmp ~= nil then
@@ -3467,6 +2901,10 @@ ApplyControlsToSettings = function()
         local idx = GetComboBoxIndex1Based(SettingsPage.controls.ct_display_mode, #COOLDOWN_DISPLAY_MODE_LABELS)
         selectedUnitCfg.display_mode = GetCooldownDisplayModeFromIndex(idx)
     end
+    if SettingsPage.controls.ct_display_style ~= nil then
+        local idx = GetComboBoxIndex1Based(SettingsPage.controls.ct_display_style, #COOLDOWN_DISPLAY_STYLE_LABELS)
+        selectedUnitCfg.display_style = GetCooldownDisplayStyleFromIndex(idx)
+    end
     if SettingsPage.controls.ct_pos_x ~= nil then
         local x = ParseEditNumber(SettingsPage.controls.ct_pos_x)
         if x ~= nil then
@@ -3487,6 +2925,12 @@ ApplyControlsToSettings = function()
     end
     if SettingsPage.controls.ct_max_icons ~= nil then
         selectedUnitCfg.max_icons = GetSliderValue(SettingsPage.controls.ct_max_icons)
+    end
+    if SettingsPage.controls.ct_bar_width ~= nil then
+        selectedUnitCfg.bar_width = GetSliderValue(SettingsPage.controls.ct_bar_width)
+    end
+    if SettingsPage.controls.ct_bar_height ~= nil then
+        selectedUnitCfg.bar_height = GetSliderValue(SettingsPage.controls.ct_bar_height)
     end
     if SettingsPage.controls.ct_show_timer ~= nil then
         selectedUnitCfg.show_timer = SettingsPage.controls.ct_show_timer:GetChecked() and true or false
@@ -3514,6 +2958,22 @@ ApplyControlsToSettings = function()
             GetSliderValue(SettingsPage.controls.ct_label_g),
             GetSliderValue(SettingsPage.controls.ct_label_b),
             255
+        )
+    end
+    if SettingsPage.controls.ct_bar_fill_r ~= nil and SettingsPage.controls.ct_bar_fill_g ~= nil and SettingsPage.controls.ct_bar_fill_b ~= nil then
+        selectedUnitCfg.bar_fill_color = colorTable(
+            GetSliderValue(SettingsPage.controls.ct_bar_fill_r),
+            GetSliderValue(SettingsPage.controls.ct_bar_fill_g),
+            GetSliderValue(SettingsPage.controls.ct_bar_fill_b),
+            255
+        )
+    end
+    if SettingsPage.controls.ct_bar_bg_r ~= nil and SettingsPage.controls.ct_bar_bg_g ~= nil and SettingsPage.controls.ct_bar_bg_b ~= nil then
+        selectedUnitCfg.bar_bg_color = colorTable(
+            GetSliderValue(SettingsPage.controls.ct_bar_bg_r),
+            GetSliderValue(SettingsPage.controls.ct_bar_bg_g),
+            GetSliderValue(SettingsPage.controls.ct_bar_bg_b),
+            220
         )
     end
     if SettingsPage.controls.ct_cache_timeout ~= nil then
@@ -3562,7 +3022,7 @@ local function EnsureWindow()
         return
     end
     if SettingsPage.window.SetExtent ~= nil then
-        SettingsPage.window:SetExtent(820, 760)
+        SettingsPage.window:SetExtent(920, 760)
     end
     if SettingsPage.window.EnableHidingIsRemove ~= nil then
         SettingsPage.window:EnableHidingIsRemove(false)
@@ -3613,7 +3073,7 @@ local function EnsureWindow()
             end
         end)
         CreateLabel("polarUiHeaderTitle", header, "Nuzi UI Settings", 16, 8, 15, 260)
-        local headerClose = CreateButton("polarUiHeaderClose", header, "X", 778, 4)
+        local headerClose = CreateButton("polarUiHeaderClose", header, "X", 878, 4)
         if headerClose ~= nil then
             pcall(function()
                 headerClose:SetExtent(28, 24)
@@ -3689,7 +3149,7 @@ local function EnsureWindow()
                 SettingsPage.scroll_frame:AddAnchor("TOPLEFT", SettingsPage.window, 185, 105)
                 SettingsPage.scroll_frame:AddAnchor("BOTTOMRIGHT", SettingsPage.window, -15, -50)
             end
-            SettingsPage.scroll_frame:SetExtent(620, 585)
+            SettingsPage.scroll_frame:SetExtent(700, 585)
         end)
 
         if SettingsPage.scroll_frame.CreateChildWidget ~= nil then
@@ -3801,10 +3261,10 @@ local function EnsureWindow()
 
     CreateLabel("polarUiNavTitle", navParent, "Sections", 14, 12, 18)
     SettingsPage.controls.page_header_title = CreateLabel("polarUiPageHeaderTitle", headerParent, "", 18, 12, 18)
-    SettingsPage.controls.page_header_summary = CreateHintLabel("polarUiPageHeaderSummary", headerParent, "", 18, 38, 600)
+    SettingsPage.controls.page_header_summary = CreateHintLabel("polarUiPageHeaderSummary", headerParent, "", 18, 38, 690)
     if SettingsPage.controls.page_header_summary ~= nil then
         SettingsPage.controls.page_header_summary:SetExtent(
-            600,
+            690,
             math.max(32, tonumber(SettingsPage.controls.page_header_summary.__polar_estimated_height) or 16)
         )
     end
@@ -3841,1387 +3301,8 @@ local function EnsureWindow()
         BuildSchemaPage(schemaPageId)
     end
 
-    if false then
-
-    do
-        local page = SettingsPage.pages.general
-        local y = 35
-        CreateLabel("polarUiGeneralPageTitle", page, "General", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.enabled = CreateCheckbox("polarUiEnabled", page, "Enable Nuzi UI overlays", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.large_hpmp = CreateCheckbox("polarUiLargeHpMp", page, "Large HP/MP text", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.alignment_grid_enabled = CreateCheckbox(
-            "polarUiAlignmentGridEnabled",
-            page,
-            "Show alignment grid (30px)",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.launcher_size, SettingsPage.controls.launcher_size_val = CreateSlider(
-            "polarUiLauncherSize",
-            page,
-            "Launcher size",
-            15,
-            y,
-            36,
-            96,
-            1
-        )
-        y = y + 34
-
-        SettingsPage.page_heights.general = y + 40
-    end
-
-    do
-        local page = SettingsPage.pages.npc
-        local y = 35
-        CreateLabel("polarUiNpcPageTitle", page, "NPC", 15, y, 18)
-        y = y + 30
-
-        CreateLabel("polarUiNpcUnitArtTitle", page, "Unit Frame Art", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.hide_ancestral_icon_level = CreateCheckbox(
-            "polarUiHideAncestralLevel",
-            page,
-            "Hide ancestral icon and level",
-            15,
-            y
-        )
-        y = y + gap + 10
-
-        CreateLabel("polarUiNpcTargetFrameTitle", page, "Target Frame", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.hide_boss_frame_background = CreateCheckbox(
-            "polarUiHideBossBackground",
-            page,
-            "Hide boss frame background",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.hide_target_grade_star = CreateCheckbox(
-            "polarUiHideTargetGradeStar",
-            page,
-            "Hide target grade stars",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.show_distance = CreateCheckbox(
-            "polarUiShowDistance",
-            page,
-            "Show target distance",
-            15,
-            y
-        )
-        y = y + gap + 10
-
-        CreateLabel("polarUiNpcGradeStarTitle", page, "Grade Star Placement", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.npc_grade_star_hint = CreateHintLabel(
-            "polarUiNpcGradeStarHint",
-            page,
-            "Offsets apply when grade stars are visible. Zero keeps the stock placement.",
-            15,
-            y,
-            540
-        )
-        y = y + 28
-
-        SettingsPage.controls.target_grade_star_offset_x, SettingsPage.controls.target_grade_star_offset_x_val = CreateSlider(
-            "polarUiTargetGradeStarOffsetX",
-            page,
-            "Grade star offset X",
-            15,
-            y,
-            -200,
-            200,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.target_grade_star_offset_y, SettingsPage.controls.target_grade_star_offset_y_val = CreateSlider(
-            "polarUiTargetGradeStarOffsetY",
-            page,
-            "Grade star offset Y",
-            15,
-            y,
-            -200,
-            200,
-            1
-        )
-        y = y + 34
-
-        SettingsPage.page_heights.npc = y + 40
-    end
-
-
-    do
-        local page = SettingsPage.pages.text
-        local y = 35
-        CreateLabel("polarUiTextPageTitle", page, "Text", 15, y, 18)
-        y = y + 30
-
-        CreateLabel("polarUiTextStyleTargetLabel", page, "Edit style for", 15, y, 15)
-        SettingsPage.controls.style_target_text = CreateComboBox(
-            page,
-            { "All frames", "Player", "Target", "Watchtarget", "Target of Target", "Party" },
-            175,
-            y - 4,
-            220,
-            24
-        )
-        y = y + 34
-
-        SettingsPage.controls.style_target_text_hint = CreateHintLabel(
-            "polarUiTextStyleTargetHint",
-            page,
-            "Editing shared defaults for all overlay and party frames.",
-            15,
-            y
-        )
-        y = y + 24
-
-        CreateLabel("polarUiFontSizesTitle", page, "Font Sizes", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.name_font_size, SettingsPage.controls.name_font_size_val = CreateSlider(
-            "polarUiNameFontSize",
-            page,
-            "Name font size",
-            15,
-            y,
-            8,
-            30,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.hp_font_size, SettingsPage.controls.hp_font_size_val = CreateSlider(
-            "polarUiHpFontSize",
-            page,
-            "HP font size",
-            15,
-            y,
-            8,
-            40,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.mp_font_size, SettingsPage.controls.mp_font_size_val = CreateSlider(
-            "polarUiMpFontSize",
-            page,
-            "MP font size",
-            15,
-            y,
-            8,
-            40,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.overlay_font_size, SettingsPage.controls.overlay_font_size_val = CreateSlider(
-            "polarUiOverlayFontSize",
-            page,
-            "Target overlay font size",
-            15,
-            y,
-            8,
-            30,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.gs_font_size, SettingsPage.controls.gs_font_size_val = CreateSlider(
-            "polarUiGsFontSize",
-            page,
-            "Gearscore font size",
-            15,
-            y,
-            8,
-            30,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.class_font_size, SettingsPage.controls.class_font_size_val = CreateSlider(
-            "polarUiClassFontSize",
-            page,
-            "Class font size",
-            15,
-            y,
-            8,
-            30,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.target_guild_font_size, SettingsPage.controls.target_guild_font_size_val = CreateSlider(
-            "polarUiTargetGuildFontSize",
-            page,
-            "Target guild font size",
-            15,
-            y,
-            8,
-            30,
-            1
-        )
-        y = y + gap
-
-        CreateLabel("polarUiTargetOverlayFieldsTitle", page, "Target Overlay Fields", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.target_guild_visible = CreateCheckbox("polarUiTargetGuildVisible", page, "Show guild text", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.target_class_visible = CreateCheckbox("polarUiTargetClassVisible", page, "Show class text", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.target_pdef_visible = CreateCheckbox("polarUiTargetPdefVisible", page, "Show PDEF text", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.target_mdef_visible = CreateCheckbox("polarUiTargetMdefVisible", page, "Show MDEF text", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.target_gearscore_visible = CreateCheckbox("polarUiTargetGearscoreVisible", page, "Show gearscore text", 15, y)
-        y = y + gap
-
-        y = y + 10
-
-        CreateLabel("polarUiTargetOverlayColorsTitle", page, "Target Overlay Colors", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.target_guild_r, SettingsPage.controls.target_guild_r_val = CreateSlider("polarUiTargetGuildR", page, "Guild R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.target_guild_g, SettingsPage.controls.target_guild_g_val = CreateSlider("polarUiTargetGuildG", page, "Guild G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.target_guild_b, SettingsPage.controls.target_guild_b_val = CreateSlider("polarUiTargetGuildB", page, "Guild B", 15, y, 0, 255, 1)
-        y = y + 24
-
-        SettingsPage.controls.target_class_r, SettingsPage.controls.target_class_r_val = CreateSlider("polarUiTargetClassR", page, "Class R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.target_class_g, SettingsPage.controls.target_class_g_val = CreateSlider("polarUiTargetClassG", page, "Class G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.target_class_b, SettingsPage.controls.target_class_b_val = CreateSlider("polarUiTargetClassB", page, "Class B", 15, y, 0, 255, 1)
-        y = y + 24
-
-        SettingsPage.controls.target_pdef_r, SettingsPage.controls.target_pdef_r_val = CreateSlider("polarUiTargetPdefR", page, "PDEF R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.target_pdef_g, SettingsPage.controls.target_pdef_g_val = CreateSlider("polarUiTargetPdefG", page, "PDEF G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.target_pdef_b, SettingsPage.controls.target_pdef_b_val = CreateSlider("polarUiTargetPdefB", page, "PDEF B", 15, y, 0, 255, 1)
-        y = y + 24
-
-        SettingsPage.controls.target_mdef_r, SettingsPage.controls.target_mdef_r_val = CreateSlider("polarUiTargetMdefR", page, "MDEF R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.target_mdef_g, SettingsPage.controls.target_mdef_g_val = CreateSlider("polarUiTargetMdefG", page, "MDEF G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.target_mdef_b, SettingsPage.controls.target_mdef_b_val = CreateSlider("polarUiTargetMdefB", page, "MDEF B", 15, y, 0, 255, 1)
-        y = y + 24
-
-        SettingsPage.controls.target_gearscore_r, SettingsPage.controls.target_gearscore_r_val = CreateSlider("polarUiTargetGsR", page, "Gearscore R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.target_gearscore_g, SettingsPage.controls.target_gearscore_g_val = CreateSlider("polarUiTargetGsG", page, "Gearscore G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.target_gearscore_b, SettingsPage.controls.target_gearscore_b_val = CreateSlider("polarUiTargetGsB", page, "Gearscore B", 15, y, 0, 255, 1)
-        y = y + gap + 10
-
-        CreateLabel("polarUiShadowsTitle", page, "Shadows", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.name_shadow = CreateCheckbox("polarUiNameShadow", page, "Name text shadow", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.value_shadow = CreateCheckbox("polarUiValueShadow", page, "HP/MP value shadow", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.overlay_shadow = CreateCheckbox("polarUiOverlayShadow", page, "Target overlay shadow", 15, y)
-        y = y + gap + 10
-
-        CreateLabel("polarUiValueOffsetsTitle", page, "HP/MP Value Offsets", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.hp_value_offset_x, SettingsPage.controls.hp_value_offset_x_val = CreateSlider(
-            "polarUiHpValueOffsetX",
-            page,
-            "HP value offset X",
-            15,
-            y,
-            -200,
-            200,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.hp_value_offset_y, SettingsPage.controls.hp_value_offset_y_val = CreateSlider(
-            "polarUiHpValueOffsetY",
-            page,
-            "HP value offset Y",
-            15,
-            y,
-            -120,
-            120,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.mp_value_offset_x, SettingsPage.controls.mp_value_offset_x_val = CreateSlider(
-            "polarUiMpValueOffsetX",
-            page,
-            "MP value offset X",
-            15,
-            y,
-            -200,
-            200,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.mp_value_offset_y, SettingsPage.controls.mp_value_offset_y_val = CreateSlider(
-            "polarUiMpValueOffsetY",
-            page,
-            "MP value offset Y",
-            15,
-            y,
-            -120,
-            120,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.target_guild_offset_x, SettingsPage.controls.target_guild_offset_x_val = CreateSlider(
-            "polarUiTargetGuildOffsetX",
-            page,
-            "Target guild offset X",
-            15,
-            y,
-            -200,
-            200,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.target_guild_offset_y, SettingsPage.controls.target_guild_offset_y_val = CreateSlider(
-            "polarUiTargetGuildOffsetY",
-            page,
-            "Target guild offset Y",
-            15,
-            y,
-            -200,
-            200,
-            1
-        )
-        y = y + gap + 10
-
-        CreateLabel("polarUiTextLayoutTitle", page, "Text Layout", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.name_visible = CreateCheckbox("polarUiNameVisible", page, "Show name text", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.name_offset_x, SettingsPage.controls.name_offset_x_val = CreateSlider(
-            "polarUiNameOffsetX",
-            page,
-            "Name offset X",
-            15,
-            y,
-            -200,
-            200,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.name_offset_y, SettingsPage.controls.name_offset_y_val = CreateSlider(
-            "polarUiNameOffsetY",
-            page,
-            "Name offset Y",
-            15,
-            y,
-            -120,
-            120,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.level_visible = CreateCheckbox("polarUiLevelVisible", page, "Show level text", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.level_font_size, SettingsPage.controls.level_font_size_val = CreateSlider(
-            "polarUiLevelFontSize",
-            page,
-            "Level font size",
-            15,
-            y,
-            8,
-            24,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.level_offset_x, SettingsPage.controls.level_offset_x_val = CreateSlider(
-            "polarUiLevelOffsetX",
-            page,
-            "Level offset X",
-            15,
-            y,
-            -200,
-            200,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.level_offset_y, SettingsPage.controls.level_offset_y_val = CreateSlider(
-            "polarUiLevelOffsetY",
-            page,
-            "Level offset Y",
-            15,
-            y,
-            -120,
-            120,
-            1
-        )
-        y = y + 34
-
-        SettingsPage.page_heights.text = y + 40
-    end
-
-    do
-        local page = SettingsPage.pages.bars
-        local y = 35
-        CreateLabel("polarUiBarsPageTitle", page, "Bars", 15, y, 18)
-        y = y + 30
-
-        CreateLabel("polarUiBarsStyleTargetLabel", page, "Edit style for", 15, y, 15)
-        SettingsPage.controls.style_target_bars = CreateComboBox(
-            page,
-            { "All frames", "Player", "Target", "Watchtarget", "Target of Target", "Party" },
-            175,
-            y - 4,
-            220,
-            24
-        )
-        y = y + 34
-
-        SettingsPage.controls.style_target_bars_hint = CreateHintLabel(
-            "polarUiBarsStyleTargetHint",
-            page,
-            "Editing shared defaults for all overlay and party frames.",
-            15,
-            y
-        )
-        y = y + 24
-
-        CreateLabel("polarUiFrameTitleBars", page, "Frame Styling", 15, y, 18)
-        y = y + 30
-
-        CreateLabel("polarUiFrameOpacityTitle", page, "Opacity", 15, y, 15)
-        y = y + 22
-
-        SettingsPage.controls.frame_alpha, SettingsPage.controls.frame_alpha_val = CreateSlider(
-            "polarUiFrameAlpha",
-            page,
-            "Frame alpha (0-100)",
-            15,
-            y,
-            0,
-            100,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.overlay_alpha, SettingsPage.controls.overlay_alpha_val = CreateSlider(
-            "polarUiOverlayAlpha",
-            page,
-            "Overlay alpha (0-100)",
-            15,
-            y,
-            0,
-            100,
-            1
-        )
-        y = y + gap
-
-        CreateLabel("polarUiFrameSizeTitle", page, "Dimensions", 15, y, 15)
-        y = y + 22
-
-        SettingsPage.controls.frame_width, SettingsPage.controls.frame_width_val = CreateSlider(
-            "polarUiFrameWidth",
-            page,
-            "Frame width",
-            15,
-            y,
-            200,
-            600,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.frame_height, SettingsPage.controls.frame_height_val = CreateSlider(
-            "polarUiFrameHeight",
-            page,
-            "Frame height (global)",
-            15,
-            y,
-            40,
-            120,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.frame_scale, SettingsPage.controls.frame_scale_val = CreateSlider(
-            "polarUiFrameScale",
-            page,
-            "Frame scale (50-150)",
-            15,
-            y,
-            50,
-            150,
-            1
-        )
-        y = y + 24
-
-        CreateLabel("polarUiBarLayoutTitle", page, "Bar Layout", 15, y, 15)
-        y = y + 22
-
-        SettingsPage.controls.bar_height, SettingsPage.controls.bar_height_val = CreateSlider(
-            "polarUiBarHeight",
-            page,
-            "Shared bar height",
-            15,
-            y,
-            10,
-            40,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.hp_bar_height, SettingsPage.controls.hp_bar_height_val = CreateSlider(
-            "polarUiHpBarHeight",
-            page,
-            "HP bar height",
-            15,
-            y,
-            10,
-            40,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.mp_bar_height, SettingsPage.controls.mp_bar_height_val = CreateSlider(
-            "polarUiMpBarHeight",
-            page,
-            "MP bar height",
-            15,
-            y,
-            6,
-            40,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.bar_gap, SettingsPage.controls.bar_gap_val = CreateSlider(
-            "polarUiBarGap",
-            page,
-            "Bar gap",
-            15,
-            y,
-            0,
-            20,
-            1
-        )
-        y = y + gap + 10
-
-        CreateLabel("polarUiBarStyleTitle", page, "Bar Style", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.bar_colors_enabled = CreateCheckbox("polarUiBarColorsEnabled", page, "Override HP/MP bar colors", 15, y)
-        y = y + gap
-
-        CreateLabel("polarUiHpColorLabel", page, "HP Color (RGB)", 15, y, 15)
-        y = y + 22
-
-        SettingsPage.controls.hp_r, SettingsPage.controls.hp_r_val = CreateSlider("polarUiHpR", page, "HP R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.hp_g, SettingsPage.controls.hp_g_val = CreateSlider("polarUiHpG", page, "HP G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.hp_b, SettingsPage.controls.hp_b_val = CreateSlider("polarUiHpB", page, "HP B", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.hp_a, SettingsPage.controls.hp_a_val = CreateSlider("polarUiHpA", page, "HP Fill alpha", 15, y, 0, 255, 1)
-        y = y + 30
-
-        CreateLabel("polarUiHpAfterColorLabel", page, "HP Afterimage Color (RGB)", 15, y, 15)
-        y = y + 22
-
-        SettingsPage.controls.hp_after_r, SettingsPage.controls.hp_after_r_val = CreateSlider("polarUiHpAfterR", page, "HP After R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.hp_after_g, SettingsPage.controls.hp_after_g_val = CreateSlider("polarUiHpAfterG", page, "HP After G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.hp_after_b, SettingsPage.controls.hp_after_b_val = CreateSlider("polarUiHpAfterB", page, "HP After B", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.hp_after_a, SettingsPage.controls.hp_after_a_val = CreateSlider("polarUiHpAfterA", page, "HP After alpha", 15, y, 0, 255, 1)
-        y = y + 30
-
-        CreateLabel("polarUiMpColorLabel", page, "MP Color (RGB)", 15, y, 15)
-        y = y + 22
-
-        SettingsPage.controls.mp_r, SettingsPage.controls.mp_r_val = CreateSlider("polarUiMpR", page, "MP R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.mp_g, SettingsPage.controls.mp_g_val = CreateSlider("polarUiMpG", page, "MP G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.mp_b, SettingsPage.controls.mp_b_val = CreateSlider("polarUiMpB", page, "MP B", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.mp_a, SettingsPage.controls.mp_a_val = CreateSlider("polarUiMpA", page, "MP Fill alpha", 15, y, 0, 255, 1)
-        y = y + 30
-
-        CreateLabel("polarUiMpAfterColorLabel", page, "MP Afterimage Color (RGB)", 15, y, 15)
-        y = y + 22
-
-        SettingsPage.controls.mp_after_r, SettingsPage.controls.mp_after_r_val = CreateSlider("polarUiMpAfterR", page, "MP After R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.mp_after_g, SettingsPage.controls.mp_after_g_val = CreateSlider("polarUiMpAfterG", page, "MP After G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.mp_after_b, SettingsPage.controls.mp_after_b_val = CreateSlider("polarUiMpAfterB", page, "MP After B", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.mp_after_a, SettingsPage.controls.mp_after_a_val = CreateSlider("polarUiMpAfterA", page, "MP After alpha", 15, y, 0, 255, 1)
-        y = y + gap + 10
-
-        CreateLabel("polarUiHpTextureLabel", page, "HP Texture Mode", 15, y, 15)
-        y = y + 22
-
-        SettingsPage.controls.hp_tex_stock = CreateCheckbox("polarUiHpTexStock", page, "Stock", 15, y)
-        y = y + gap
-        SettingsPage.controls.hp_tex_pc = CreateCheckbox("polarUiHpTexPc", page, "PC", 15, y)
-        y = y + gap
-        SettingsPage.controls.hp_tex_npc = CreateCheckbox("polarUiHpTexNpc", page, "NPC", 15, y)
-        y = y + gap + 10
-
-        CreateLabel("polarUiValueTextTitle", page, "HP/MP Value Text", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.value_fmt_curmax = CreateCheckbox(
-            "polarUiValueFmtCurMax",
-            page,
-            "Format HP/MP as cur/max",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.value_fmt_percent = CreateCheckbox(
-            "polarUiValueFmtPercent",
-            page,
-            "Format HP/MP as percent",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.short_numbers = CreateCheckbox(
-            "polarUiShortNumbers",
-            page,
-            "Short numbers (12.3k/4.5m)",
-            15,
-            y
-        )
-        y = y + 34
-
-        SettingsPage.page_heights.bars = y + 40
-    end
-
-    do
-        local page = SettingsPage.pages.auras
-        local y = 35
-        CreateLabel("polarUiAurasPageTitle", page, "Auras", 15, y, 18)
-        y = y + 30
-
-        CreateLabel("polarUiAuraTitle", page, "Aura Layout (Buff/Debuff Icon Size)", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.aura_enabled = CreateCheckbox(
-            "polarUiAuraEnabled",
-            page,
-            "Override aura icon layout",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.aura_icon_size, SettingsPage.controls.aura_icon_size_val = CreateSlider(
-            "polarUiAuraIconSize",
-            page,
-            "Icon size",
-            15,
-            y,
-            12,
-            48,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.aura_x_gap, SettingsPage.controls.aura_x_gap_val = CreateSlider(
-            "polarUiAuraXGap",
-            page,
-            "Icon X gap",
-            15,
-            y,
-            0,
-            10,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.aura_y_gap, SettingsPage.controls.aura_y_gap_val = CreateSlider(
-            "polarUiAuraYGap",
-            page,
-            "Icon Y gap",
-            15,
-            y,
-            0,
-            10,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.aura_per_row, SettingsPage.controls.aura_per_row_val = CreateSlider(
-            "polarUiAuraPerRow",
-            page,
-            "Icons per row",
-            15,
-            y,
-            1,
-            30,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.aura_sort_vertical = CreateCheckbox(
-            "polarUiAuraSortVertical",
-            page,
-            "Sort vertical",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.aura_reverse_growth = CreateCheckbox(
-            "polarUiAuraReverseGrowth",
-            page,
-            "Reverse growth",
-            15,
-            y
-        )
-        y = y + gap + 10
-
-        SettingsPage.controls.move_buffs = CreateCheckbox("polarUiMoveBuffs", page, "Move buff/debuff strips (uses settings.txt offsets)", 15, y)
-        y = y + gap
-
-        CreateLabel("polarUiBuffPlacementTitle", page, "Buff/Debuff Placement (Offsets)", 15, y, 18)
-        y = y + 30
-
-        CreateLabel("polarUiBuffPlacementPlayer", page, "Player", 15, y, 15)
-        y = y + 22
-
-        SettingsPage.controls.p_buff_x, SettingsPage.controls.p_buff_x_val = CreateSlider("polarUiPBX", page, "Buff X", 15, y, -200, 200, 1)
-        y = y + 24
-        SettingsPage.controls.p_buff_y, SettingsPage.controls.p_buff_y_val = CreateSlider("polarUiPBY", page, "Buff Y", 15, y, -200, 200, 1)
-        y = y + 24
-        SettingsPage.controls.p_debuff_x, SettingsPage.controls.p_debuff_x_val = CreateSlider("polarUiPDBX", page, "Debuff X", 15, y, -200, 200, 1)
-        y = y + 24
-        SettingsPage.controls.p_debuff_y, SettingsPage.controls.p_debuff_y_val = CreateSlider("polarUiPDBY", page, "Debuff Y", 15, y, -200, 200, 1)
-        y = y + 30
-
-        CreateLabel("polarUiBuffPlacementTarget", page, "Target", 15, y, 15)
-        y = y + 22
-
-        SettingsPage.controls.t_buff_x, SettingsPage.controls.t_buff_x_val = CreateSlider("polarUiTBX", page, "Buff X", 15, y, -200, 200, 1)
-        y = y + 24
-        SettingsPage.controls.t_buff_y, SettingsPage.controls.t_buff_y_val = CreateSlider("polarUiTBY", page, "Buff Y", 15, y, -200, 200, 1)
-        y = y + 24
-        SettingsPage.controls.t_debuff_x, SettingsPage.controls.t_debuff_x_val = CreateSlider("polarUiTDBX", page, "Debuff X", 15, y, -200, 200, 1)
-        y = y + 24
-        SettingsPage.controls.t_debuff_y, SettingsPage.controls.t_debuff_y_val = CreateSlider("polarUiTDBY", page, "Debuff Y", 15, y, -200, 200, 1)
-        y = y + 34
-
-        SettingsPage.page_heights.auras = y + 40
-    end
-
-    do
-        local page = SettingsPage.pages.plates
-        local y = 35
-        CreateLabel("polarUiPlatesPageTitle", page, "Plates", 15, y, 18)
-        y = y + 30
-
-        CreateLabel("polarUiPlatesHeader", page, "Overhead Raid/Party Plates", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.plates_enabled = CreateCheckbox("polarUiPlatesEnabled", page, "Enable overhead plates", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.plates_guild_only = CreateCheckbox(
-            "polarUiPlatesGuildOnly",
-            page,
-            "Guild-only overlay (keep stock nameplates)",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.plates_show_target = CreateCheckbox("polarUiPlatesShowTarget", page, "Show target (always)", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.plates_show_player = CreateCheckbox("polarUiPlatesShowPlayer", page, "Show player (always)", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.plates_show_raid_party = CreateCheckbox("polarUiPlatesShowRaid", page, "Show raid/party (team1..team50)", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.plates_show_watchtarget = CreateCheckbox("polarUiPlatesShowWatch", page, "Show watchtarget", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.plates_show_mount = CreateCheckbox("polarUiPlatesShowMount", page, "Show mount/pet (playerpet1)", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.plates_show_guild = CreateCheckbox("polarUiPlatesShowGuild", page, "Show guild/expedition", 15, y)
-        y = y + gap + 10
-
-        SettingsPage.controls.plates_runtime_note = CreateLabel(
-            "polarUiPlatesRuntimeNote",
-            page,
-            "Current client supports native targeting, so the old passthrough click modifiers are no longer needed.",
-            15,
-            y,
-            13
-        )
-        if SettingsPage.controls.plates_runtime_note ~= nil then
-            SettingsPage.controls.plates_runtime_note:SetExtent(470, 36)
-        end
-        y = y + 38
-
-        SettingsPage.controls.plates_runtime_status = CreateLabel(
-            "polarUiPlatesRuntimeStatus",
-            page,
-            "",
-            15,
-            y,
-            12
-        )
-        if SettingsPage.controls.plates_runtime_status ~= nil then
-            SettingsPage.controls.plates_runtime_status:SetExtent(470, 32)
-        end
-        y = y + 34
-
-        CreateLabel("polarUiPlatesLayoutHeader", page, "Layout", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.plates_alpha, SettingsPage.controls.plates_alpha_val = CreateSlider(
-            "polarUiPlatesAlpha",
-            page,
-            "Transparency (0-100)",
-            15,
-            y,
-            0,
-            100,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.plates_width, SettingsPage.controls.plates_width_val = CreateSlider(
-            "polarUiPlatesWidth",
-            page,
-            "Width",
-            15,
-            y,
-            50,
-            250,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.plates_hp_h, SettingsPage.controls.plates_hp_h_val = CreateSlider(
-            "polarUiPlatesHpHeight",
-            page,
-            "HP height",
-            15,
-            y,
-            5,
-            60,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.plates_mp_h, SettingsPage.controls.plates_mp_h_val = CreateSlider(
-            "polarUiPlatesMpHeight",
-            page,
-            "MP height (0 hides)",
-            15,
-            y,
-            0,
-            40,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.plates_x_offset, SettingsPage.controls.plates_x_offset_val = CreateSlider(
-            "polarUiPlatesXOffset",
-            page,
-            "X offset",
-            15,
-            y,
-            -200,
-            200,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.plates_max_dist, SettingsPage.controls.plates_max_dist_val = CreateSlider(
-            "polarUiPlatesMaxDistance",
-            page,
-            "Max distance",
-            15,
-            y,
-            1,
-            300,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.plates_y_offset, SettingsPage.controls.plates_y_offset_val = CreateSlider(
-            "polarUiPlatesYOffset",
-            page,
-            "Y offset",
-            15,
-            y,
-            -100,
-            100,
-            1
-        )
-        y = y + gap
-
-        SettingsPage.controls.plates_anchor_tag = CreateCheckbox(
-            "polarUiPlatesAnchorToTag",
-            page,
-            "Anchor to stock name tag",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.plates_bg_enabled = CreateCheckbox(
-            "polarUiPlatesBgEnabled",
-            page,
-            "Show background",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.plates_bg_alpha, SettingsPage.controls.plates_bg_alpha_val = CreateSlider(
-            "polarUiPlatesBgAlpha",
-            page,
-            "Background alpha (0-100)",
-            15,
-            y,
-            0,
-            100,
-            1
-        )
-        y = y + gap + 10
-
-        CreateLabel("polarUiPlatesTextHeader", page, "Text", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.plates_name_fs, SettingsPage.controls.plates_name_fs_val = CreateSlider(
-            "polarUiPlatesNameFontSize",
-            page,
-            "Name font size",
-            15,
-            y,
-            6,
-            32,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.plates_guild_fs, SettingsPage.controls.plates_guild_fs_val = CreateSlider(
-            "polarUiPlatesGuildFontSize",
-            page,
-            "Guild font size",
-            15,
-            y,
-            6,
-            32,
-            1
-        )
-        y = y + 34
-
-        CreateLabel("polarUiPlatesGuildColorsHeader", page, "Guild Colors", 15, y, 18)
-        y = y + 30
-
-        CreateLabel("polarUiPlatesGuildColorNameLbl", page, "Guild", 15, y, 15)
-        SettingsPage.controls.plates_guild_color_name = CreateEdit("polarUiPlatesGuildColorName", page, "", 70, y - 4, 180, 22)
-        SettingsPage.controls.plates_guild_color_add = CreateButton("polarUiPlatesGuildColorAdd", page, "Add", 265, y - 6)
-        SettingsPage.controls.plates_guild_color_add_target = CreateButton("polarUiPlatesGuildColorAddTarget", page, "Use Target", 340, y - 6)
-        if SettingsPage.controls.plates_guild_color_add ~= nil then
-            SettingsPage.controls.plates_guild_color_add:SetExtent(70, 22)
-        end
-        if SettingsPage.controls.plates_guild_color_add_target ~= nil then
-            SettingsPage.controls.plates_guild_color_add_target:SetExtent(95, 22)
-        end
-        y = y + 28
-
-        SettingsPage.controls.plates_guild_color_r, SettingsPage.controls.plates_guild_color_r_val = CreateSlider(
-            "polarUiPlatesGuildColorR",
-            page,
-            "R (0-255)",
-            15,
-            y,
-            0,
-            255,
-            1
-        )
-        y = y + 24
-        SettingsPage.controls.plates_guild_color_g, SettingsPage.controls.plates_guild_color_g_val = CreateSlider(
-            "polarUiPlatesGuildColorG",
-            page,
-            "G (0-255)",
-            15,
-            y,
-            0,
-            255,
-            1
-        )
-        y = y + 24
-        SettingsPage.controls.plates_guild_color_b, SettingsPage.controls.plates_guild_color_b_val = CreateSlider(
-            "polarUiPlatesGuildColorB",
-            page,
-            "B (0-255)",
-            15,
-            y,
-            0,
-            255,
-            1
-        )
-        y = y + 30
-
-        SettingsPage.controls.plates_guild_color_rows = {}
-        for i = 1, 8 do
-            local row_y = y
-            local label = CreateLabel("polarUiPlatesGuildColorRow" .. tostring(i), page, "", 30, row_y, 14)
-            if label ~= nil then
-                label:SetExtent(280, 18)
-            end
-            local rm = CreateButton("polarUiPlatesGuildColorRemove" .. tostring(i), page, "Remove", 320, row_y - 6)
-            if rm ~= nil then
-                rm:SetExtent(80, 22)
-            end
-            SettingsPage.controls.plates_guild_color_rows[i] = { label = label, remove = rm }
-            y = y + 26
-        end
-        SettingsPage.page_heights.plates = y + 40
-    end
-
-    end
-
-    do
-        local page = SettingsPage.pages.cooldown
-        if page ~= nil then
-        local y = 35
-        CreateLabel("polarUiCooldownPageTitle", page, "Cooldown Tracker", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.ct_enabled = CreateCheckbox(
-            "polarUiCooldownEnabled",
-            page,
-            "Enable cooldown tracker",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.ct_update_interval, SettingsPage.controls.ct_update_interval_val = CreateSlider(
-            "polarUiCooldownUpdateInterval",
-            page,
-            "Update interval (ms)",
-            15,
-            y,
-            10,
-            500,
-            1
-        )
-        y = y + gap + 10
-
-        CreateLabel("polarUiCooldownUnitLabel", page, "Unit", 15, y, 15)
-        SettingsPage.controls.ct_unit = CreateComboBox(page, COOLDOWN_UNIT_LABELS, 110, y - 4, 220, 24)
-        CreateLabel("polarUiCooldownDisplayModeLabel", page, "Show", 350, y, 15)
-        SettingsPage.controls.ct_display_mode = CreateComboBox(page, COOLDOWN_DISPLAY_MODE_LABELS, 400, y - 4, 180, 24)
-        y = y + 34
-
-        SettingsPage.controls.ct_unit_enabled = CreateCheckbox(
-            "polarUiCooldownUnitEnabled",
-            page,
-            "Enable for selected unit",
-            15,
-            y
-        )
-        y = y + gap
-
-        SettingsPage.controls.ct_lock_position = CreateCheckbox(
-            "polarUiCooldownLockPosition",
-            page,
-            "Lock position (disable dragging)",
-            15,
-            y
-        )
-        y = y + gap + 10
-
-        CreateLabel("polarUiCooldownPositionTitle", page, "Position", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.ct_position_hint = CreateHintLabel(
-            "polarUiCooldownPositionHint",
-            page,
-            "Player uses an absolute screen position.",
-            15,
-            y
-        )
-        if SettingsPage.controls.ct_position_hint ~= nil then
-            SettingsPage.controls.ct_position_hint:SetExtent(
-                360,
-                math.max(18, tonumber(SettingsPage.controls.ct_position_hint.__polar_estimated_height) or 16)
-            )
-        end
-        y = y + 24
-
-        CreateLabel("polarUiCooldownPosXLabel", page, "X", 15, y, 15)
-        SettingsPage.controls.ct_pos_x = CreateEdit("polarUiCooldownPosX", page, "0", 35, y - 4, 90, 22)
-        if SettingsPage.controls.ct_pos_x ~= nil and SettingsPage.controls.ct_pos_x.SetDigit ~= nil then
-            pcall(function()
-                SettingsPage.controls.ct_pos_x:SetDigit(true)
-            end)
-        end
-
-        CreateLabel("polarUiCooldownPosYLabel", page, "Y", 145, y, 15)
-        SettingsPage.controls.ct_pos_y = CreateEdit("polarUiCooldownPosY", page, "0", 165, y - 4, 90, 22)
-        if SettingsPage.controls.ct_pos_y ~= nil and SettingsPage.controls.ct_pos_y.SetDigit ~= nil then
-            pcall(function()
-                SettingsPage.controls.ct_pos_y:SetDigit(true)
-            end)
-        end
-        y = y + gap + 10
-
-        CreateLabel("polarUiCooldownIconsTitle", page, "Icons", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.ct_icon_size, SettingsPage.controls.ct_icon_size_val = CreateSlider(
-            "polarUiCooldownIconSize",
-            page,
-            "Icon size",
-            15,
-            y,
-            12,
-            80,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.ct_icon_spacing, SettingsPage.controls.ct_icon_spacing_val = CreateSlider(
-            "polarUiCooldownIconSpacing",
-            page,
-            "Icon spacing",
-            15,
-            y,
-            0,
-            20,
-            1
-        )
-        y = y + 24
-
-        SettingsPage.controls.ct_max_icons, SettingsPage.controls.ct_max_icons_val = CreateSlider(
-            "polarUiCooldownMaxIcons",
-            page,
-            "Max icons",
-            15,
-            y,
-            1,
-            20,
-            1
-        )
-        y = y + gap + 10
-
-        CreateLabel("polarUiCooldownTimerTitle", page, "Timer Text", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.ct_show_timer = CreateCheckbox("polarUiCooldownShowTimer", page, "Show timer", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.ct_timer_fs, SettingsPage.controls.ct_timer_fs_val = CreateSlider(
-            "polarUiCooldownTimerFontSize",
-            page,
-            "Timer font size",
-            15,
-            y,
-            6,
-            40,
-            1
-        )
-        y = y + 24
-
-        CreateLabel("polarUiCooldownTimerColorTitle", page, "Timer color (RGB)", 15, y, 15)
-        y = y + 22
-        SettingsPage.controls.ct_timer_r, SettingsPage.controls.ct_timer_r_val = CreateSlider("polarUiCooldownTimerR", page, "R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.ct_timer_g, SettingsPage.controls.ct_timer_g_val = CreateSlider("polarUiCooldownTimerG", page, "G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.ct_timer_b, SettingsPage.controls.ct_timer_b_val = CreateSlider("polarUiCooldownTimerB", page, "B", 15, y, 0, 255, 1)
-        y = y + gap + 10
-
-        CreateLabel("polarUiCooldownLabelTitle", page, "Label Text", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.ct_show_label = CreateCheckbox("polarUiCooldownShowLabel", page, "Show label", 15, y)
-        y = y + gap
-
-        SettingsPage.controls.ct_label_fs, SettingsPage.controls.ct_label_fs_val = CreateSlider(
-            "polarUiCooldownLabelFontSize",
-            page,
-            "Label font size",
-            15,
-            y,
-            6,
-            40,
-            1
-        )
-        y = y + 24
-
-        CreateLabel("polarUiCooldownLabelColorTitle", page, "Label color (RGB)", 15, y, 15)
-        y = y + 22
-        SettingsPage.controls.ct_label_r, SettingsPage.controls.ct_label_r_val = CreateSlider("polarUiCooldownLabelR", page, "R", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.ct_label_g, SettingsPage.controls.ct_label_g_val = CreateSlider("polarUiCooldownLabelG", page, "G", 15, y, 0, 255, 1)
-        y = y + 24
-        SettingsPage.controls.ct_label_b, SettingsPage.controls.ct_label_b_val = CreateSlider("polarUiCooldownLabelB", page, "B", 15, y, 0, 255, 1)
-        y = y + gap + 10
-
-        CreateLabel("polarUiCooldownTargetCacheTitle", page, "Target Cache", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.ct_cache_timeout, SettingsPage.controls.ct_cache_timeout_val = CreateSlider(
-            "polarUiCooldownCacheTimeout",
-            page,
-            "Cache timeout (sec) (target only)",
-            15,
-            y,
-            0,
-            600,
-            1
-        )
-        y = y + gap + 10
-
-        CreateLabel("polarUiCooldownTrackedBuffsTitle", page, "Tracked Effects", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.ct_new_buff_id = CreateEdit("polarUiCooldownNewBuffId", page, "", 15, y - 4, 120, 22)
-        if SettingsPage.controls.ct_new_buff_id ~= nil and SettingsPage.controls.ct_new_buff_id.SetDigit ~= nil then
-            pcall(function()
-                SettingsPage.controls.ct_new_buff_id:SetDigit(true)
-            end)
-        end
-        SettingsPage.controls.ct_add_buff = CreateButton("polarUiCooldownAddBuff", page, "Add", 145, y - 6)
-        CreateLabel("polarUiCooldownTrackKindLabel", page, "Track as", 225, y, 15)
-        SettingsPage.controls.ct_track_kind = CreateComboBox(page, COOLDOWN_TRACK_KIND_LABELS, 290, y - 4, 110, 24)
-        CreateLabel("polarUiCooldownSearchLabel", page, "Search", 420, y, 15)
-        SettingsPage.controls.ct_search_text = CreateEdit("polarUiCooldownSearchText", page, "", 470, y - 4, 95, 22)
-        SettingsPage.controls.ct_search_btn = CreateButton("polarUiCooldownSearchBtn", page, "Find", 575, y - 6)
-        if SettingsPage.controls.ct_search_btn ~= nil then
-            SettingsPage.controls.ct_search_btn:SetExtent(50, 22)
-        end
-        y = y + 34
-
-        SettingsPage.controls.ct_search_status = CreateLabel("polarUiCooldownSearchStatus", page, "", 15, y, 14)
-        if SettingsPage.controls.ct_search_status ~= nil then
-            SettingsPage.controls.ct_search_status:SetExtent(380, 18)
-        end
-        SettingsPage.controls.ct_search_more = CreateButton("polarUiCooldownSearchMore", page, "More", 405, y - 6)
-        if SettingsPage.controls.ct_search_more ~= nil then
-            SettingsPage.controls.ct_search_more:SetExtent(65, 22)
-        end
-        y = y + 34
-
-        SettingsPage.controls.ct_search_rows = {}
-        for i = 1, COOLDOWN_SEARCH_ROWS do
-            local row_y = y + ((i - 1) * 26)
-            local label = CreateLabel("polarUiCooldownSearchRowLabel" .. tostring(i), page, "", 15, row_y + 6, 14)
-            if label ~= nil then
-                label:SetExtent(310, 18)
-            end
-            local add = CreateButton("polarUiCooldownSearchRowAdd" .. tostring(i), page, "Add", 335, row_y)
-            if add ~= nil then
-                add:SetExtent(60, 22)
-            end
-            SettingsPage.controls.ct_search_rows[i] = { label = label, add = add }
-        end
-        y = y + (COOLDOWN_SEARCH_ROWS * 26) + 10
-
-        SettingsPage.controls.ct_prev_page = CreateButton("polarUiCooldownPrevPage", page, "Prev", 15, y)
-        SettingsPage.controls.ct_next_page = CreateButton("polarUiCooldownNextPage", page, "Next", 110, y)
-        SettingsPage.controls.ct_page_label = CreateLabel("polarUiCooldownPageLabel", page, "1 / 1", 215, y + 6, 14)
-        y = y + 34
-
-        SettingsPage.controls.ct_buff_rows = {}
-        for i = 1, COOLDOWN_BUFFS_PER_PAGE do
-            local row_y = y + ((i - 1) * 26)
-            local label = CreateLabel("polarUiCooldownBuffRowLabel" .. tostring(i), page, "", 15, row_y + 6, 14)
-            if label ~= nil then
-                label:SetExtent(280, 18)
-            end
-            local rm = CreateButton("polarUiCooldownBuffRowRemove" .. tostring(i), page, "Remove", 305, row_y)
-            if rm ~= nil then
-                rm:SetExtent(90, 22)
-            end
-            SettingsPage.controls.ct_buff_rows[i] = { label = label, remove = rm }
-        end
-        y = y + (COOLDOWN_BUFFS_PER_PAGE * 26) + 20
-
-        CreateLabel("polarUiCooldownScanTitle", page, "Scan Target Buffs/Debuffs", 15, y, 18)
-        y = y + 30
-
-        SettingsPage.controls.ct_scan_btn = CreateButton("polarUiCooldownScanBtn", page, "Scan", 15, y - 6)
-        SettingsPage.controls.ct_scan_status = CreateLabel("polarUiCooldownScanStatus", page, "", 110, y, 14)
-        if SettingsPage.controls.ct_scan_status ~= nil then
-            SettingsPage.controls.ct_scan_status:SetExtent(320, 18)
-        end
-        y = y + 34
-
-        SettingsPage.controls.ct_scan_rows = {}
-        for i = 1, COOLDOWN_SCAN_ROWS do
-            local row_y = y + ((i - 1) * 26)
-            local label = CreateLabel("polarUiCooldownScanRowLabel" .. tostring(i), page, "", 15, row_y + 6, 14)
-            if label ~= nil then
-                label:SetExtent(310, 18)
-            end
-            local add = CreateButton("polarUiCooldownScanRowAdd" .. tostring(i), page, "Add", 335, row_y)
-            if add ~= nil then
-                add:SetExtent(60, 22)
-            end
-            SettingsPage.controls.ct_scan_rows[i] = { label = label, add = add }
-        end
-        y = y + (COOLDOWN_SCAN_ROWS * 26) + 20
-
-        SettingsPage.page_heights.cooldown = y + 40
-        end
+    if SettingsCooldownPage ~= nil and SettingsCooldownPage.Build ~= nil then
+        SettingsPage.page_heights.cooldown = SettingsCooldownPage.Build(SettingsPage, SettingsPage.pages.cooldown, gap)
     end
 
     local applyBtn = CreateButton("polarUiApplySettings", SettingsPage.window, "Apply", 185, 370)
@@ -5230,7 +3311,7 @@ local function EnsureWindow()
     local importBtn = CreateButton("polarUiImportSettings", SettingsPage.window, "Import", 470, 370)
     local backupStatus = CreateLabel("polarUiBackupStatus", SettingsPage.window, "", 570, 370 + 6, 14)
     if backupStatus ~= nil then
-        backupStatus:SetExtent(220, 18)
+        backupStatus:SetExtent(320, 18)
     end
 
     pcall(function()
@@ -5311,6 +3392,11 @@ local function EnsureWindow()
         { SettingsPage.controls.castbar_text_g, SettingsPage.controls.castbar_text_g_val },
         { SettingsPage.controls.castbar_text_b, SettingsPage.controls.castbar_text_b_val },
         { SettingsPage.controls.castbar_text_a, SettingsPage.controls.castbar_text_a_val },
+        { SettingsPage.controls.travel_speed_width, SettingsPage.controls.travel_speed_width_val },
+        { SettingsPage.controls.travel_speed_scale, SettingsPage.controls.travel_speed_scale_val },
+        { SettingsPage.controls.travel_speed_font_size, SettingsPage.controls.travel_speed_font_size_val },
+        { SettingsPage.controls.gear_loadouts_button_size, SettingsPage.controls.gear_loadouts_button_size_val },
+        { SettingsPage.controls.gear_loadouts_button_width, SettingsPage.controls.gear_loadouts_button_width_val },
         { SettingsPage.controls.frame_alpha, SettingsPage.controls.frame_alpha_val },
         { SettingsPage.controls.overlay_alpha, SettingsPage.controls.overlay_alpha_val },
         { SettingsPage.controls.frame_width, SettingsPage.controls.frame_width_val },
@@ -5393,10 +3479,25 @@ local function EnsureWindow()
         { SettingsPage.controls.plates_bg_alpha, SettingsPage.controls.plates_bg_alpha_val },
         { SettingsPage.controls.plates_name_fs, SettingsPage.controls.plates_name_fs_val },
         { SettingsPage.controls.plates_guild_fs, SettingsPage.controls.plates_guild_fs_val },
+        { SettingsPage.controls.plates_debuffs_max_icons, SettingsPage.controls.plates_debuffs_max_icons_val },
+        { SettingsPage.controls.plates_debuffs_icon_size, SettingsPage.controls.plates_debuffs_icon_size_val },
+        { SettingsPage.controls.plates_debuffs_secondary_size, SettingsPage.controls.plates_debuffs_secondary_size_val },
+        { SettingsPage.controls.plates_debuffs_timer_size, SettingsPage.controls.plates_debuffs_timer_size_val },
+        { SettingsPage.controls.plates_debuffs_gap, SettingsPage.controls.plates_debuffs_gap_val },
+        { SettingsPage.controls.plates_debuffs_offset_x, SettingsPage.controls.plates_debuffs_offset_x_val },
+        { SettingsPage.controls.plates_debuffs_offset_y, SettingsPage.controls.plates_debuffs_offset_y_val },
         { SettingsPage.controls.ct_update_interval, SettingsPage.controls.ct_update_interval_val },
         { SettingsPage.controls.ct_icon_size, SettingsPage.controls.ct_icon_size_val },
         { SettingsPage.controls.ct_icon_spacing, SettingsPage.controls.ct_icon_spacing_val },
         { SettingsPage.controls.ct_max_icons, SettingsPage.controls.ct_max_icons_val },
+        { SettingsPage.controls.ct_bar_width, SettingsPage.controls.ct_bar_width_val },
+        { SettingsPage.controls.ct_bar_height, SettingsPage.controls.ct_bar_height_val },
+        { SettingsPage.controls.ct_bar_fill_r, SettingsPage.controls.ct_bar_fill_r_val },
+        { SettingsPage.controls.ct_bar_fill_g, SettingsPage.controls.ct_bar_fill_g_val },
+        { SettingsPage.controls.ct_bar_fill_b, SettingsPage.controls.ct_bar_fill_b_val },
+        { SettingsPage.controls.ct_bar_bg_r, SettingsPage.controls.ct_bar_bg_r_val },
+        { SettingsPage.controls.ct_bar_bg_g, SettingsPage.controls.ct_bar_bg_g_val },
+        { SettingsPage.controls.ct_bar_bg_b, SettingsPage.controls.ct_bar_bg_b_val },
         { SettingsPage.controls.ct_timer_fs, SettingsPage.controls.ct_timer_fs_val },
         { SettingsPage.controls.ct_label_fs, SettingsPage.controls.ct_label_fs_val },
         { SettingsPage.controls.ct_timer_r, SettingsPage.controls.ct_timer_r_val },
@@ -5455,6 +3556,15 @@ local function EnsureWindow()
         SettingsPage.controls.alignment_grid_enabled,
         SettingsPage.controls.castbar_enabled,
         SettingsPage.controls.castbar_lock_position,
+        SettingsPage.controls.travel_speed_enabled,
+        SettingsPage.controls.travel_speed_lock_position,
+        SettingsPage.controls.travel_speed_only_vehicle_or_mount,
+        SettingsPage.controls.travel_speed_show_bar,
+        SettingsPage.controls.travel_speed_show_state_text,
+        SettingsPage.controls.gear_loadouts_enabled,
+        SettingsPage.controls.gear_loadouts_lock_bar,
+        SettingsPage.controls.gear_loadouts_lock_editor,
+        SettingsPage.controls.gear_loadouts_show_icons,
         SettingsPage.controls.bar_colors_enabled,
         SettingsPage.controls.overlay_shadow,
         SettingsPage.controls.target_guild_visible,
@@ -5475,6 +3585,16 @@ local function EnsureWindow()
         SettingsPage.controls.plates_show_guild,
         SettingsPage.controls.plates_anchor_tag,
         SettingsPage.controls.plates_bg_enabled,
+        SettingsPage.controls.plates_debuffs_enabled,
+        SettingsPage.controls.plates_debuffs_track_raid,
+        SettingsPage.controls.plates_debuffs_show_timer,
+        SettingsPage.controls.plates_debuffs_show_secondary,
+        SettingsPage.controls.plates_debuffs_show_hard,
+        SettingsPage.controls.plates_debuffs_show_silence,
+        SettingsPage.controls.plates_debuffs_show_root,
+        SettingsPage.controls.plates_debuffs_show_slow,
+        SettingsPage.controls.plates_debuffs_show_dot,
+        SettingsPage.controls.plates_debuffs_show_misc,
         SettingsPage.controls.ct_enabled,
         SettingsPage.controls.ct_unit_enabled,
         SettingsPage.controls.ct_lock_position,
@@ -5496,6 +3616,18 @@ local function EnsureWindow()
 
     if SettingsPage.controls.ct_display_mode ~= nil and SettingsPage.controls.ct_display_mode.SetHandler ~= nil then
         SettingsPage.controls.ct_display_mode:SetHandler("OnSelChanged", function()
+            ApplyControlsToSettings()
+            if type(SettingsPage.on_apply) == "function" then
+                pcall(function()
+                    SettingsPage.on_apply()
+                end)
+            end
+            RefreshControls()
+        end)
+    end
+
+    if SettingsPage.controls.ct_display_style ~= nil and SettingsPage.controls.ct_display_style.SetHandler ~= nil then
+        SettingsPage.controls.ct_display_style:SetHandler("OnSelChanged", function()
             ApplyControlsToSettings()
             if type(SettingsPage.on_apply) == "function" then
                 pcall(function()
@@ -5659,7 +3791,7 @@ local function EnsureWindow()
 
     if SettingsPage.controls.ct_scan_btn ~= nil and SettingsPage.controls.ct_scan_btn.SetHandler ~= nil then
         SettingsPage.controls.ct_scan_btn:SetHandler("OnClick", function()
-            ScanTargetEffects()
+            SettingsCooldown.ScanTargetEffects(SettingsPage)
             RefreshControls()
         end)
     end
@@ -5829,6 +3961,14 @@ local function EnsureWindow()
     if SettingsPage.controls.castbar_fill_style ~= nil and SettingsPage.controls.castbar_fill_style.SetHandler ~= nil then
         SettingsPage.controls.castbar_fill_style:SetHandler("OnSelChanged", function()
             if SettingsPage._refreshing_castbar_fill_style then
+                return
+            end
+            sliderChanged()
+        end)
+    end
+    if SettingsPage.controls.plates_debuffs_anchor ~= nil and SettingsPage.controls.plates_debuffs_anchor.SetHandler ~= nil then
+        SettingsPage.controls.plates_debuffs_anchor:SetHandler("OnSelChanged", function()
+            if SettingsPage._refreshing_debuff_anchor then
                 return
             end
             sliderChanged()

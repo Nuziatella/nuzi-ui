@@ -6,8 +6,26 @@ local function trim(value)
     return (tostring(value or ""):gsub("^%s*(.-)%s*$", "%1"))
 end
 
+local function normalizeUnitToken(unit)
+    if type(unit) ~= "string" then
+        return nil
+    end
+    local text = trim(unit)
+    if text == "" then
+        return nil
+    end
+    if text == "targetoftarget" or text == "target_of_target" then
+        return "targettarget"
+    end
+    return text
+end
+
 function Runtime.GetUnitId(unit)
     if api == nil or api.Unit == nil or api.Unit.GetUnitId == nil then
+        return nil
+    end
+    unit = normalizeUnitToken(unit)
+    if unit == nil then
         return nil
     end
     local ok, value = pcall(function()
@@ -20,6 +38,10 @@ function Runtime.GetUnitId(unit)
 end
 
 function Runtime.GetUnitName(unit)
+    unit = normalizeUnitToken(unit)
+    if unit == nil then
+        return ""
+    end
     if api ~= nil and api.Unit ~= nil and api.Unit.GetUnitName ~= nil then
         local ok, value = pcall(function()
             return api.Unit:GetUnitName(unit)
