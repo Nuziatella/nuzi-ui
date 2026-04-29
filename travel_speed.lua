@@ -422,10 +422,11 @@ local function unitTokenExists(unit)
     return text ~= "" and text ~= "0"
 end
 
-local function hasVehicleOrMountContext()
-    if math.abs(getVehicleSpeed()) > MIN_TRAVEL_SPEED_DISPLAY then
-        return true
-    end
+local function hasVehicleContext()
+    return math.abs(getVehicleSpeed()) > MIN_TRAVEL_SPEED_DISPLAY
+end
+
+local function hasMountContext()
     return unitTokenExists("playerpet1") or unitTokenExists("playerpet") or unitTokenExists("slave")
 end
 
@@ -433,7 +434,12 @@ local function shouldShowForContext(cfg)
     if type(cfg) ~= "table" or cfg.only_vehicle_or_mount ~= true then
         return true
     end
-    return hasVehicleOrMountContext()
+    local showVehicle = cfg.show_on_vehicle ~= false
+    local showMount = cfg.show_on_mount ~= false
+    if not showVehicle and not showMount then
+        return false
+    end
+    return (showVehicle and hasVehicleContext()) or (showMount and hasMountContext())
 end
 
 local function getPlayerTravelPosition()
@@ -655,8 +661,8 @@ local function createFrame()
     frame.divider = createColorDrawable(frame, 0.88, 0.70, 0.35, 0.26, "overlay")
     frame.barBorder = createColorDrawable(frame, 0.70, 0.48, 0.22, 0.42, "overlay")
     frame.barBg = createColorDrawable(frame, 0.04, 0.03, 0.02, 0.84, "overlay")
-    frame.barFill = createColorDrawable(frame, 1.00, 1.00, 0.44, 1.00, "artwork")
-    frame.barShine = createColorDrawable(frame, 1.00, 1.00, 0.76, 0.72, "artwork")
+    frame.barFill = createColorDrawable(frame, 1.00, 0.96, 0.72, 1.00, "artwork")
+    frame.barShine = createColorDrawable(frame, 1.00, 1.00, 0.92, 1.00, "artwork")
 
     frame.title = createLabel(frame, "NuziUiTravelSpeedTitle", 12, getAlignLeft())
     frame.value = createLabel(frame, "NuziUiTravelSpeedValue", DEFAULT_FONT_SIZE, getAlignLeft())
@@ -766,12 +772,12 @@ local function renderFrame(frame)
 
     if source == "Vehicle" then
         setLabelColor(frame.source, 1, 0.78, 0.42, 1)
-        setDrawableColor(frame.barFill, 1.00, 1.00, 0.44, 1.00)
-        setDrawableColor(frame.barShine, 1.00, 1.00, 0.76, 0.72)
+        setDrawableColor(frame.barFill, 1.00, 0.96, 0.72, 1.00)
+        setDrawableColor(frame.barShine, 1.00, 1.00, 0.92, 1.00)
     elseif source == "Travel" then
         setLabelColor(frame.source, 0.70, 0.88, 1, 1)
-        setDrawableColor(frame.barFill, 0.68, 1.00, 1.00, 1.00)
-        setDrawableColor(frame.barShine, 0.92, 1.00, 1.00, 0.72)
+        setDrawableColor(frame.barFill, 1.00, 0.96, 0.72, 1.00)
+        setDrawableColor(frame.barShine, 1.00, 1.00, 0.92, 1.00)
     else
         setLabelColor(frame.source, 0.62, 0.56, 0.46, 1)
         setDrawableColor(frame.barFill, 0.28, 0.22, 0.16, 0.0)

@@ -164,6 +164,8 @@ SettingsDefaults.DEFAULT_SETTINGS = {
         font_size = 20,
         lock_position = false,
         only_vehicle_or_mount = false,
+        show_on_mount = true,
+        show_on_vehicle = true,
         show_bar = true,
         show_state_text = true
     },

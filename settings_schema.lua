@@ -709,6 +709,18 @@ SettingsSchema.PAGES = {
                         { depends_on = { control = "travel_speed_enabled", checked = true } }
                     ),
                     checkbox(
+                        "travel_speed_show_on_mount",
+                        "polarUiTravelSpeedShowOnMount",
+                        "Show for mounts",
+                        { depends_on = { control = "travel_speed_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "travel_speed_show_on_vehicle",
+                        "polarUiTravelSpeedShowOnVehicle",
+                        "Show for vehicles",
+                        { depends_on = { control = "travel_speed_enabled", checked = true } }
+                    ),
+                    checkbox(
                         "travel_speed_show_bar",
                         "polarUiTravelSpeedShowBar",
                         "Show speed bar",
