@@ -939,12 +939,16 @@ local function isShiftDown()
     return false
 end
 
+local function shouldRequireShiftDrag()
+    return type(GearLoadouts.settings) == "table" and GearLoadouts.settings.drag_requires_shift == true
+end
+
 local function syncMoveInteraction(window, cfg, lockKey)
     if window == nil then
         return
     end
     local interactive = window.__nuzi_loadouts_dragging
-        or (type(cfg) == "table" and not cfg[lockKey] and isShiftDown())
+        or (type(cfg) == "table" and not cfg[lockKey] and (not shouldRequireShiftDrag() or isShiftDown()))
     setWindowInteractive(window, interactive)
 end
 
@@ -959,7 +963,7 @@ local function attachMoveHandlers(window, cfgKeyX, cfgKeyY, lockKey)
                 syncMoveInteraction(window, cfg, lockKey)
                 return
             end
-            if isShiftDown() then
+            if not shouldRequireShiftDrag() or isShiftDown() then
                 window.__nuzi_loadouts_dragging = true
                 syncMoveInteraction(window, cfg, lockKey)
                 safeCall(function()

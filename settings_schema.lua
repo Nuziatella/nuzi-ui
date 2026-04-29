@@ -107,6 +107,7 @@ SettingsSchema.PAGES = {
                 hint = "Shared addon toggles that affect all custom unit frame overlays.",
                 fields = {
                     checkbox("enabled", "polarUiEnabled", "Enable Nuzi UI overlays"),
+                    checkbox("drag_requires_shift", "polarUiDragRequiresShift", "Require Shift to move frames"),
                     checkbox("large_hpmp", "polarUiLargeHpMp", "Large HP/MP text"),
                     checkbox("alignment_grid_enabled", "polarUiAlignmentGridEnabled", "Show alignment grid (30px)")
                 }
@@ -406,7 +407,7 @@ SettingsSchema.PAGES = {
                     hint(
                         "castbar_move_hint",
                         "polarUiCastBarMoveHint",
-                        "Use Shift + drag in game to move the cast bar. Position saves automatically.",
+                        "Drag in game to move the cast bar. If Shift movement is enabled in General, hold Shift while dragging.",
                         { width = 520, depends_on = { control = "castbar_enabled", checked = true } }
                     ),
                     hint(
@@ -693,7 +694,7 @@ SettingsSchema.PAGES = {
                     hint(
                         "travel_speed_move_hint",
                         "polarUiTravelSpeedMoveHint",
-                        "Use Shift + drag in game to move the speed meter. Position saves automatically.",
+                        "Drag in game to move the speed meter. If Shift movement is enabled in General, hold Shift while dragging.",
                         { width = 520, depends_on = { control = "travel_speed_enabled", checked = true } }
                     ),
                     checkbox(
@@ -781,7 +782,7 @@ SettingsSchema.PAGES = {
                     hint(
                         "gear_loadouts_move_hint",
                         "polarUiGearLoadoutsMoveHint",
-                        "Use Shift + drag in game to move the bar or editor. Positions save automatically.",
+                        "Drag in game to move the bar or editor. If Shift movement is enabled in General, hold Shift while dragging.",
                         { width = 520, depends_on = { control = "gear_loadouts_enabled", checked = true } }
                     ),
                     custom("gear_loadouts_editor_button", { estimate_height = 34 }),

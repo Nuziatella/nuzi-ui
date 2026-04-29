@@ -902,8 +902,11 @@ local function HookUnitFrameDrag(wnd, settings, key)
         end
 
         wnd.__polar_drag_start = function(self, ...)
-            if api.Input == nil or api.Input.IsShiftKeyDown == nil or not api.Input:IsShiftKeyDown() then
-                return
+            local activeSettings = wnd.__polar_drag_settings or settings
+            if activeSettings.drag_requires_shift then
+                if api.Input ~= nil and api.Input.IsShiftKeyDown ~= nil and not api.Input:IsShiftKeyDown() then
+                    return
+                end
             end
             wnd.__polar_dragging = true
             local args = { ... }
@@ -1008,12 +1011,10 @@ SyncUnitFrameDragState = function(wnd, settings)
         return
     end
 
-    local enabled = UI.enabled
-        and type(settings) == "table"
-        and api.Input ~= nil
-        and api.Input.IsShiftKeyDown ~= nil
-        and api.Input:IsShiftKeyDown()
-        and true or false
+    local enabled = UI.enabled and type(settings) == "table"
+    if enabled and settings.drag_requires_shift then
+        enabled = api.Input ~= nil and api.Input.IsShiftKeyDown ~= nil and api.Input:IsShiftKeyDown() and true or false
+    end
 
     for _, t in ipairs(wnd.__polar_drag_targets) do
         if t ~= nil and t.EnableDrag ~= nil and t.__polar_drag_enabled ~= enabled then

@@ -322,7 +322,8 @@ local function syncInteractionState(frame)
 
     local active, cfg = isActive()
     local interactive = frame.__nuzi_travel_dragging
-        or (active and type(cfg) == "table" and not cfg.lock_position and isShiftDown())
+        or (active and type(cfg) == "table" and not cfg.lock_position
+            and (type(TravelSpeed.settings) ~= "table" or TravelSpeed.settings.drag_requires_shift ~= true or isShiftDown()))
 
     for _, target in ipairs({
         frame,
@@ -561,7 +562,7 @@ local function attachDragHandlers(frame)
         if type(cfg) ~= "table" or cfg.lock_position then
             return
         end
-        if not isShiftDown() then
+        if type(TravelSpeed.settings) == "table" and TravelSpeed.settings.drag_requires_shift == true and not isShiftDown() then
             return
         end
         frame.__nuzi_travel_dragging = true

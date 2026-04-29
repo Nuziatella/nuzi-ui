@@ -1200,7 +1200,7 @@ local function syncWindowInteractionState(window, unitKey)
     local interactive = window.__nuzi_dragging
         or (CooldownTracker.enabled and type(trackerSettings) == "table" and trackerSettings.enabled == true
             and type(unitCfg) == "table" and unitCfg.enabled == true and not unitCfg.lock_position
-            and isShiftDown())
+            and (type(settings) ~= "table" or settings.drag_requires_shift ~= true or isShiftDown()))
 
     for _, target in ipairs(window.__nuzi_drag_targets) do
         setWidgetInteractive(target, interactive)
@@ -1237,7 +1237,7 @@ local function attachDragTarget(window, target, unitKey)
         if type(unitCfg) == "table" and unitCfg.lock_position then
             return
         end
-        if not isShiftDown() then
+        if type(CooldownTracker.settings) == "table" and CooldownTracker.settings.drag_requires_shift == true and not isShiftDown() then
             return
         end
         window.__nuzi_dragging = true

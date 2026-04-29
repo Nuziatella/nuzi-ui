@@ -5,7 +5,7 @@ local SettingsDefaults = {}
 
 SettingsDefaults.DEFAULT_SETTINGS = {
     enabled = true,
-    drag_requires_shift = true,
+    drag_requires_shift = false,
     update_interval_ms = 100,
     frame_scale = 1,
     alignment_grid_enabled = false,

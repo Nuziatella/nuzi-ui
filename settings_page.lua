@@ -618,7 +618,7 @@ local function AttachWindowShiftDrag(widget, target)
         end
     end)
     widget:SetHandler("OnDragStart", function()
-        if type(SettingsPage.settings) == "table" and SettingsPage.settings.drag_requires_shift ~= false and not IsShiftDown() then
+        if type(SettingsPage.settings) == "table" and SettingsPage.settings.drag_requires_shift == true and not IsShiftDown() then
             return
         end
         if target.StartMoving ~= nil then
@@ -957,7 +957,7 @@ local function EnsureSettingsButton()
 
     if btn.SetHandler ~= nil then
         btn:SetHandler("OnDragStart", function(self)
-            if type(SettingsPage.settings) == "table" and SettingsPage.settings.drag_requires_shift ~= false and not IsShiftDown() then
+            if type(SettingsPage.settings) == "table" and SettingsPage.settings.drag_requires_shift == true and not IsShiftDown() then
                 return
             end
             SettingsPage.toggle_button_dragging = true
@@ -1325,6 +1325,9 @@ RefreshControls = function()
     end
     if SettingsPage.controls.enabled ~= nil then
         SettingsPage.controls.enabled:SetChecked(s.enabled and true or false)
+    end
+    if SettingsPage.controls.drag_requires_shift ~= nil then
+        SettingsPage.controls.drag_requires_shift:SetChecked(s.drag_requires_shift == true)
     end
 
     UpdateStyleTargetHints()
@@ -2272,6 +2275,9 @@ ApplyControlsToSettings = function()
         return
     end
     s.enabled = (SettingsPage.controls.enabled ~= nil and SettingsPage.controls.enabled:GetChecked()) and true or false
+    if SettingsPage.controls.drag_requires_shift ~= nil then
+        s.drag_requires_shift = SettingsPage.controls.drag_requires_shift:GetChecked() and true or false
+    end
 
     if SettingsPage.controls.alignment_grid_enabled ~= nil then
         s.alignment_grid_enabled = SettingsPage.controls.alignment_grid_enabled:GetChecked() and true or false
@@ -3596,6 +3602,7 @@ local function EnsureWindow()
         SettingsPage.controls.aura_reverse_growth,
         SettingsPage.controls.name_visible,
         SettingsPage.controls.level_visible,
+        SettingsPage.controls.drag_requires_shift,
         SettingsPage.controls.large_hpmp,
         SettingsPage.controls.hide_ancestral_icon_level,
         SettingsPage.controls.hide_boss_frame_background,

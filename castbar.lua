@@ -1043,8 +1043,9 @@ local function syncInteractionState(frame)
 
     local active, cfg = getActiveConfig()
     local visible = CastBar.state.is_casting or CastBar.preview_visible
+    local requireShift = type(CastBar.settings) == "table" and CastBar.settings.drag_requires_shift == true
     local interactive = frame.__nuzi_castbar_dragging
-        or (active and cfg ~= nil and not cfg.lock_position and visible and isShiftDown())
+        or (active and cfg ~= nil and not cfg.lock_position and visible and (not requireShift or isShiftDown()))
 
     for _, target in ipairs({ frame, frame.statusBar, frame.text }) do
         setWidgetInteractive(target, interactive)
@@ -1539,7 +1540,7 @@ local function attachDragHandlers(frame)
         if not active or cfg == nil or cfg.lock_position then
             return
         end
-        if type(CastBar.settings) == "table" and CastBar.settings.drag_requires_shift ~= false and not isShiftDown() then
+        if type(CastBar.settings) == "table" and CastBar.settings.drag_requires_shift == true and not isShiftDown() then
             return
         end
 
