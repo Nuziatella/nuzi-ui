@@ -77,6 +77,24 @@ local function readOffset(widget, methodName)
     return nil, nil
 end
 
+local function readWidgetScale(widget)
+    if widget == nil or type(widget.GetScale) ~= "function" then
+        return 1
+    end
+    local ok, scale = pcall(function()
+        return widget:GetScale()
+    end)
+    scale = ok and tonumber(scale) or nil
+    if scale == nil or scale <= 0 then
+        return 1
+    end
+    return scale
+end
+
+function Layout.GetWidgetScale(widget)
+    return readWidgetScale(widget)
+end
+
 function Layout.ReadUiOffset(widget)
     local x, y = readOffset(widget, "GetOffset")
     if x ~= nil and y ~= nil then
@@ -84,19 +102,21 @@ function Layout.ReadUiOffset(widget)
     end
     x, y = readOffset(widget, "GetEffectiveOffset")
     if x ~= nil and y ~= nil then
-        return Layout.ToUi(x), Layout.ToUi(y)
+        local scale = readWidgetScale(widget)
+        return Layout.ToUi(x) / scale, Layout.ToUi(y) / scale
     end
     return nil, nil
 end
 
 function Layout.ReadScreenOffset(widget)
-    local x, y = readOffset(widget, "GetEffectiveOffset")
-    if x ~= nil and y ~= nil then
-        return x, y
-    end
-    x, y = readOffset(widget, "GetOffset")
+    local x, y = readOffset(widget, "GetOffset")
     if x ~= nil and y ~= nil then
         return Layout.ToScreen(x), Layout.ToScreen(y)
+    end
+    x, y = readOffset(widget, "GetEffectiveOffset")
+    if x ~= nil and y ~= nil then
+        local scale = readWidgetScale(widget)
+        return x / scale, y / scale
     end
     return nil, nil
 end

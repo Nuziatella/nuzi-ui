@@ -1524,6 +1524,9 @@ RefreshControls = function()
     if SettingsPage.controls.travel_speed_show_on_vehicle ~= nil then
         SettingsPage.controls.travel_speed_show_on_vehicle:SetChecked(travelSpeed.show_on_vehicle ~= false)
     end
+    if SettingsPage.controls.travel_speed_show_speed_text ~= nil then
+        SettingsPage.controls.travel_speed_show_speed_text:SetChecked(travelSpeed.show_speed_text ~= false)
+    end
     if SettingsPage.controls.travel_speed_show_bar ~= nil then
         SettingsPage.controls.travel_speed_show_bar:SetChecked(travelSpeed.show_bar ~= false)
     end
@@ -2356,6 +2359,9 @@ ApplyControlsToSettings = function()
     end
     if SettingsPage.controls.travel_speed_show_on_vehicle ~= nil then
         s.travel_speed.show_on_vehicle = SettingsPage.controls.travel_speed_show_on_vehicle:GetChecked() and true or false
+    end
+    if SettingsPage.controls.travel_speed_show_speed_text ~= nil then
+        s.travel_speed.show_speed_text = SettingsPage.controls.travel_speed_show_speed_text:GetChecked() and true or false
     end
     if SettingsPage.controls.travel_speed_show_bar ~= nil then
         s.travel_speed.show_bar = SettingsPage.controls.travel_speed_show_bar:GetChecked() and true or false
@@ -3616,6 +3622,7 @@ local function EnsureWindow()
         SettingsPage.controls.travel_speed_only_vehicle_or_mount,
         SettingsPage.controls.travel_speed_show_on_mount,
         SettingsPage.controls.travel_speed_show_on_vehicle,
+        SettingsPage.controls.travel_speed_show_speed_text,
         SettingsPage.controls.travel_speed_show_bar,
         SettingsPage.controls.travel_speed_show_state_text,
         SettingsPage.controls.gear_loadouts_enabled,

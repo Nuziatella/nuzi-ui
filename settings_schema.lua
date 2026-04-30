@@ -722,6 +722,12 @@ SettingsSchema.PAGES = {
                         { depends_on = { control = "travel_speed_enabled", checked = true } }
                     ),
                     checkbox(
+                        "travel_speed_show_speed_text",
+                        "polarUiTravelSpeedShowSpeedText",
+                        "Show speed text",
+                        { depends_on = { control = "travel_speed_enabled", checked = true } }
+                    ),
+                    checkbox(
                         "travel_speed_show_bar",
                         "polarUiTravelSpeedShowBar",
                         "Show speed bar",

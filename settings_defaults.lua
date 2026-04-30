@@ -166,6 +166,7 @@ SettingsDefaults.DEFAULT_SETTINGS = {
         only_vehicle_or_mount = false,
         show_on_mount = true,
         show_on_vehicle = true,
+        show_speed_text = true,
         show_bar = true,
         show_state_text = true
     },

@@ -34,6 +34,8 @@ local MAX_TRAVEL_SAMPLE_DISTANCE = 12
 local TRAVEL_SPEED_RISE_SMOOTHING = 0.28
 local TRAVEL_SPEED_FALL_SMOOTHING = 0.4
 local MIN_TRAVEL_SPEED_DISPLAY = 0.05
+local BAR_FILL_COLOR = { 1.00, 0.93, 0.42, 1.00 }
+local BAR_SHINE_COLOR = { 1.00, 1.00, 0.88, 1.00 }
 
 local function safeCall(fn)
     local ok, a, b, c = pcall(fn)
@@ -315,6 +317,18 @@ local function isShiftDown()
     return false
 end
 
+local function readMousePos()
+    if api ~= nil and api.Input ~= nil and api.Input.GetMousePos ~= nil then
+        local ok, x, y = pcall(function()
+            return api.Input:GetMousePos()
+        end)
+        if ok and tonumber(x) ~= nil and tonumber(y) ~= nil then
+            return tonumber(x), tonumber(y)
+        end
+    end
+    return nil, nil
+end
+
 local function syncInteractionState(frame)
     if frame == nil then
         return
@@ -442,6 +456,13 @@ local function shouldShowForContext(cfg)
     return (showVehicle and hasVehicleContext()) or (showMount and hasMountContext())
 end
 
+local function hasVisibleContent(cfg)
+    if type(cfg) ~= "table" then
+        return true
+    end
+    return cfg.show_speed_text ~= false or cfg.show_bar ~= false
+end
+
 local function getPlayerTravelPosition()
     if api == nil or api.Unit == nil or api.Unit.UnitWorldPosition == nil then
         return nil, nil
@@ -551,6 +572,32 @@ local function updateSpeed()
     end
 end
 
+local function updateDragPosition(frame, cfg)
+    if frame == nil or type(cfg) ~= "table" then
+        return false
+    end
+
+    local drag = frame.__nuzi_travel_drag_state
+    if type(drag) ~= "table" then
+        return false
+    end
+
+    local mouseX, mouseY = readMousePos()
+    if mouseX == nil or mouseY == nil then
+        return false
+    end
+
+    local nextX = clampInt((tonumber(drag.pos_x) or DEFAULT_POS_X) + (mouseX - (tonumber(drag.mouse_x) or mouseX)), -5000, 5000, DEFAULT_POS_X)
+    local nextY = clampInt((tonumber(drag.pos_y) or DEFAULT_POS_Y) + (mouseY - (tonumber(drag.mouse_y) or mouseY)), -5000, 5000, DEFAULT_POS_Y)
+    local changed = cfg.pos_x ~= nextX or cfg.pos_y ~= nextY
+
+    cfg.pos_x = nextX
+    cfg.pos_y = nextY
+    anchorTopLeft(frame, nextX, nextY)
+
+    return changed
+end
+
 local function attachDragHandlers(frame)
     if frame == nil or frame.__nuzi_travel_drag_hooked then
         return
@@ -565,39 +612,41 @@ local function attachDragHandlers(frame)
         if type(TravelSpeed.settings) == "table" and TravelSpeed.settings.drag_requires_shift == true and not isShiftDown() then
             return
         end
-        frame.__nuzi_travel_dragging = true
-        if frame.StartMoving ~= nil then
-            safeCall(function()
-                frame:StartMoving()
-            end)
+
+        local mouseX, mouseY = readMousePos()
+        if mouseX == nil or mouseY == nil then
+            return
         end
+
+        frame.__nuzi_travel_drag_state = {
+            mouse_x = mouseX,
+            mouse_y = mouseY,
+            pos_x = tonumber(cfg.pos_x) or DEFAULT_POS_X,
+            pos_y = tonumber(cfg.pos_y) or DEFAULT_POS_Y
+        }
+        frame.__nuzi_travel_dragging = true
         setMoveCursor()
+        syncInteractionState(frame)
     end
 
     local function onDragStop()
         if not frame.__nuzi_travel_dragging then
             return
         end
-        if frame.StopMovingOrSizing ~= nil then
-            safeCall(function()
-                frame:StopMovingOrSizing()
-            end)
-        end
-        frame.__nuzi_travel_dragging = false
-        clearCursor()
 
         local cfg = getConfig()
         if type(cfg) ~= "table" then
+            frame.__nuzi_travel_dragging = false
+            frame.__nuzi_travel_drag_state = nil
+            clearCursor()
             syncInteractionState(frame)
             return
         end
-        local x, y = readWindowOffset(frame)
-        if x == nil or y == nil then
-            syncInteractionState(frame)
-            return
-        end
-        cfg.pos_x = clampInt(x, -5000, 5000, DEFAULT_POS_X)
-        cfg.pos_y = clampInt(y, -5000, 5000, DEFAULT_POS_Y)
+
+        updateDragPosition(frame, cfg)
+        frame.__nuzi_travel_dragging = false
+        frame.__nuzi_travel_drag_state = nil
+        clearCursor()
         frame.__nuzi_travel_x = nil
         frame.__nuzi_travel_y = nil
         anchorTopLeft(frame, cfg.pos_x, cfg.pos_y)
@@ -661,8 +710,8 @@ local function createFrame()
     frame.divider = createColorDrawable(frame, 0.88, 0.70, 0.35, 0.26, "overlay")
     frame.barBorder = createColorDrawable(frame, 0.70, 0.48, 0.22, 0.42, "overlay")
     frame.barBg = createColorDrawable(frame, 0.04, 0.03, 0.02, 0.84, "overlay")
-    frame.barFill = createColorDrawable(frame, 1.00, 0.96, 0.72, 1.00, "artwork")
-    frame.barShine = createColorDrawable(frame, 1.00, 1.00, 0.92, 1.00, "artwork")
+    frame.barFill = createColorDrawable(frame, BAR_FILL_COLOR[1], BAR_FILL_COLOR[2], BAR_FILL_COLOR[3], BAR_FILL_COLOR[4], "overlay")
+    frame.barShine = createColorDrawable(frame, BAR_SHINE_COLOR[1], BAR_SHINE_COLOR[2], BAR_SHINE_COLOR[3], BAR_SHINE_COLOR[4], "overlay")
 
     frame.title = createLabel(frame, "NuziUiTravelSpeedTitle", 12, getAlignLeft())
     frame.value = createLabel(frame, "NuziUiTravelSpeedValue", DEFAULT_FONT_SIZE, getAlignLeft())
@@ -695,15 +744,16 @@ local function applyFrameSettings(frame, cfg)
     local width = clampInt(cfg.width, 160, 360, DEFAULT_WIDTH)
     local scale = clampNumber(cfg.scale, 0.75, 1.6, DEFAULT_SCALE)
     local fontSize = clampInt(cfg.font_size, 14, 30, DEFAULT_FONT_SIZE)
+    local showSpeedText = cfg.show_speed_text ~= false
     local showBar = cfg.show_bar ~= false
-    local showStateText = cfg.show_state_text ~= false
+    local showStateText = showSpeedText and cfg.show_state_text ~= false
     local valueY = 8
     local valueHeight = fontSize + 8
-    local barY = valueY + valueHeight + 5
-    local windowHeight = showBar and (barY + 13) or (valueY + valueHeight + 8)
+    local barY = showSpeedText and (valueY + valueHeight + 5) or 7
+    local windowHeight = showBar and (barY + 13) or (showSpeedText and (valueY + valueHeight + 8) or 1)
     local valueWidth = showStateText and (width - 96) or (width - 24)
     local sourceY = valueY + math.max(0, math.floor((valueHeight - 18) / 2))
-    local layoutKey = string.format("%d:%.2f:%d:%s:%s", width, scale, fontSize, tostring(showBar), tostring(showStateText))
+    local layoutKey = string.format("%d:%.2f:%d:%s:%s:%s", width, scale, fontSize, tostring(showSpeedText), tostring(showBar), tostring(showStateText))
 
     if frame.__nuzi_travel_layout_key ~= layoutKey then
         safeCall(function()
@@ -732,6 +782,7 @@ local function applyFrameSettings(frame, cfg)
         end
         frame.__nuzi_travel_layout_key = layoutKey
     end
+    setWidgetVisible(frame.value, showSpeedText)
     setWidgetVisible(frame.source, showStateText)
     setWidgetVisible(frame.barBorder, showBar)
     setWidgetVisible(frame.barBg, showBar)
@@ -751,8 +802,9 @@ local function renderFrame(frame)
     local source = tostring(TravelSpeed.speed_source or "Idle")
     local maxSpeed = math.max(DEFAULT_SPEED_BAR_MAX, tonumber(TravelSpeed.speed_bar_max) or DEFAULT_SPEED_BAR_MAX)
     local cfg = getConfig()
+    local showSpeedText = type(cfg) ~= "table" or cfg.show_speed_text ~= false
     local showBar = type(cfg) ~= "table" or cfg.show_bar ~= false
-    local showStateText = type(cfg) ~= "table" or cfg.show_state_text ~= false
+    local showStateText = showSpeedText and (type(cfg) ~= "table" or cfg.show_state_text ~= false)
     local width = clampInt(type(cfg) == "table" and cfg.width or nil, 160, 360, DEFAULT_WIDTH)
     local fillMax = math.max(1, width - 24)
     local progress = speed / maxSpeed
@@ -768,16 +820,17 @@ local function renderFrame(frame)
 
     setText(frame.value, string.format("%.1f m/s", speed))
     setText(frame.source, string.upper(source))
+    setWidgetVisible(frame.value, showSpeedText)
     setWidgetVisible(frame.source, showStateText)
 
     if source == "Vehicle" then
         setLabelColor(frame.source, 1, 0.78, 0.42, 1)
-        setDrawableColor(frame.barFill, 1.00, 0.96, 0.72, 1.00)
-        setDrawableColor(frame.barShine, 1.00, 1.00, 0.92, 1.00)
+        setDrawableColor(frame.barFill, BAR_FILL_COLOR[1], BAR_FILL_COLOR[2], BAR_FILL_COLOR[3], BAR_FILL_COLOR[4])
+        setDrawableColor(frame.barShine, BAR_SHINE_COLOR[1], BAR_SHINE_COLOR[2], BAR_SHINE_COLOR[3], BAR_SHINE_COLOR[4])
     elseif source == "Travel" then
         setLabelColor(frame.source, 0.70, 0.88, 1, 1)
-        setDrawableColor(frame.barFill, 1.00, 0.96, 0.72, 1.00)
-        setDrawableColor(frame.barShine, 1.00, 1.00, 0.92, 1.00)
+        setDrawableColor(frame.barFill, BAR_FILL_COLOR[1], BAR_FILL_COLOR[2], BAR_FILL_COLOR[3], BAR_FILL_COLOR[4])
+        setDrawableColor(frame.barShine, BAR_SHINE_COLOR[1], BAR_SHINE_COLOR[2], BAR_SHINE_COLOR[3], BAR_SHINE_COLOR[4])
     else
         setLabelColor(frame.source, 0.62, 0.56, 0.46, 1)
         setDrawableColor(frame.barFill, 0.28, 0.22, 0.16, 0.0)
@@ -785,7 +838,7 @@ local function renderFrame(frame)
     end
 
     local fontSize = clampInt(type(cfg) == "table" and cfg.font_size or nil, 14, 30, DEFAULT_FONT_SIZE)
-    local barY = 8 + fontSize + 8 + 5
+    local barY = showSpeedText and (8 + fontSize + 8 + 5) or 7
     setDrawableRect(frame.barFill, frame, 12, barY, math.max(1, fillWidth), 8)
     setDrawableRect(frame.barShine, frame, 12, barY, math.max(1, fillWidth), 3)
     setWidgetVisible(frame.barFill, showBar and fillWidth > 0)
@@ -797,7 +850,7 @@ function TravelSpeed.Init(settings)
     TravelSpeed.enabled = type(settings) == "table" and settings.enabled and true or false
     TravelSpeed.accum_ms = 0
     local active, cfg = isActive()
-    if not active or not shouldShowForContext(cfg) then
+    if not active or not shouldShowForContext(cfg) or not hasVisibleContent(cfg) then
         if TravelSpeed.frame ~= nil then
             setWidgetVisible(TravelSpeed.frame, false)
         end
@@ -814,7 +867,7 @@ end
 function TravelSpeed.ApplySettings(settings)
     TravelSpeed.settings = settings
     local active, cfg = isActive()
-    if not active or not shouldShowForContext(cfg) then
+    if not active or not shouldShowForContext(cfg) or not hasVisibleContent(cfg) then
         if TravelSpeed.frame ~= nil then
             setWidgetVisible(TravelSpeed.frame, false)
         end
@@ -851,7 +904,7 @@ function TravelSpeed.OnUpdate(dt, settings)
         return
     end
 
-    if not shouldShowForContext(cfg)
+    if (not shouldShowForContext(cfg) or not hasVisibleContent(cfg))
         and not (TravelSpeed.frame ~= nil and TravelSpeed.frame.__nuzi_travel_dragging) then
         if TravelSpeed.frame ~= nil then
             setWidgetVisible(TravelSpeed.frame, false)
@@ -869,6 +922,10 @@ function TravelSpeed.OnUpdate(dt, settings)
 
     applyFrameSettings(frame, cfg)
     setWidgetVisible(frame, true)
+
+    if frame.__nuzi_travel_dragging then
+        updateDragPosition(frame, cfg)
+    end
 
     TravelSpeed.accum_ms = (tonumber(TravelSpeed.accum_ms) or 0) + (tonumber(dt) or 0)
     if TravelSpeed.accum_ms < UPDATE_INTERVAL_MS then
@@ -888,6 +945,7 @@ end
 function TravelSpeed.Unload()
     if TravelSpeed.frame ~= nil then
         TravelSpeed.frame.__nuzi_travel_dragging = false
+        TravelSpeed.frame.__nuzi_travel_drag_state = nil
         setWidgetVisible(TravelSpeed.frame, false)
         if api ~= nil and api.Interface ~= nil and api.Interface.Free ~= nil then
             safeCall(function()
