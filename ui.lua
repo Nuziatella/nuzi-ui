@@ -210,6 +210,21 @@ local function NormalizeRuntimeUnitToken(unit)
     return token
 end
 
+local function SafeUnitInfo(unit)
+    local normalizedUnit = NormalizeRuntimeUnitToken(unit)
+    if normalizedUnit == nil or api == nil or api.Unit == nil or api.Unit.UnitInfo == nil then
+        return nil
+    end
+    local info = nil
+    pcall(function()
+        info = api.Unit:UnitInfo(normalizedUnit)
+    end)
+    if type(info) == "table" then
+        return info
+    end
+    return nil
+end
+
 local function NormalizeNumericValue(value)
     local n = tonumber(value)
     if n == nil or n ~= n or n == math.huge or n == -math.huge then
@@ -261,74 +276,145 @@ local function ResolveUnitDisplayName(info)
     return TrimText(info.name or info.unitName or info.family_name or "")
 end
 
-local function ResolveUnitLevel(info)
+local function ResolveUnitLevelParts(info)
     if type(info) ~= "table" then
-        return nil
+        return nil, nil
     end
-    local candidates = {
-        info.level,
-        info.unitLevel,
-        info.grade,
-        info.lv
-    }
-    for _, value in ipairs(candidates) do
-        local num = tonumber(value)
-        if num ~= nil and num > 0 then
-            return math.floor(num + 0.5)
-        end
+
+    local level = tonumber(info.level or info.unitLevel or info.lv)
+    if level ~= nil and level > 0 then
+        level = math.floor(level + 0.5)
+    else
+        level = nil
     end
-    return nil
+
+    local heirLevel = tonumber(info.heirLevel)
+    if heirLevel ~= nil and heirLevel > 0 then
+        heirLevel = math.floor(heirLevel + 0.5)
+    else
+        heirLevel = nil
+    end
+
+    return level, heirLevel
 end
 
-local function ApplyTargetNameLevel(targetName, targetLevel)
-    if UI == nil or UI.target == nil or UI.target.wnd == nil then
+local function ResolveUnitLevel(info)
+    local level, heirLevel = ResolveUnitLevelParts(info)
+    return heirLevel or level
+end
+
+local function ApplyFrameNameLevel(frame, unitName, unitLevel, unitHeirLevel)
+    if frame == nil then
         return
     end
+
+    local style = ResolveFrameStyleTable ~= nil and ResolveFrameStyleTable(frame) or nil
+    if type(style) ~= "table" and type(UI.settings) == "table" then
+        style = UI.settings.style
+    end
+
     pcall(function()
-        if UI.target.wnd.name ~= nil then
-            local showName = type(targetName) == "string" and targetName ~= ""
-            if UI.target.wnd.name.SetText ~= nil and showName and UI.target.wnd.name.__polar_text ~= targetName then
-                UI.target.wnd.name:SetText(targetName)
-                UI.target.wnd.name.__polar_text = targetName
+        if frame.name ~= nil then
+            local showName = type(unitName) == "string" and unitName ~= "" and (type(style) ~= "table" or style.name_visible ~= false)
+            if frame.name.SetText ~= nil and showName and frame.name.__polar_text ~= unitName then
+                frame.name:SetText(unitName)
+                frame.name.__polar_text = unitName
             end
-            if UI.target.wnd.name.SetText ~= nil and not showName and UI.target.wnd.name.__polar_text ~= "" then
-                UI.target.wnd.name:SetText("")
-                UI.target.wnd.name.__polar_text = ""
+            if frame.name.SetText ~= nil and not showName and frame.name.__polar_text ~= "" then
+                frame.name:SetText("")
+                frame.name.__polar_text = ""
             end
-            if UI.target.wnd.name.Show ~= nil and UI.target.wnd.name.__polar_visible ~= showName then
-                UI.target.wnd.name:Show(showName)
-                UI.target.wnd.name.__polar_visible = showName
+            if frame.name.Show ~= nil and frame.name.__polar_visible ~= showName then
+                frame.name:Show(showName)
+                frame.name.__polar_visible = showName
             end
         end
     end)
+
     pcall(function()
-        local levelLabel = (UI.target.wnd.level ~= nil and UI.target.wnd.level.label ~= nil) and UI.target.wnd.level.label or nil
+        local levelRoot = frame.level
+        local levelLabel = (type(levelRoot) == "table" and levelRoot.label ~= nil) and levelRoot.label or nil
         if levelLabel == nil then
             return
         end
-        local showLevel = type(targetLevel) == "number" and targetLevel > 0
+
+        local level = tonumber(unitLevel)
+        local heirLevel = tonumber(unitHeirLevel) or 0
+        local displayLevel = heirLevel > 0 and heirLevel or level
+        local showLevel = type(displayLevel) == "number" and displayLevel > 0 and (type(style) ~= "table" or style.level_visible ~= false)
         if type(UI.settings) == "table" and UI.settings.hide_ancestral_icon_level then
             showLevel = false
         end
-        if levelLabel.SetText ~= nil then
-            if showLevel then
-                local levelText = tostring(targetLevel)
-                if levelLabel.__polar_text ~= levelText then
-                    levelLabel:SetText(levelText)
-                    levelLabel.__polar_text = levelText
-                end
-            else
-                if levelLabel.__polar_text ~= "" then
-                    levelLabel:SetText("")
-                    levelLabel.__polar_text = ""
-                end
+
+        if showLevel and type(levelRoot) == "table" and type(levelRoot.ChangedLevel) == "function" then
+            levelRoot:ChangedLevel(level or displayLevel, heirLevel)
+            levelLabel.__polar_text = tostring(displayLevel)
+        elseif levelLabel.SetText ~= nil then
+            local levelText = showLevel and tostring(displayLevel) or ""
+            if levelLabel.__polar_text ~= levelText then
+                levelLabel:SetText(levelText)
+                levelLabel.__polar_text = levelText
             end
+        end
+
+        if levelRoot ~= nil and levelRoot.Show ~= nil and levelRoot.__polar_visible ~= showLevel then
+            levelRoot:Show(showLevel)
+            levelRoot.__polar_visible = showLevel
         end
         if levelLabel.Show ~= nil and levelLabel.__polar_visible ~= showLevel then
             levelLabel:Show(showLevel)
             levelLabel.__polar_visible = showLevel
         end
+        if not showLevel and type(levelRoot) == "table" then
+            if levelRoot.levelTexture ~= nil and levelRoot.levelTexture.SetVisible ~= nil then
+                levelRoot.levelTexture:SetVisible(false)
+            end
+            if levelRoot.heirIcon ~= nil and levelRoot.heirIcon.SetVisible ~= nil then
+                levelRoot.heirIcon:SetVisible(false)
+            end
+            if levelRoot.heirTexture ~= nil and levelRoot.heirTexture.SetVisible ~= nil then
+                levelRoot.heirTexture:SetVisible(false)
+            end
+        end
     end)
+end
+
+local function ApplyTargetNameLevel(targetName, targetLevel, targetHeirLevel)
+    if UI == nil or UI.target == nil or UI.target.wnd == nil then
+        return
+    end
+    ApplyFrameNameLevel(UI.target.wnd, targetName, targetLevel, targetHeirLevel)
+end
+
+local function RefreshFrameNameLevelFromUnit(frame, unit)
+    if frame == nil then
+        return
+    end
+
+    local unitId = Runtime ~= nil and Runtime.GetUnitId ~= nil and Runtime.GetUnitId(unit) or nil
+    local unitInfo = SafeUnitInfo(unit)
+    local idInfo = SafeGetUnitInfoById(unitId)
+    if type(unitInfo) ~= "table" and type(idInfo) ~= "table" then
+        return
+    end
+
+    local name = Runtime ~= nil and Runtime.GetUnitName ~= nil and Runtime.GetUnitName(unit) or ""
+    if name == "" then
+        name = ResolveUnitDisplayName(unitInfo)
+    end
+    if name == "" then
+        name = ResolveUnitDisplayName(idInfo)
+    end
+
+    local level, heirLevel = ResolveUnitLevelParts(unitInfo)
+    local idLevel, idHeirLevel = ResolveUnitLevelParts(idInfo)
+    if level == nil then
+        level = idLevel
+    end
+    if heirLevel == nil then
+        heirLevel = idHeirLevel
+    end
+    ApplyFrameNameLevel(frame, name, level, heirLevel)
 end
 
 local function ResolveWidgetCandidate(value)
@@ -4056,7 +4142,9 @@ BuildUiContext = function()
         ApplyTextColor = ApplyTextColor,
         ApplyOverlayAlpha = ApplyOverlayAlpha,
         ResolveUnitDisplayName = ResolveUnitDisplayName,
+        ResolveUnitLevelParts = ResolveUnitLevelParts,
         ResolveUnitLevel = ResolveUnitLevel,
+        SafeUnitInfo = SafeUnitInfo,
         SafeGetUnitInfoById = SafeGetUnitInfoById,
         ApplyTargetNameLevel = ApplyTargetNameLevel,
         TrimText = TrimText,
@@ -4210,6 +4298,8 @@ local function EnsureUi(settings)
     if UI.target_of_target.wnd ~= nil then
         ApplyStockFrameStyle(UI.target_of_target.wnd, UI.target_of_target.wnd.__polar_style_override or baseStyle)
     end
+    RefreshFrameNameLevelFromUnit(UI.watchtarget.wnd, "watchtarget")
+    RefreshFrameNameLevelFromUnit(UI.target_of_target.wnd, "targettarget")
 
     RefreshTrackedStockFrameBars()
     RefreshTrackedStockFrameValueText(baseStyle)
@@ -4670,6 +4760,8 @@ UI.OnUpdate = function(dt)
     if UI.enabled then
         SyncSecondaryFrameBinding(UI.watchtarget.wnd, "watchtarget")
         SyncSecondaryFrameBinding(UI.target_of_target.wnd, "targettarget")
+        RefreshFrameNameLevelFromUnit(UI.watchtarget.wnd, "watchtarget")
+        RefreshFrameNameLevelFromUnit(UI.target_of_target.wnd, "targettarget")
         ApplyUnitFramePosition(UI.target.wnd, UI.settings, "target", 10, 380)
         ApplyUnitFramePosition(UI.watchtarget.wnd, UI.settings, "watchtarget", 10, 460)
         ApplyUnitFramePosition(UI.target_of_target.wnd, UI.settings, "target_of_target", 10, 540)

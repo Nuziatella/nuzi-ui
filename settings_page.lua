@@ -30,6 +30,7 @@ local SettingsPage = {
     toggle_button_dragging = false,
     style_target = "all",
     _refreshing_style_target = false,
+    _refreshing_controls = false,
     cooldown_unit_key = "player",
     cooldown_track_kind = "any",
     cooldown_buff_page = 1,
@@ -320,6 +321,22 @@ local function GetStyleTargetIndexFromKey(key)
     return SettingsCommon.GetIndexFromKey(STYLE_TARGET_KEYS, tostring(key or "all"))
 end
 
+local function SyncStyleTargetCombos()
+    SettingsPage._refreshing_style_target = true
+    local targetIdx = GetStyleTargetIndexFromKey(SettingsPage.style_target)
+    local controls = {
+        SettingsPage.controls.style_target_text,
+        SettingsPage.controls.style_target_bars
+    }
+    for _, ctrl in ipairs(controls) do
+        if ctrl ~= nil then
+            ctrl.__polar_index_base = nil
+            SetComboBoxIndex1Based(ctrl, targetIdx)
+        end
+    end
+    SettingsPage._refreshing_style_target = false
+end
+
 local function GetStyleTargetDisplayName(key)
     key = tostring(key or "all")
     if key == "player" then
@@ -538,23 +555,7 @@ local function SetActivePage(pageId)
         UpdateNavigationState(pageId)
     end
 
-    local function syncStyleTargetCombo(ctrl)
-        if ctrl == nil then
-            return
-        end
-        SettingsPage._refreshing_style_target = true
-        local targetIdx = GetStyleTargetIndexFromKey(SettingsPage.style_target)
-        ctrl.__polar_index_base = nil
-        SetComboBoxIndex1Based(ctrl, targetIdx)
-        SettingsPage._refreshing_style_target = false
-    end
-
-    if pageId == "text" then
-        syncStyleTargetCombo(SettingsPage.controls.style_target_text)
-    elseif pageId == "bars" then
-        syncStyleTargetCombo(SettingsPage.controls.style_target_bars)
-    end
-
+    SyncStyleTargetCombos()
     UpdateStyleTargetHints()
 
     local page = SettingsPage.pages[pageId]
@@ -1323,6 +1324,8 @@ RefreshControls = function()
     if s == nil then
         return
     end
+    SettingsPage._refreshing_controls = true
+    SyncStyleTargetCombos()
     if SettingsPage.controls.enabled ~= nil then
         SettingsPage.controls.enabled:SetChecked(s.enabled and true or false)
     end
@@ -2275,6 +2278,7 @@ RefreshControls = function()
     SettingsCooldown.RefreshScanRows(SettingsPage)
     RefreshSchemaControlStates()
     RefreshRepairDiagnostics()
+    SettingsPage._refreshing_controls = false
 
 end
 
@@ -2422,6 +2426,9 @@ ApplyControlsToSettings = function()
         editStyle = {}
         s.style = editStyle
     end
+    local activePage = tostring(SettingsPage.active_page or "")
+    local applyTextStyle = activePage == "text"
+    local applyBarsStyle = activePage == "bars"
 
     local _, targetEditStyle = GetTargetFrameStyleTables(s)
 
@@ -2604,259 +2611,268 @@ ApplyControlsToSettings = function()
         end
     end
 
-    if SettingsPage.controls.frame_alpha ~= nil then
-        editStyle.frame_alpha = GetSliderValue(SettingsPage.controls.frame_alpha) / 100
-    end
-
-    if SettingsPage.controls.frame_width ~= nil then
-        editStyle.frame_width = GetSliderValue(SettingsPage.controls.frame_width)
-    end
-
-    if SettingsPage.controls.frame_height ~= nil then
-        s.frame_height = GetSliderValue(SettingsPage.controls.frame_height)
-    end
-
-    if SettingsPage.controls.frame_scale ~= nil then
-        editStyle.frame_scale = GetSliderValue(SettingsPage.controls.frame_scale) / 100
-    end
-
-    if SettingsPage.controls.bar_height ~= nil then
-        editStyle.bar_height = GetSliderValue(SettingsPage.controls.bar_height)
-    end
-    if SettingsPage.controls.hp_bar_height ~= nil then
-        editStyle.hp_bar_height = GetSliderValue(SettingsPage.controls.hp_bar_height)
-    end
-    if SettingsPage.controls.mp_bar_height ~= nil then
-        editStyle.mp_bar_height = GetSliderValue(SettingsPage.controls.mp_bar_height)
-    end
-    if SettingsPage.controls.bar_gap ~= nil then
-        editStyle.bar_gap = GetSliderValue(SettingsPage.controls.bar_gap)
-    end
-    if SettingsPage.controls.name_visible ~= nil then
-        editStyle.name_visible = SettingsPage.controls.name_visible:GetChecked() and true or false
-    end
-    if SettingsPage.controls.name_offset_x ~= nil then
-        editStyle.name_offset_x = GetSliderValue(SettingsPage.controls.name_offset_x)
-    end
-    if SettingsPage.controls.name_offset_y ~= nil then
-        editStyle.name_offset_y = GetSliderValue(SettingsPage.controls.name_offset_y)
-    end
-
-    if SettingsPage.controls.level_visible ~= nil then
-        editStyle.level_visible = SettingsPage.controls.level_visible:GetChecked() and true or false
-    end
-    if SettingsPage.controls.level_font_size ~= nil then
-        editStyle.level_font_size = GetSliderValue(SettingsPage.controls.level_font_size)
-    end
-    if SettingsPage.controls.level_offset_x ~= nil then
-        editStyle.level_offset_x = GetSliderValue(SettingsPage.controls.level_offset_x)
-    end
-    if SettingsPage.controls.level_offset_y ~= nil then
-        editStyle.level_offset_y = GetSliderValue(SettingsPage.controls.level_offset_y)
-    end
-
-    if SettingsPage.controls.name_font_size ~= nil then
-        editStyle.name_font_size = GetSliderValue(SettingsPage.controls.name_font_size)
-    end
-    if SettingsPage.controls.hp_font_size ~= nil then
-        editStyle.hp_font_size = GetSliderValue(SettingsPage.controls.hp_font_size)
-    end
-    if SettingsPage.controls.mp_font_size ~= nil then
-        editStyle.mp_font_size = GetSliderValue(SettingsPage.controls.mp_font_size)
-    end
-    if SettingsPage.controls.overlay_font_size ~= nil then
-        editStyle.overlay_font_size = GetSliderValue(SettingsPage.controls.overlay_font_size)
-    end
-
-    if SettingsPage.controls.gs_font_size ~= nil then
-        editStyle.gs_font_size = GetSliderValue(SettingsPage.controls.gs_font_size)
-    end
-    if SettingsPage.controls.class_font_size ~= nil then
-        editStyle.class_font_size = GetSliderValue(SettingsPage.controls.class_font_size)
-    end
-    if SettingsPage.controls.target_guild_font_size ~= nil then
-        editStyle.target_guild_font_size = GetSliderValue(SettingsPage.controls.target_guild_font_size)
-    end
-    if SettingsPage.controls.target_guild_visible ~= nil then
-        editStyle.target_guild_visible = SettingsPage.controls.target_guild_visible:GetChecked() and true or false
-    end
-    if SettingsPage.controls.target_class_visible ~= nil then
-        editStyle.target_class_visible = SettingsPage.controls.target_class_visible:GetChecked() and true or false
-    end
-    if SettingsPage.controls.target_gearscore_visible ~= nil then
-        editStyle.target_gearscore_visible = SettingsPage.controls.target_gearscore_visible:GetChecked() and true or false
-    end
-    if SettingsPage.controls.target_pdef_visible ~= nil then
-        editStyle.target_pdef_visible = SettingsPage.controls.target_pdef_visible:GetChecked() and true or false
-    end
-    if SettingsPage.controls.target_mdef_visible ~= nil then
-        editStyle.target_mdef_visible = SettingsPage.controls.target_mdef_visible:GetChecked() and true or false
-    end
-
-    if SettingsPage.controls.name_shadow ~= nil then
-        editStyle.name_shadow = SettingsPage.controls.name_shadow:GetChecked() and true or false
-    end
-    if SettingsPage.controls.value_shadow ~= nil then
-        editStyle.value_shadow = SettingsPage.controls.value_shadow:GetChecked() and true or false
-    end
-    if SettingsPage.controls.overlay_shadow ~= nil then
-        editStyle.overlay_shadow = SettingsPage.controls.overlay_shadow:GetChecked() and true or false
-    end
-
-    if SettingsPage.controls.hp_value_visible ~= nil then
-        editStyle.hp_value_visible = SettingsPage.controls.hp_value_visible:GetChecked() and true or false
-    end
-    if SettingsPage.controls.mp_value_visible ~= nil then
-        editStyle.mp_value_visible = SettingsPage.controls.mp_value_visible:GetChecked() and true or false
-    end
-
-    if SettingsPage.controls.hp_value_offset_x ~= nil then
-        editStyle.hp_value_offset_x = GetSliderValue(SettingsPage.controls.hp_value_offset_x)
-    end
-    if SettingsPage.controls.hp_value_offset_y ~= nil then
-        editStyle.hp_value_offset_y = GetSliderValue(SettingsPage.controls.hp_value_offset_y)
-    end
-    if SettingsPage.controls.mp_value_offset_x ~= nil then
-        editStyle.mp_value_offset_x = GetSliderValue(SettingsPage.controls.mp_value_offset_x)
-    end
-    if SettingsPage.controls.mp_value_offset_y ~= nil then
-        editStyle.mp_value_offset_y = GetSliderValue(SettingsPage.controls.mp_value_offset_y)
-    end
-
-    if SettingsPage.controls.target_guild_offset_x ~= nil then
-        editStyle.target_guild_offset_x = GetSliderValue(SettingsPage.controls.target_guild_offset_x)
-    end
-    if SettingsPage.controls.target_guild_offset_y ~= nil then
-        editStyle.target_guild_offset_y = GetSliderValue(SettingsPage.controls.target_guild_offset_y)
-    end
-    if SettingsPage.controls.target_guild_r ~= nil and SettingsPage.controls.target_guild_g ~= nil and SettingsPage.controls.target_guild_b ~= nil then
-        editStyle.target_guild_color = colorTable(
-            GetSliderValue(SettingsPage.controls.target_guild_r),
-            GetSliderValue(SettingsPage.controls.target_guild_g),
-            GetSliderValue(SettingsPage.controls.target_guild_b),
-            255
-        )
-    end
-    if SettingsPage.controls.target_class_r ~= nil and SettingsPage.controls.target_class_g ~= nil and SettingsPage.controls.target_class_b ~= nil then
-        editStyle.target_class_color = colorTable(
-            GetSliderValue(SettingsPage.controls.target_class_r),
-            GetSliderValue(SettingsPage.controls.target_class_g),
-            GetSliderValue(SettingsPage.controls.target_class_b),
-            255
-        )
-    end
-    if SettingsPage.controls.target_gearscore_r ~= nil and SettingsPage.controls.target_gearscore_g ~= nil and SettingsPage.controls.target_gearscore_b ~= nil then
-        editStyle.target_gearscore_color = colorTable(
-            GetSliderValue(SettingsPage.controls.target_gearscore_r),
-            GetSliderValue(SettingsPage.controls.target_gearscore_g),
-            GetSliderValue(SettingsPage.controls.target_gearscore_b),
-            255
-        )
-    end
-    if SettingsPage.controls.target_pdef_r ~= nil and SettingsPage.controls.target_pdef_g ~= nil and SettingsPage.controls.target_pdef_b ~= nil then
-        editStyle.target_pdef_color = colorTable(
-            GetSliderValue(SettingsPage.controls.target_pdef_r),
-            GetSliderValue(SettingsPage.controls.target_pdef_g),
-            GetSliderValue(SettingsPage.controls.target_pdef_b),
-            255
-        )
-    end
-    if SettingsPage.controls.target_mdef_r ~= nil and SettingsPage.controls.target_mdef_g ~= nil and SettingsPage.controls.target_mdef_b ~= nil then
-        editStyle.target_mdef_color = colorTable(
-            GetSliderValue(SettingsPage.controls.target_mdef_r),
-            GetSliderValue(SettingsPage.controls.target_mdef_g),
-            GetSliderValue(SettingsPage.controls.target_mdef_b),
-            255
-        )
-    end
-
-    if SettingsPage.controls.bar_colors_enabled ~= nil then
-        editStyle.bar_colors_enabled = SettingsPage.controls.bar_colors_enabled:GetChecked() and true or false
-    end
-    if SettingsPage.controls.hostile_target_hp_enabled ~= nil then
-        editStyle.hostile_target_hp_enabled = SettingsPage.controls.hostile_target_hp_enabled:GetChecked() and true or false
-    end
-
-    local function sliderOr(slider, fallback)
-        if slider ~= nil then
-            return GetSliderValue(slider)
-        end
-        return fallback
-    end
-    if SettingsPage.controls.hp_r ~= nil and SettingsPage.controls.hp_g ~= nil and SettingsPage.controls.hp_b ~= nil then
-        local fill = colorTable(
-            GetSliderValue(SettingsPage.controls.hp_r),
-            GetSliderValue(SettingsPage.controls.hp_g),
-            GetSliderValue(SettingsPage.controls.hp_b),
-            sliderOr(SettingsPage.controls.hp_a, 255)
-        )
-        editStyle.hp_fill_color = fill
-        editStyle.hp_bar_color = fill
-    end
-    if SettingsPage.controls.hp_after_r ~= nil and SettingsPage.controls.hp_after_g ~= nil and SettingsPage.controls.hp_after_b ~= nil then
-        editStyle.hp_after_color = colorTable(
-            GetSliderValue(SettingsPage.controls.hp_after_r),
-            GetSliderValue(SettingsPage.controls.hp_after_g),
-            GetSliderValue(SettingsPage.controls.hp_after_b),
-            sliderOr(SettingsPage.controls.hp_after_a, 255)
-        )
-    end
-    if SettingsPage.controls.hostile_target_hp_r ~= nil
-        and SettingsPage.controls.hostile_target_hp_g ~= nil
-        and SettingsPage.controls.hostile_target_hp_b ~= nil then
-        editStyle.hostile_target_hp_color = colorTable(
-            GetSliderValue(SettingsPage.controls.hostile_target_hp_r),
-            GetSliderValue(SettingsPage.controls.hostile_target_hp_g),
-            GetSliderValue(SettingsPage.controls.hostile_target_hp_b),
-            sliderOr(SettingsPage.controls.hostile_target_hp_a, 255)
-        )
-    end
-
-    if SettingsPage.controls.mp_r ~= nil and SettingsPage.controls.mp_g ~= nil and SettingsPage.controls.mp_b ~= nil then
-        local fill = colorTable(
-            GetSliderValue(SettingsPage.controls.mp_r),
-            GetSliderValue(SettingsPage.controls.mp_g),
-            GetSliderValue(SettingsPage.controls.mp_b),
-            sliderOr(SettingsPage.controls.mp_a, 255)
-        )
-        editStyle.mp_fill_color = fill
-        editStyle.mp_bar_color = fill
-    end
-    if SettingsPage.controls.mp_after_r ~= nil and SettingsPage.controls.mp_after_g ~= nil and SettingsPage.controls.mp_after_b ~= nil then
-        editStyle.mp_after_color = colorTable(
-            GetSliderValue(SettingsPage.controls.mp_after_r),
-            GetSliderValue(SettingsPage.controls.mp_after_g),
-            GetSliderValue(SettingsPage.controls.mp_after_b),
-            sliderOr(SettingsPage.controls.mp_after_a, 255)
-        )
-    end
-
-    if SettingsPage.controls.hp_tex_stock ~= nil and SettingsPage.controls.hp_tex_pc ~= nil and SettingsPage.controls.hp_tex_npc ~= nil then
-        if SettingsPage.controls.hp_tex_pc:GetChecked() then
-            editStyle.hp_texture_mode = "pc"
-        elseif SettingsPage.controls.hp_tex_npc:GetChecked() then
-            editStyle.hp_texture_mode = "npc"
-        else
-            editStyle.hp_texture_mode = "stock"
+    if applyBarsStyle then
+        if SettingsPage.controls.frame_alpha ~= nil then
+            editStyle.frame_alpha = GetSliderValue(SettingsPage.controls.frame_alpha) / 100
         end
 
-        if SettingsPage.style_target == "all" and type(s.style.frames) == "table" then
-            for _, frameKey in ipairs(STYLE_TARGET_KEYS) do
-                if frameKey ~= "all" then
-                    local frameStyle = s.style.frames[frameKey]
-                    if type(frameStyle) == "table" then
-                        frameStyle.bar_colors_enabled = nil
-                        frameStyle.hp_texture_mode = nil
-                        frameStyle.hp_custom_texture_path = nil
-                        frameStyle.hp_custom_texture_key = nil
-                        frameStyle.hp_bar_color = nil
-                        frameStyle.hp_fill_color = nil
-                        frameStyle.hp_after_color = nil
-                        frameStyle.hostile_target_hp_enabled = nil
-                        frameStyle.hostile_target_hp_color = nil
-                        frameStyle.mp_bar_color = nil
-                        frameStyle.mp_fill_color = nil
-                        frameStyle.mp_after_color = nil
+        if SettingsPage.controls.frame_width ~= nil then
+            editStyle.frame_width = GetSliderValue(SettingsPage.controls.frame_width)
+        end
+
+        if SettingsPage.controls.frame_height ~= nil then
+            s.frame_height = GetSliderValue(SettingsPage.controls.frame_height)
+        end
+
+        if SettingsPage.controls.frame_scale ~= nil then
+            editStyle.frame_scale = GetSliderValue(SettingsPage.controls.frame_scale) / 100
+        end
+
+        if SettingsPage.controls.bar_height ~= nil then
+            editStyle.bar_height = GetSliderValue(SettingsPage.controls.bar_height)
+        end
+        if SettingsPage.controls.hp_bar_height ~= nil then
+            editStyle.hp_bar_height = GetSliderValue(SettingsPage.controls.hp_bar_height)
+        end
+        if SettingsPage.controls.mp_bar_height ~= nil then
+            editStyle.mp_bar_height = GetSliderValue(SettingsPage.controls.mp_bar_height)
+        end
+        if SettingsPage.controls.bar_gap ~= nil then
+            editStyle.bar_gap = GetSliderValue(SettingsPage.controls.bar_gap)
+        end
+    end
+
+    if applyTextStyle then
+        if SettingsPage.controls.name_visible ~= nil then
+            editStyle.name_visible = SettingsPage.controls.name_visible:GetChecked() and true or false
+        end
+        if SettingsPage.controls.name_offset_x ~= nil then
+            editStyle.name_offset_x = GetSliderValue(SettingsPage.controls.name_offset_x)
+        end
+        if SettingsPage.controls.name_offset_y ~= nil then
+            editStyle.name_offset_y = GetSliderValue(SettingsPage.controls.name_offset_y)
+        end
+
+        if SettingsPage.controls.level_visible ~= nil then
+            editStyle.level_visible = SettingsPage.controls.level_visible:GetChecked() and true or false
+        end
+        if SettingsPage.controls.level_font_size ~= nil then
+            editStyle.level_font_size = GetSliderValue(SettingsPage.controls.level_font_size)
+        end
+        if SettingsPage.controls.level_offset_x ~= nil then
+            editStyle.level_offset_x = GetSliderValue(SettingsPage.controls.level_offset_x)
+        end
+        if SettingsPage.controls.level_offset_y ~= nil then
+            editStyle.level_offset_y = GetSliderValue(SettingsPage.controls.level_offset_y)
+        end
+
+        if SettingsPage.controls.name_font_size ~= nil then
+            editStyle.name_font_size = GetSliderValue(SettingsPage.controls.name_font_size)
+        end
+        if SettingsPage.controls.hp_font_size ~= nil then
+            editStyle.hp_font_size = GetSliderValue(SettingsPage.controls.hp_font_size)
+        end
+        if SettingsPage.controls.mp_font_size ~= nil then
+            editStyle.mp_font_size = GetSliderValue(SettingsPage.controls.mp_font_size)
+        end
+        if SettingsPage.controls.overlay_font_size ~= nil then
+            editStyle.overlay_font_size = GetSliderValue(SettingsPage.controls.overlay_font_size)
+        end
+
+        if SettingsPage.controls.gs_font_size ~= nil then
+            editStyle.gs_font_size = GetSliderValue(SettingsPage.controls.gs_font_size)
+        end
+        if SettingsPage.controls.class_font_size ~= nil then
+            editStyle.class_font_size = GetSliderValue(SettingsPage.controls.class_font_size)
+        end
+        if SettingsPage.controls.target_guild_font_size ~= nil then
+            editStyle.target_guild_font_size = GetSliderValue(SettingsPage.controls.target_guild_font_size)
+        end
+        if SettingsPage.controls.target_guild_visible ~= nil then
+            editStyle.target_guild_visible = SettingsPage.controls.target_guild_visible:GetChecked() and true or false
+        end
+        if SettingsPage.controls.target_class_visible ~= nil then
+            editStyle.target_class_visible = SettingsPage.controls.target_class_visible:GetChecked() and true or false
+        end
+        if SettingsPage.controls.target_gearscore_visible ~= nil then
+            editStyle.target_gearscore_visible = SettingsPage.controls.target_gearscore_visible:GetChecked() and true or false
+        end
+        if SettingsPage.controls.target_pdef_visible ~= nil then
+            editStyle.target_pdef_visible = SettingsPage.controls.target_pdef_visible:GetChecked() and true or false
+        end
+        if SettingsPage.controls.target_mdef_visible ~= nil then
+            editStyle.target_mdef_visible = SettingsPage.controls.target_mdef_visible:GetChecked() and true or false
+        end
+
+        if SettingsPage.controls.name_shadow ~= nil then
+            editStyle.name_shadow = SettingsPage.controls.name_shadow:GetChecked() and true or false
+        end
+        if SettingsPage.controls.value_shadow ~= nil then
+            editStyle.value_shadow = SettingsPage.controls.value_shadow:GetChecked() and true or false
+        end
+        if SettingsPage.controls.overlay_shadow ~= nil then
+            editStyle.overlay_shadow = SettingsPage.controls.overlay_shadow:GetChecked() and true or false
+        end
+
+        if SettingsPage.controls.hp_value_visible ~= nil then
+            editStyle.hp_value_visible = SettingsPage.controls.hp_value_visible:GetChecked() and true or false
+        end
+        if SettingsPage.controls.mp_value_visible ~= nil then
+            editStyle.mp_value_visible = SettingsPage.controls.mp_value_visible:GetChecked() and true or false
+        end
+
+        if SettingsPage.controls.hp_value_offset_x ~= nil then
+            editStyle.hp_value_offset_x = GetSliderValue(SettingsPage.controls.hp_value_offset_x)
+        end
+        if SettingsPage.controls.hp_value_offset_y ~= nil then
+            editStyle.hp_value_offset_y = GetSliderValue(SettingsPage.controls.hp_value_offset_y)
+        end
+        if SettingsPage.controls.mp_value_offset_x ~= nil then
+            editStyle.mp_value_offset_x = GetSliderValue(SettingsPage.controls.mp_value_offset_x)
+        end
+        if SettingsPage.controls.mp_value_offset_y ~= nil then
+            editStyle.mp_value_offset_y = GetSliderValue(SettingsPage.controls.mp_value_offset_y)
+        end
+
+        if SettingsPage.controls.target_guild_offset_x ~= nil then
+            editStyle.target_guild_offset_x = GetSliderValue(SettingsPage.controls.target_guild_offset_x)
+        end
+        if SettingsPage.controls.target_guild_offset_y ~= nil then
+            editStyle.target_guild_offset_y = GetSliderValue(SettingsPage.controls.target_guild_offset_y)
+        end
+        if SettingsPage.controls.target_guild_r ~= nil and SettingsPage.controls.target_guild_g ~= nil and SettingsPage.controls.target_guild_b ~= nil then
+            editStyle.target_guild_color = colorTable(
+                GetSliderValue(SettingsPage.controls.target_guild_r),
+                GetSliderValue(SettingsPage.controls.target_guild_g),
+                GetSliderValue(SettingsPage.controls.target_guild_b),
+                255
+            )
+        end
+        if SettingsPage.controls.target_class_r ~= nil and SettingsPage.controls.target_class_g ~= nil and SettingsPage.controls.target_class_b ~= nil then
+            editStyle.target_class_color = colorTable(
+                GetSliderValue(SettingsPage.controls.target_class_r),
+                GetSliderValue(SettingsPage.controls.target_class_g),
+                GetSliderValue(SettingsPage.controls.target_class_b),
+                255
+            )
+        end
+        if SettingsPage.controls.target_gearscore_r ~= nil and SettingsPage.controls.target_gearscore_g ~= nil and SettingsPage.controls.target_gearscore_b ~= nil then
+            editStyle.target_gearscore_color = colorTable(
+                GetSliderValue(SettingsPage.controls.target_gearscore_r),
+                GetSliderValue(SettingsPage.controls.target_gearscore_g),
+                GetSliderValue(SettingsPage.controls.target_gearscore_b),
+                255
+            )
+        end
+        if SettingsPage.controls.target_pdef_r ~= nil and SettingsPage.controls.target_pdef_g ~= nil and SettingsPage.controls.target_pdef_b ~= nil then
+            editStyle.target_pdef_color = colorTable(
+                GetSliderValue(SettingsPage.controls.target_pdef_r),
+                GetSliderValue(SettingsPage.controls.target_pdef_g),
+                GetSliderValue(SettingsPage.controls.target_pdef_b),
+                255
+            )
+        end
+        if SettingsPage.controls.target_mdef_r ~= nil and SettingsPage.controls.target_mdef_g ~= nil and SettingsPage.controls.target_mdef_b ~= nil then
+            editStyle.target_mdef_color = colorTable(
+                GetSliderValue(SettingsPage.controls.target_mdef_r),
+                GetSliderValue(SettingsPage.controls.target_mdef_g),
+                GetSliderValue(SettingsPage.controls.target_mdef_b),
+                255
+            )
+        end
+    end
+
+    if applyBarsStyle then
+        if SettingsPage.controls.bar_colors_enabled ~= nil then
+            editStyle.bar_colors_enabled = SettingsPage.controls.bar_colors_enabled:GetChecked() and true or false
+        end
+        if SettingsPage.controls.hostile_target_hp_enabled ~= nil then
+            editStyle.hostile_target_hp_enabled = SettingsPage.controls.hostile_target_hp_enabled:GetChecked() and true or false
+        end
+    end
+
+    if applyBarsStyle then
+        local function sliderOr(slider, fallback)
+            if slider ~= nil then
+                return GetSliderValue(slider)
+            end
+            return fallback
+        end
+        if SettingsPage.controls.hp_r ~= nil and SettingsPage.controls.hp_g ~= nil and SettingsPage.controls.hp_b ~= nil then
+            local fill = colorTable(
+                GetSliderValue(SettingsPage.controls.hp_r),
+                GetSliderValue(SettingsPage.controls.hp_g),
+                GetSliderValue(SettingsPage.controls.hp_b),
+                sliderOr(SettingsPage.controls.hp_a, 255)
+            )
+            editStyle.hp_fill_color = fill
+            editStyle.hp_bar_color = fill
+        end
+        if SettingsPage.controls.hp_after_r ~= nil and SettingsPage.controls.hp_after_g ~= nil and SettingsPage.controls.hp_after_b ~= nil then
+            editStyle.hp_after_color = colorTable(
+                GetSliderValue(SettingsPage.controls.hp_after_r),
+                GetSliderValue(SettingsPage.controls.hp_after_g),
+                GetSliderValue(SettingsPage.controls.hp_after_b),
+                sliderOr(SettingsPage.controls.hp_after_a, 255)
+            )
+        end
+        if SettingsPage.controls.hostile_target_hp_r ~= nil
+            and SettingsPage.controls.hostile_target_hp_g ~= nil
+            and SettingsPage.controls.hostile_target_hp_b ~= nil then
+            editStyle.hostile_target_hp_color = colorTable(
+                GetSliderValue(SettingsPage.controls.hostile_target_hp_r),
+                GetSliderValue(SettingsPage.controls.hostile_target_hp_g),
+                GetSliderValue(SettingsPage.controls.hostile_target_hp_b),
+                sliderOr(SettingsPage.controls.hostile_target_hp_a, 255)
+            )
+        end
+
+        if SettingsPage.controls.mp_r ~= nil and SettingsPage.controls.mp_g ~= nil and SettingsPage.controls.mp_b ~= nil then
+            local fill = colorTable(
+                GetSliderValue(SettingsPage.controls.mp_r),
+                GetSliderValue(SettingsPage.controls.mp_g),
+                GetSliderValue(SettingsPage.controls.mp_b),
+                sliderOr(SettingsPage.controls.mp_a, 255)
+            )
+            editStyle.mp_fill_color = fill
+            editStyle.mp_bar_color = fill
+        end
+        if SettingsPage.controls.mp_after_r ~= nil and SettingsPage.controls.mp_after_g ~= nil and SettingsPage.controls.mp_after_b ~= nil then
+            editStyle.mp_after_color = colorTable(
+                GetSliderValue(SettingsPage.controls.mp_after_r),
+                GetSliderValue(SettingsPage.controls.mp_after_g),
+                GetSliderValue(SettingsPage.controls.mp_after_b),
+                sliderOr(SettingsPage.controls.mp_after_a, 255)
+            )
+        end
+
+        if SettingsPage.controls.hp_tex_stock ~= nil and SettingsPage.controls.hp_tex_pc ~= nil and SettingsPage.controls.hp_tex_npc ~= nil then
+            if SettingsPage.controls.hp_tex_pc:GetChecked() then
+                editStyle.hp_texture_mode = "pc"
+            elseif SettingsPage.controls.hp_tex_npc:GetChecked() then
+                editStyle.hp_texture_mode = "npc"
+            else
+                editStyle.hp_texture_mode = "stock"
+            end
+
+            if SettingsPage.style_target == "all" and type(s.style.frames) == "table" then
+                for _, frameKey in ipairs(STYLE_TARGET_KEYS) do
+                    if frameKey ~= "all" then
+                        local frameStyle = s.style.frames[frameKey]
+                        if type(frameStyle) == "table" then
+                            frameStyle.bar_colors_enabled = nil
+                            frameStyle.hp_texture_mode = nil
+                            frameStyle.hp_custom_texture_path = nil
+                            frameStyle.hp_custom_texture_key = nil
+                            frameStyle.hp_bar_color = nil
+                            frameStyle.hp_fill_color = nil
+                            frameStyle.hp_after_color = nil
+                            frameStyle.hostile_target_hp_enabled = nil
+                            frameStyle.hostile_target_hp_color = nil
+                            frameStyle.mp_bar_color = nil
+                            frameStyle.mp_fill_color = nil
+                            frameStyle.mp_after_color = nil
+                        end
                     end
                 end
             end
@@ -2918,7 +2934,7 @@ ApplyControlsToSettings = function()
         s.style.buff_windows.target.debuff.y = GetSliderValue(SettingsPage.controls.t_debuff_y)
     end
 
-    if SettingsPage.controls.overlay_alpha ~= nil then
+    if applyBarsStyle and SettingsPage.controls.overlay_alpha ~= nil then
         editStyle.overlay_alpha = GetSliderValue(SettingsPage.controls.overlay_alpha) / 100
     end
 
@@ -3049,7 +3065,7 @@ ApplyControlsToSettings = function()
         selectedUnitCfg.cache_timeout_s = GetSliderValue(SettingsPage.controls.ct_cache_timeout)
     end
 
-    if SettingsPage.controls.value_fmt_curmax ~= nil and SettingsPage.controls.value_fmt_percent ~= nil then
+    if applyBarsStyle and SettingsPage.controls.value_fmt_curmax ~= nil and SettingsPage.controls.value_fmt_percent ~= nil then
         local wantCurMax = SettingsPage.controls.value_fmt_curmax:GetChecked() and true or false
         local wantPercent = SettingsPage.controls.value_fmt_percent:GetChecked() and true or false
         if wantCurMax and wantPercent then
@@ -3063,11 +3079,11 @@ ApplyControlsToSettings = function()
         end
     end
 
-    if SettingsPage.controls.short_numbers ~= nil then
+    if applyBarsStyle and SettingsPage.controls.short_numbers ~= nil then
         editStyle.short_numbers = SettingsPage.controls.short_numbers:GetChecked() and true or false
     end
 
-    if SettingsPage.style_target == "all" and type(PruneStyleFrameOverrides) == "function" then
+    if (applyTextStyle or applyBarsStyle) and SettingsPage.style_target == "all" and type(PruneStyleFrameOverrides) == "function" then
         PruneStyleFrameOverrides(s, { "player", "target", "watchtarget", "target_of_target", "party" })
     end
 
@@ -3411,6 +3427,9 @@ local function EnsureWindow()
     SetActivePage("general")
 
     local function syncStyleTargetFromActivePage()
+        if SettingsPage._refreshing_controls then
+            return
+        end
         local ctrl = nil
         if SettingsPage.active_page == "text" then
             ctrl = SettingsPage.controls.style_target_text
@@ -3420,10 +3439,14 @@ local function EnsureWindow()
             return
         end
         SettingsPage.style_target = GetStyleTargetKeyFromControl(ctrl)
+        SyncStyleTargetCombos()
         UpdateStyleTargetHints()
     end
 
     local function sliderChanged()
+        if SettingsPage._refreshing_controls then
+            return
+        end
         if SettingsPage.settings == nil then
             return
         end
@@ -4003,7 +4026,7 @@ local function EnsureWindow()
     end
 
     local function styleTargetChanged(ctrl, a, b)
-        if SettingsPage._refreshing_style_target then
+        if SettingsPage._refreshing_controls or SettingsPage._refreshing_style_target then
             return
         end
         if ctrl == SettingsPage.controls.style_target_text and SettingsPage.active_page ~= "text" then
@@ -4016,6 +4039,7 @@ local function EnsureWindow()
             return
         end
         SettingsPage.style_target = GetStyleTargetKeyFromControl(ctrl, a, b)
+        SyncStyleTargetCombos()
         UpdateStyleTargetHints()
         RefreshControls()
     end
@@ -4058,6 +4082,9 @@ local function EnsureWindow()
     for _, cb in ipairs(checkboxList) do
         if cb ~= nil and cb.SetHandler ~= nil then
             cb:SetHandler("OnClick", function()
+                if SettingsPage._refreshing_controls then
+                    return
+                end
                 sliderChanged()
             end)
         end
@@ -4066,6 +4093,9 @@ local function EnsureWindow()
     local function bindHpTextureCheckbox(ctrl, mode)
         if ctrl ~= nil and ctrl.SetHandler ~= nil then
             ctrl:SetHandler("OnClick", function()
+                if SettingsPage._refreshing_controls then
+                    return
+                end
                 SetHpTextureModeChecks(mode)
                 sliderChanged()
                 RefreshControls()

@@ -308,9 +308,13 @@ function TargetExtras.Update(ctx, settings)
     if targetDisplayName == "" then
         targetDisplayName = ctx.ResolveUnitDisplayName(targetInfoById)
     end
-    local targetLevel = ctx.ResolveUnitLevel(targetUnitInfo)
+    local targetLevel, targetHeirLevel = ctx.ResolveUnitLevelParts(targetUnitInfo)
+    local targetLevelById, targetHeirLevelById = ctx.ResolveUnitLevelParts(targetInfoById)
     if targetLevel == nil then
-        targetLevel = ctx.ResolveUnitLevel(targetInfoById)
+        targetLevel = targetLevelById
+    end
+    if targetHeirLevel == nil then
+        targetHeirLevel = targetHeirLevelById
     end
 
     local isCharacter = true
@@ -382,7 +386,7 @@ function TargetExtras.Update(ctx, settings)
         return
     end
 
-    ctx.ApplyTargetNameLevel(targetDisplayName, targetLevel)
+    ctx.ApplyTargetNameLevel(targetDisplayName, targetLevel, targetHeirLevel)
 
     local gearscoreText = ""
     if type(gs) == "number" then

@@ -42,6 +42,36 @@ local function normalizeSettings(settings)
     return SettingsDefaults.EnsureSettingsDefaultsAndMigrations(settings)
 end
 
+local function ensureDirectory(path)
+    local dir = string.match(tostring(path or ""), "^(.*)[/\\][^/\\]+$")
+    if dir == nil or dir == "" or type(os) ~= "table" or type(os.execute) ~= "function" then
+        return
+    end
+    dir = string.gsub(dir, "\\", "/")
+    dir = string.gsub(dir, '"', '""')
+    pcall(function()
+        os.execute('mkdir "' .. dir .. '" >nul 2>nul')
+    end)
+end
+
+local function ensureParentDirectory(path)
+    if type(path) ~= "string" or path == "" then
+        return
+    end
+    ensureDirectory(path)
+    if Settings.GetFullPath ~= nil then
+        ensureDirectory(Settings.GetFullPath(path))
+    end
+end
+
+local function ensureDataDirectories(includeBackups)
+    ensureParentDirectory(Store.SETTINGS_FILE_PATH)
+    ensureParentDirectory(Store.SETTINGS_BACKUP_FILE_PATH)
+    if includeBackups then
+        ensureParentDirectory(Store.SETTINGS_BACKUP_INDEX_FILE_PATH)
+    end
+end
+
 local store = Settings.CreateStore({
     addon_id = Store.ADDON_ID,
     legacy_addon_ids = {
@@ -151,6 +181,7 @@ function Store.SaveSettingsFile(settings)
     if type(settings) ~= "table" then
         return false
     end
+    ensureDataDirectories(false)
     normalizeSettings(settings)
     ensureStoreSettings(settings)
     local ok = store:Save()
@@ -164,6 +195,7 @@ function Store.SaveSettingsBackupFile(settings)
     if type(settings) ~= "table" then
         return false, "settings not initialized"
     end
+    ensureDataDirectories(true)
     normalizeSettings(settings)
     ensureStoreSettings(settings)
     local ok, result = store:SaveBackup()
