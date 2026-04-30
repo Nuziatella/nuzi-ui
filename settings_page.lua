@@ -2101,6 +2101,12 @@ RefreshControls = function()
 
     if type(displayStyle) == "table" then
         local fmt = tostring(displayStyle.value_format or "stock")
+        if SettingsPage.controls.hp_value_visible ~= nil then
+            SettingsPage.controls.hp_value_visible:SetChecked(displayStyle.hp_value_visible ~= false)
+        end
+        if SettingsPage.controls.mp_value_visible ~= nil then
+            SettingsPage.controls.mp_value_visible:SetChecked(displayStyle.mp_value_visible ~= false)
+        end
         if SettingsPage.controls.value_fmt_curmax ~= nil then
             SettingsPage.controls.value_fmt_curmax:SetChecked(fmt == "curmax" or fmt == "curmax_percent")
         end
@@ -2695,6 +2701,13 @@ ApplyControlsToSettings = function()
     end
     if SettingsPage.controls.overlay_shadow ~= nil then
         editStyle.overlay_shadow = SettingsPage.controls.overlay_shadow:GetChecked() and true or false
+    end
+
+    if SettingsPage.controls.hp_value_visible ~= nil then
+        editStyle.hp_value_visible = SettingsPage.controls.hp_value_visible:GetChecked() and true or false
+    end
+    if SettingsPage.controls.mp_value_visible ~= nil then
+        editStyle.mp_value_visible = SettingsPage.controls.mp_value_visible:GetChecked() and true or false
     end
 
     if SettingsPage.controls.hp_value_offset_x ~= nil then
@@ -3639,6 +3652,8 @@ local function EnsureWindow()
         SettingsPage.controls.target_mdef_visible,
         SettingsPage.controls.name_shadow,
         SettingsPage.controls.value_shadow,
+        SettingsPage.controls.hp_value_visible,
+        SettingsPage.controls.mp_value_visible,
         SettingsPage.controls.move_buffs,
         SettingsPage.controls.plates_enabled,
         SettingsPage.controls.plates_guild_only,

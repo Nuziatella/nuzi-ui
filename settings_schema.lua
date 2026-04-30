@@ -275,9 +275,11 @@ SettingsSchema.PAGES = {
             },
             {
                 id = "text_value_offsets",
-                title = "HP/MP Value Offsets",
-                hint = "Fine tune where the HP, MP, and target guild/family text sit on the frame.",
+                title = "HP/MP Values",
+                hint = "Choose which HP and MP values are visible and fine tune where the value text sits on the frame.",
                 fields = {
+                    checkbox("hp_value_visible", "polarUiHpValueVisible", "Show HP values"),
+                    checkbox("mp_value_visible", "polarUiMpValueVisible", "Show MP values"),
                     slider("hp_value_offset_x", "polarUiHpValueOffsetX", "HP value offset X", -200, 200, 1),
                     slider("hp_value_offset_y", "polarUiHpValueOffsetY", "HP value offset Y", -120, 120, 1),
                     slider("mp_value_offset_x", "polarUiMpValueOffsetX", "MP value offset X", -200, 200, 1),

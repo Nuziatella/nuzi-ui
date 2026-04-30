@@ -2580,6 +2580,41 @@ local function SetLabelTextIfChanged(label, text)
     end
 end
 
+local function ApplyValueLabelVisibility(frame, style)
+    if frame == nil or type(style) ~= "table" then
+        return
+    end
+
+    local showHpValue = style.hp_value_visible ~= false
+    local showMpValue = style.mp_value_visible ~= false
+
+    local function setValueLabelVisible(label, shown)
+        if label == nil then
+            return
+        end
+        if shown then
+            if label.__polar_value_forced_hidden then
+                label.__polar_value_forced_hidden = nil
+                SetWidgetVisible(label, true)
+            end
+            return
+        end
+        label.__polar_value_forced_hidden = true
+        SetWidgetVisible(label, false)
+    end
+
+    pcall(function()
+        if frame.hpBar ~= nil and frame.hpBar.hpLabel ~= nil then
+            setValueLabelVisible(frame.hpBar.hpLabel, showHpValue)
+        end
+    end)
+    pcall(function()
+        if frame.mpBar ~= nil and frame.mpBar.mpLabel ~= nil then
+            setValueLabelVisible(frame.mpBar.mpLabel, showMpValue)
+        end
+    end)
+end
+
 local function SafeSetBarValue(statusBar, maxValue, value)
     if statusBar == nil then
         return
@@ -2609,6 +2644,10 @@ local function ApplyValueTextFormat(frame, style)
     local fmt = tostring(style.value_format or "stock")
     local short = style.short_numbers and true or false
     local repairStock = false
+    local showHpValue = style.hp_value_visible ~= false
+    local showMpValue = style.mp_value_visible ~= false
+
+    ApplyValueLabelVisibility(frame, style)
 
     local function labelNeedsRepair(label)
         if label == nil or label.GetText == nil then
@@ -2622,8 +2661,8 @@ local function ApplyValueTextFormat(frame, style)
     end
 
     if fmt == "stock" and not short then
-        repairStock = labelNeedsRepair(frame.hpBar ~= nil and frame.hpBar.hpLabel or nil) or
-            labelNeedsRepair(frame.mpBar ~= nil and frame.mpBar.mpLabel or nil)
+        repairStock = (showHpValue and labelNeedsRepair(frame.hpBar ~= nil and frame.hpBar.hpLabel or nil)) or
+            (showMpValue and labelNeedsRepair(frame.mpBar ~= nil and frame.mpBar.mpLabel or nil))
         if not repairStock then
             return
         end
@@ -2633,8 +2672,8 @@ local function ApplyValueTextFormat(frame, style)
 
     local vitals = GetUnitVitals(unit)
 
-    local function applyTo(label, cur, max)
-        if label == nil or label.SetText == nil then
+    local function applyTo(label, cur, max, shown)
+        if not shown or label == nil or label.SetText == nil then
             return
         end
 
@@ -2647,22 +2686,22 @@ local function ApplyValueTextFormat(frame, style)
     pcall(function()
         if frame.hpBar ~= nil then
             if vitals ~= nil and vitals.hp ~= nil and vitals.hp_max ~= nil then
-                applyTo(frame.hpBar.hpLabel, vitals.hp, vitals.hp_max)
+                applyTo(frame.hpBar.hpLabel, vitals.hp, vitals.hp_max, showHpValue)
             else
                 local t = (frame.hpBar.hpLabel ~= nil and frame.hpBar.hpLabel.GetText ~= nil) and frame.hpBar.hpLabel:GetText() or nil
                 local cur, max = ParseTwoNumbers(t)
-                applyTo(frame.hpBar.hpLabel, cur, max)
+                applyTo(frame.hpBar.hpLabel, cur, max, showHpValue)
             end
         end
     end)
     pcall(function()
         if frame.mpBar ~= nil then
             if vitals ~= nil and vitals.mp ~= nil and vitals.mp_max ~= nil then
-                applyTo(frame.mpBar.mpLabel, vitals.mp, vitals.mp_max)
+                applyTo(frame.mpBar.mpLabel, vitals.mp, vitals.mp_max, showMpValue)
             else
                 local t = (frame.mpBar.mpLabel ~= nil and frame.mpBar.mpLabel.GetText ~= nil) and frame.mpBar.mpLabel:GetText() or nil
                 local cur, max = ParseTwoNumbers(t)
-                applyTo(frame.mpBar.mpLabel, cur, max)
+                applyTo(frame.mpBar.mpLabel, cur, max, showMpValue)
             end
         end
     end)
@@ -3399,19 +3438,28 @@ local function UpdatePartyOverlayData(record, settings)
             SafeSetBarValue(record.frame.mpBar.statusBar or record.frame.mpBar, vitals.mp_max, vitals.mp)
         end
     end
+    local style = record.frame.__polar_style_override or settings.style
+    local showHpValue = type(style) ~= "table" or style.hp_value_visible ~= false
+    local showMpValue = hasMp and (type(style) ~= "table" or style.mp_value_visible ~= false)
+    if record.frame.hpBar ~= nil and record.frame.hpBar.hpLabel ~= nil then
+        SetWidgetVisible(record.frame.hpBar.hpLabel, showHpValue)
+    end
     if record.frame.mpBar ~= nil and record.frame.mpBar.mpLabel ~= nil then
-        SetWidgetVisible(record.frame.mpBar.mpLabel, hasMp)
+        SetWidgetVisible(record.frame.mpBar.mpLabel, showMpValue)
     end
 
-    local style = record.frame.__polar_style_override or settings.style
     local hpText = BuildFormattedValueText(vitals.hp, vitals.hp_max, style, true) or ""
-    SetLabelTextIfChanged(record.frame.hpBar ~= nil and record.frame.hpBar.hpLabel or nil, hpText)
+    if showHpValue then
+        SetLabelTextIfChanged(record.frame.hpBar ~= nil and record.frame.hpBar.hpLabel or nil, hpText)
+    end
 
     local mpText = ""
     if hasMp then
         mpText = BuildFormattedValueText(vitals.mp, vitals.mp_max, style, true) or ""
     end
-    SetLabelTextIfChanged(record.frame.mpBar ~= nil and record.frame.mpBar.mpLabel or nil, mpText)
+    if showMpValue then
+        SetLabelTextIfChanged(record.frame.mpBar ~= nil and record.frame.mpBar.mpLabel or nil, mpText)
+    end
     RefreshFrameBarPresentation(record.frame, style)
     SetWidgetVisible(record.frame, true)
     HideStockPartyBits(record.host)
@@ -3446,6 +3494,22 @@ local function RefreshTrackedStockFrameBars()
     RefreshFrameBarPresentation(UI.target.wnd, nil)
     RefreshFrameBarPresentation(UI.watchtarget.wnd, nil)
     RefreshFrameBarPresentation(UI.target_of_target.wnd, nil)
+end
+
+local function RefreshTrackedStockFrameValueText(baseStyle)
+    baseStyle = type(baseStyle) == "table" and baseStyle or (type(UI.settings) == "table" and UI.settings.style or {})
+    if UI.player.wnd ~= nil then
+        ApplyValueTextFormat(UI.player.wnd, UI.player.wnd.__polar_style_override or baseStyle)
+    end
+    if UI.target.wnd ~= nil then
+        ApplyValueTextFormat(UI.target.wnd, UI.target.wnd.__polar_style_override or baseStyle)
+    end
+    if UI.watchtarget.wnd ~= nil then
+        ApplyValueTextFormat(UI.watchtarget.wnd, UI.watchtarget.wnd.__polar_style_override or baseStyle)
+    end
+    if UI.target_of_target.wnd ~= nil then
+        ApplyValueTextFormat(UI.target_of_target.wnd, UI.target_of_target.wnd.__polar_style_override or baseStyle)
+    end
 end
 
 local function ApplyAuraLayout(frame, aura)
@@ -3978,6 +4042,7 @@ ApplyStockFrameStyle = function(frame, style)
             end
             SafeAnchor(frame.mpBar.mpLabel, frame.mpBar)
         end
+        ApplyValueLabelVisibility(frame, style)
     end)
 end
 
@@ -4147,19 +4212,7 @@ local function EnsureUi(settings)
     end
 
     RefreshTrackedStockFrameBars()
-
-    if UI.player.wnd ~= nil then
-        ApplyValueTextFormat(UI.player.wnd, UI.player.wnd.__polar_style_override or baseStyle)
-    end
-    if UI.target.wnd ~= nil then
-        ApplyValueTextFormat(UI.target.wnd, UI.target.wnd.__polar_style_override or baseStyle)
-    end
-    if UI.watchtarget.wnd ~= nil then
-        ApplyValueTextFormat(UI.watchtarget.wnd, UI.watchtarget.wnd.__polar_style_override or baseStyle)
-    end
-    if UI.target_of_target.wnd ~= nil then
-        ApplyValueTextFormat(UI.target_of_target.wnd, UI.target_of_target.wnd.__polar_style_override or baseStyle)
-    end
+    RefreshTrackedStockFrameValueText(baseStyle)
 
     UpdatePartyOverlays(settings)
 
@@ -4349,6 +4402,14 @@ UI.UnLoad = function()
         AlignmentModule.Reset(BuildUiContext())
     end
     UI.enabled = false
+    local restoreValues = {
+        hp_value_visible = true,
+        mp_value_visible = true
+    }
+    ApplyValueLabelVisibility(UI.player.wnd, restoreValues)
+    ApplyValueLabelVisibility(UI.target.wnd, restoreValues)
+    ApplyValueLabelVisibility(UI.watchtarget.wnd, restoreValues)
+    ApplyValueLabelVisibility(UI.target_of_target.wnd, restoreValues)
     RefreshFrameBarPresentation(UI.player.wnd, nil)
     RefreshFrameBarPresentation(UI.target.wnd, nil)
     RefreshFrameBarPresentation(UI.watchtarget.wnd, nil)
@@ -4427,6 +4488,14 @@ UI.SetEnabled = function(enabled)
         ClearAuraFrameHook(UI.target.wnd)
         ClearAuraOverride(UI.player.wnd)
         ClearAuraOverride(UI.target.wnd)
+        local restoreValues = {
+            hp_value_visible = true,
+            mp_value_visible = true
+        }
+        ApplyValueLabelVisibility(UI.player.wnd, restoreValues)
+        ApplyValueLabelVisibility(UI.target.wnd, restoreValues)
+        ApplyValueLabelVisibility(UI.watchtarget.wnd, restoreValues)
+        ApplyValueLabelVisibility(UI.target_of_target.wnd, restoreValues)
         pcall(function()
             if UI.player.wnd ~= nil and UI.player.wnd.UpdateAll ~= nil then
                 UI.player.wnd:UpdateAll()
@@ -4605,6 +4674,7 @@ UI.OnUpdate = function(dt)
         ApplyUnitFramePosition(UI.watchtarget.wnd, UI.settings, "watchtarget", 10, 460)
         ApplyUnitFramePosition(UI.target_of_target.wnd, UI.settings, "target_of_target", 10, 540)
         RefreshStockFrameDecorations(UI.settings)
+        RefreshTrackedStockFrameValueText()
     end
 
     UpdatePartyOverlays(UI.settings)
