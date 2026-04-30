@@ -150,16 +150,28 @@ local function SafeShow(wnd, show)
 end
 
 local function SafeClickable(wnd, clickable)
-    if wnd == nil or wnd.Clickable == nil then
+    if wnd == nil then
         return
     end
     clickable = clickable and true or false
     if wnd.__polar_clickable == clickable then
         return
     end
-    pcall(function()
-        wnd:Clickable(clickable)
-    end)
+    if wnd.Clickable ~= nil then
+        pcall(function()
+            wnd:Clickable(clickable)
+        end)
+    end
+    if wnd.EnablePick ~= nil then
+        pcall(function()
+            wnd:EnablePick(clickable)
+        end)
+    end
+    if not clickable and wnd.EnableDrag ~= nil then
+        pcall(function()
+            wnd:EnableDrag(false)
+        end)
+    end
     wnd.__polar_clickable = clickable
 end
 

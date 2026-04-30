@@ -244,6 +244,15 @@ local function setWidgetVisible(widget, visible, fadeOutTime)
     end)
 end
 
+local function setWidgetAlpha(widget, alpha)
+    if widget == nil or widget.SetAlpha == nil then
+        return
+    end
+    safeCall(function()
+        widget:SetAlpha(alpha)
+    end)
+end
+
 local function setWidgetInteractive(widget, enabled)
     if widget == nil then
         return
@@ -484,7 +493,41 @@ local function getActiveConfig()
     if cfg == nil then
         return false, nil
     end
-    return CastBar.enabled and cfg.enabled and true or false, cfg
+    return CastBar.enabled and true or false, cfg
+end
+
+local function isVisualEnabled()
+    local cfg = getConfig(CastBar.settings)
+    return CastBar.enabled and cfg ~= nil and cfg.enabled == true
+end
+
+local function applyVisibilityAlpha(color)
+    local out = normalizeColor255(color, color)
+    if not isVisualEnabled() then
+        out[4] = 0
+    end
+    return out
+end
+
+local function syncVisualAlpha(frame)
+    if frame == nil then
+        return
+    end
+    local alpha = isVisualEnabled() and 1 or 0
+    for _, widget in ipairs({
+        frame,
+        frame.baseBg,
+        frame.solidFill,
+        frame.statusBar,
+        frame.lightDeco,
+        frame.flashDeco,
+        frame.text,
+        frame.probeLabel,
+        frame.__nuzi_castbar_backdrop,
+        frame.__nuzi_castbar_accent
+    }) do
+        setWidgetAlpha(widget, alpha)
+    end
 end
 
 local function getDefaultPosition(cfg)
@@ -889,10 +932,10 @@ local function styleBar(frame)
     end
 
     local cfg = getConfig(CastBar.settings)
-    local bgColor = normalizeColor255(type(cfg) == "table" and cfg.bg_color or nil, DEFAULT_BG_COLOR_255)
-    local accentColor = normalizeColor255(type(cfg) == "table" and cfg.accent_color or nil, DEFAULT_ACCENT_COLOR_255)
-    local fillColor = normalizeColor255(type(cfg) == "table" and cfg.fill_color or nil, DEFAULT_FILL_COLOR_255)
-    local textColor = normalizeColor255(type(cfg) == "table" and cfg.text_color or nil, DEFAULT_TEXT_COLOR_255)
+    local bgColor = applyVisibilityAlpha(normalizeColor255(type(cfg) == "table" and cfg.bg_color or nil, DEFAULT_BG_COLOR_255))
+    local accentColor = applyVisibilityAlpha(normalizeColor255(type(cfg) == "table" and cfg.accent_color or nil, DEFAULT_ACCENT_COLOR_255))
+    local fillColor = applyVisibilityAlpha(normalizeColor255(type(cfg) == "table" and cfg.fill_color or nil, DEFAULT_FILL_COLOR_255))
+    local textColor = applyVisibilityAlpha(normalizeColor255(type(cfg) == "table" and cfg.text_color or nil, DEFAULT_TEXT_COLOR_255))
     local textOffsetX = clampInt(type(cfg) == "table" and cfg.text_offset_x or nil, -120, 120, DEFAULT_TEXT_OFFSET_X)
     local textOffsetY = clampInt(type(cfg) == "table" and cfg.text_offset_y or nil, -40, 60, DEFAULT_TEXT_OFFSET_Y)
     local textFontSize = clampInt(type(cfg) == "table" and cfg.text_font_size or nil, 10, 24, CUSTOM_TEXT_FONT_SIZE)
@@ -972,6 +1015,7 @@ local function styleBar(frame)
     if frame.ChangeBarTexture ~= nil then
         frame:ChangeBarTexture(CastBar.state.casting_useable)
     end
+    syncVisualAlpha(frame)
 end
 
 local function hideFrame(frame, force, isSucceed)
@@ -987,7 +1031,12 @@ local function hideFrame(frame, force, isSucceed)
     setWidgetVisible(frame.flashDeco, false)
     setWidgetVisible(frame.text, false)
     setWidgetVisible(frame.probeLabel, false)
-    setWidgetVisible(frame, true)
+    setWidgetInteractive(frame, false)
+    setWidgetInteractive(frame.statusBar, false)
+    setWidgetInteractive(frame.text, false)
+    setVisualWidgetsNotInteractive(frame)
+    syncVisualAlpha(frame)
+    setWidgetVisible(frame, false)
 end
 
 local function showFrame(frame)
@@ -1005,6 +1054,7 @@ local function showFrame(frame)
     setWidgetVisible(frame.flashDeco, not useSolid)
     setWidgetVisible(frame.text, true)
     setWidgetVisible(frame.probeLabel, false)
+    syncVisualAlpha(frame)
     setWidgetVisible(frame, true)
 end
 
@@ -1044,8 +1094,9 @@ local function syncInteractionState(frame)
     local active, cfg = getActiveConfig()
     local visible = CastBar.state.is_casting or CastBar.preview_visible
     local requireShift = type(CastBar.settings) == "table" and CastBar.settings.drag_requires_shift == true
+    local visualEnabled = isVisualEnabled()
     local interactive = frame.__nuzi_castbar_dragging
-        or (active and cfg ~= nil and not cfg.lock_position and visible and (not requireShift or isShiftDown()))
+        or (visualEnabled and active and cfg ~= nil and not cfg.lock_position and visible and (not requireShift or isShiftDown()))
 
     for _, target in ipairs({ frame, frame.statusBar, frame.text }) do
         setWidgetInteractive(target, interactive)
@@ -1667,7 +1718,31 @@ local function showProbe(frame, text)
     setProbeText(frame, text or "Nuzi UI Cast Bar Probe")
 end
 
+local function releaseFrame()
+    if CastBar.frame ~= nil then
+        CastBar.frame.__nuzi_castbar_dragging = false
+        CastBar.frame.__nuzi_castbar_drag_state = nil
+        hideFrame(CastBar.frame, true)
+        if api ~= nil and api.Interface ~= nil and api.Interface.Free ~= nil then
+            safeCall(function()
+                api.Interface:Free(CastBar.frame)
+            end)
+        end
+    end
+    clearCursor()
+    CastBar.frame = nil
+    CastBar.preview_visible = false
+    CastBar.state.ignore_info_ms = 0
+    resetState()
+end
+
 local function ensureFrame()
+    local active, cfg = getActiveConfig()
+    if not active and not CastBar.preview_visible and not CastBar.state.is_casting then
+        releaseFrame()
+        return nil
+    end
+
     if CastBar.frame == nil then
         CastBar.frame = createFrame()
     end
@@ -1677,8 +1752,6 @@ local function ensureFrame()
 
     ensureEventsRegistered(CastBar.frame)
     attachDragHandlers(CastBar.frame)
-
-    local active, cfg = getActiveConfig()
 
     if cfg ~= nil then
         applyFrameSettings(CastBar.frame, cfg)
@@ -1817,21 +1890,7 @@ function CastBar.OnUpdate(dt, settings)
 end
 
 function CastBar.Unload()
-    if CastBar.frame ~= nil then
-        CastBar.frame.__nuzi_castbar_dragging = false
-        CastBar.frame.__nuzi_castbar_drag_state = nil
-        hideFrame(CastBar.frame, true)
-        if api ~= nil and api.Interface ~= nil and api.Interface.Free ~= nil then
-            safeCall(function()
-                api.Interface:Free(CastBar.frame)
-            end)
-        end
-    end
-    clearCursor()
-    CastBar.frame = nil
-    CastBar.preview_visible = false
-    CastBar.state.ignore_info_ms = 0
-    resetState()
+    releaseFrame()
 end
 
 return CastBar

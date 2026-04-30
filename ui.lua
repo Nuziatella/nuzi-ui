@@ -347,6 +347,10 @@ local function SetWidgetForcedHidden(widget, hidden)
         return
     end
 
+    if SetNotClickable ~= nil then
+        SetNotClickable(widget)
+    end
+
     hidden = hidden and true or false
     if hidden then
         if widget.__polar_forced_hidden then
@@ -1048,6 +1052,9 @@ local function SetStockDistanceLabelVisible(visible)
     end
     pcall(function()
         local w = UI.target.wnd.distanceLabel
+        if SetNotClickable ~= nil then
+            SetNotClickable(w)
+        end
         if w.SetAlpha ~= nil then
             w:SetAlpha(visible and 1 or 0)
         end
@@ -2661,6 +2668,44 @@ local function ApplyValueTextFormat(frame, style)
     end)
 end
 
+local function SyncFrameEventHitbox(frame, width, height)
+    if frame == nil or frame.eventWindow == nil then
+        return
+    end
+
+    local eventWindow = frame.eventWindow
+    local w = tonumber(width)
+    local h = tonumber(height)
+    if (w == nil or h == nil) and SafeGetExtent ~= nil then
+        w, h = SafeGetExtent(frame)
+    end
+    if w == nil or h == nil or w <= 0 or h <= 0 then
+        return
+    end
+
+    pcall(function()
+        if eventWindow.AddAnchor ~= nil then
+            if eventWindow.RemoveAllAnchors ~= nil then
+                eventWindow:RemoveAllAnchors()
+            end
+            local ok = pcall(function()
+                eventWindow:AddAnchor("TOPLEFT", frame, "TOPLEFT", 0, 0)
+            end)
+            if not ok then
+                pcall(function()
+                    eventWindow:AddAnchor("TOPLEFT", frame, 0, 0)
+                end)
+            end
+        end
+        if eventWindow.SetExtent ~= nil then
+            eventWindow:SetExtent(w, h)
+        end
+    end)
+
+    eventWindow.__polar_hitbox_w = w
+    eventWindow.__polar_hitbox_h = h
+end
+
 local function ApplyFrameLayout(frame, settings)
     if frame == nil or type(settings) ~= "table" then
         return
@@ -2716,6 +2761,7 @@ local function ApplyFrameLayout(frame, settings)
             end
         end)
     end
+    SyncFrameEventHitbox(frame, width, height)
 
     if scale ~= nil then
         if scale < 0.5 then
@@ -3914,6 +3960,7 @@ ApplyStockFrameStyle = function(frame, style)
             if style.value_shadow ~= nil then
                 frame.hpBar.hpLabel.style:SetShadow(style.value_shadow and true or false)
             end
+            SetNotClickable(frame.hpBar.hpLabel)
             if frame.hpBar.hpLabel.RemoveAllAnchors ~= nil then
                 frame.hpBar.hpLabel:RemoveAllAnchors()
             end
@@ -3925,6 +3972,7 @@ ApplyStockFrameStyle = function(frame, style)
             if style.value_shadow ~= nil then
                 frame.mpBar.mpLabel.style:SetShadow(style.value_shadow and true or false)
             end
+            SetNotClickable(frame.mpBar.mpLabel)
             if frame.mpBar.mpLabel.RemoveAllAnchors ~= nil then
                 frame.mpBar.mpLabel:RemoveAllAnchors()
             end
