@@ -9,6 +9,7 @@ SettingsDefaults.DEFAULT_SETTINGS = {
     update_interval_ms = 100,
     frame_scale = 1,
     alignment_grid_enabled = false,
+    show_class_icons = true,
     hide_ancestral_icon_level = false,
     hide_boss_frame_background = false,
     hide_target_grade_star = false,

@@ -1369,6 +1369,10 @@ RefreshControls = function()
         SettingsPage.controls.hide_ancestral_icon_level:SetChecked(s.hide_ancestral_icon_level and true or false)
     end
 
+    if SettingsPage.controls.show_class_icons ~= nil then
+        SettingsPage.controls.show_class_icons:SetChecked(s.show_class_icons ~= false)
+    end
+
     if SettingsPage.controls.hide_boss_frame_background ~= nil then
         SettingsPage.controls.hide_boss_frame_background:SetChecked(s.hide_boss_frame_background and true or false)
     end
@@ -2298,6 +2302,10 @@ ApplyControlsToSettings = function()
 
     if SettingsPage.controls.hide_ancestral_icon_level ~= nil then
         s.hide_ancestral_icon_level = SettingsPage.controls.hide_ancestral_icon_level:GetChecked() and true or false
+    end
+
+    if SettingsPage.controls.show_class_icons ~= nil then
+        s.show_class_icons = SettingsPage.controls.show_class_icons:GetChecked() and true or false
     end
 
     if SettingsPage.controls.hide_boss_frame_background ~= nil then
@@ -3647,6 +3655,7 @@ local function EnsureWindow()
         SettingsPage.controls.drag_requires_shift,
         SettingsPage.controls.large_hpmp,
         SettingsPage.controls.hide_ancestral_icon_level,
+        SettingsPage.controls.show_class_icons,
         SettingsPage.controls.hide_boss_frame_background,
         SettingsPage.controls.hide_target_grade_star,
         SettingsPage.controls.show_distance,

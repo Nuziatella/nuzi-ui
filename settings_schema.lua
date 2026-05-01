@@ -109,6 +109,7 @@ SettingsSchema.PAGES = {
                     checkbox("enabled", "polarUiEnabled", "Enable Nuzi UI overlays"),
                     checkbox("drag_requires_shift", "polarUiDragRequiresShift", "Require Shift to move frames"),
                     checkbox("large_hpmp", "polarUiLargeHpMp", "Large HP/MP text"),
+                    checkbox("show_class_icons", "polarUiShowClassIcons", "Show class icons"),
                     checkbox("alignment_grid_enabled", "polarUiAlignmentGridEnabled", "Show alignment grid (30px)")
                 }
             },
@@ -358,8 +359,8 @@ SettingsSchema.PAGES = {
                     slider("hp_after_g", "polarUiHpAfterG", "HP After G", 0, 255, 1, { depends_on = { control = "bar_colors_enabled", checked = true } }),
                     slider("hp_after_b", "polarUiHpAfterB", "HP After B", 0, 255, 1, { depends_on = { control = "bar_colors_enabled", checked = true } }),
                     slider("hp_after_a", "polarUiHpAfterA", "HP After alpha", 0, 255, 1, { depends_on = { control = "bar_colors_enabled", checked = true } }),
-                    checkbox("hostile_target_hp_enabled", "polarUiHostileTargetHpEnabled", "Hostile target HP color"),
-                    label(nil, "polarUiHostileTargetHpColorLabel", "Hostile Target HP", { font_size = 15, depends_on = { control = "hostile_target_hp_enabled", checked = true } }),
+                    checkbox("hostile_target_hp_enabled", "polarUiHostileTargetHpEnabled", "Hostile target frames HP color"),
+                    label(nil, "polarUiHostileTargetHpColorLabel", "Hostile Target Frames HP", { font_size = 15, depends_on = { control = "hostile_target_hp_enabled", checked = true } }),
                     slider("hostile_target_hp_r", "polarUiHostileTargetHpR", "Hostile HP R", 0, 255, 1, { depends_on = { control = "hostile_target_hp_enabled", checked = true } }),
                     slider("hostile_target_hp_g", "polarUiHostileTargetHpG", "Hostile HP G", 0, 255, 1, { depends_on = { control = "hostile_target_hp_enabled", checked = true } }),
                     slider("hostile_target_hp_b", "polarUiHostileTargetHpB", "Hostile HP B", 0, 255, 1, { depends_on = { control = "hostile_target_hp_enabled", checked = true } }),

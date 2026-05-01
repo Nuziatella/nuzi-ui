@@ -269,6 +269,11 @@ local function SyncSecondaryFrameBinding(frame, runtimeUnit)
     frame.__polar_runtime_unit = unitKey
 end
 
+local function IsHostileHpOverrideUnit(unit)
+    local token = NormalizeRuntimeUnitToken(unit)
+    return token == "target" or token == "watchtarget" or token == "targettarget"
+end
+
 local function ResolveUnitDisplayName(info)
     if type(info) ~= "table" then
         return ""
@@ -486,6 +491,122 @@ local function SetWidgetForcedHidden(widget, hidden)
             widget:Show(restoreVisible and true or false)
         end
     end)
+end
+
+local function ShouldShowClassIconForUnit(unit)
+    local unitKey = NormalizeRuntimeUnitToken(unit)
+    if unitKey == nil then
+        return false
+    end
+    if unitKey == "player" then
+        return true
+    end
+    if F_UNIT == nil or type(F_UNIT.GetUnitType) ~= "function" then
+        return false
+    end
+
+    local unitType = nil
+    pcall(function()
+        unitType = F_UNIT.GetUnitType(unitKey)
+    end)
+    return unitType == "player" or unitType == "character"
+end
+
+local function ResolveClassIconFrame(frame)
+    if type(frame) ~= "table" then
+        return nil
+    end
+    return ResolveWidgetCandidate(frame.abilityIconFrame)
+end
+
+local function AnchorClassIconFrame(frame, icon)
+    if frame == nil or icon == nil or icon.AddAnchor == nil then
+        return
+    end
+    pcall(function()
+        if icon.RemoveAllAnchors ~= nil then
+            icon:RemoveAllAnchors()
+        end
+        icon:AddAnchor("TOPRIGHT", frame, -48, 3)
+    end)
+end
+
+local function EnsureClassIconFrame(frame, unit)
+    if frame == nil or ResolveClassIconFrame(frame) ~= nil or type(CreateAbilityIcon) ~= "function" then
+        return
+    end
+
+    local unitKey = NormalizeRuntimeUnitToken(unit) or "player"
+    pcall(function()
+        CreateAbilityIcon("abilityIconFrame", frame, unitKey)
+    end)
+
+    local icon = ResolveClassIconFrame(frame)
+    if icon ~= nil then
+        icon.__polar_class_icon_created = true
+        AnchorClassIconFrame(frame, icon)
+    end
+end
+
+local function RefreshClassIconFrame(frame, settings)
+    local icon = ResolveClassIconFrame(frame)
+    if icon == nil then
+        return
+    end
+
+    local hideClassIcon = type(settings) == "table" and settings.show_class_icons == false
+    SetWidgetForcedHidden(icon, hideClassIcon)
+    if hideClassIcon then
+        return
+    end
+
+    local unitKey = ResolveFrameRuntimeUnit(frame)
+    pcall(function()
+        if icon.SetAbility ~= nil and unitKey ~= nil then
+            icon:SetAbility(unitKey)
+        end
+    end)
+
+    local visible = ShouldShowClassIconForUnit(unitKey)
+    pcall(function()
+        if icon.Show ~= nil then
+            icon:Show(visible)
+        elseif icon.SetVisible ~= nil then
+            icon:SetVisible(visible)
+        end
+    end)
+end
+
+local function ResetClassIconFrame(frame)
+    local icon = ResolveClassIconFrame(frame)
+    if icon == nil then
+        return
+    end
+
+    SetWidgetForcedHidden(icon, false)
+    if icon.__polar_class_icon_created then
+        pcall(function()
+            if icon.Show ~= nil then
+                icon:Show(false)
+            elseif icon.SetVisible ~= nil then
+                icon:SetVisible(false)
+            end
+        end)
+    end
+end
+
+local function EnsureClassIconFrames()
+    EnsureClassIconFrame(UI.player.wnd, "player")
+    EnsureClassIconFrame(UI.target.wnd, "target")
+    EnsureClassIconFrame(UI.watchtarget.wnd, "watchtarget")
+    EnsureClassIconFrame(UI.target_of_target.wnd, "targettarget")
+end
+
+local function ResetClassIconFrames()
+    ResetClassIconFrame(UI.player.wnd)
+    ResetClassIconFrame(UI.target.wnd)
+    ResetClassIconFrame(UI.watchtarget.wnd)
+    ResetClassIconFrame(UI.target_of_target.wnd)
 end
 
 local function MatchesLevelArtifactPattern(key)
@@ -1613,7 +1734,7 @@ local function ApplyLegacyStockBarStyle(frame, style, statusbar_style)
     local frameUnit = ResolveFrameRuntimeUnit(frame) or frame.__polar_unit
     local frameHostile = isHostileUnit(frameUnit)
     local hostileTargetHpEnabled = style.hostile_target_hp_enabled == true
-        and tostring(frameUnit or "") == "target"
+        and IsHostileHpOverrideUnit(frameUnit)
         and frameHostile
 
     pcall(function()
@@ -1974,7 +2095,7 @@ local function ApplyBarStyle(frame, style)
     local frameUnit = ResolveFrameRuntimeUnit(frame) or frame.__polar_unit
     local frameHostile = isHostileUnit(frameUnit)
     local hostileTargetHpEnabled = style.hostile_target_hp_enabled == true
-        and tostring(frameUnit or "") == "target"
+        and IsHostileHpOverrideUnit(frameUnit)
         and frameHostile
     local hostileTargetHpColor = NormalizeColor255(style.hostile_target_hp_color, { 255, 54, 40, 255 })
 
@@ -2242,6 +2363,8 @@ local function ApplyStockFrameDecorations(frame, settings)
     local isTargetFrame = UI ~= nil and UI.target ~= nil and frame == UI.target.wnd
     local hideBossBackground = type(settings) == "table" and settings.hide_boss_frame_background == true and isTargetFrame
     local hideTargetGradeStar = type(settings) == "table" and settings.hide_target_grade_star == true and isTargetFrame
+
+    RefreshClassIconFrame(frame, settings)
 
     for _, key in ipairs(STOCK_LEVEL_ARTIFACT_FIELDS) do
         SetWidgetForcedHidden(frame[key], hideLevelArtifacts)
@@ -4211,6 +4334,8 @@ local function EnsureUi(settings)
         return
     end
 
+    EnsureClassIconFrames()
+
     HookUnitFrameDrag(UI.player.wnd, settings, "player")
     HookUnitFrameDrag(UI.target.wnd, settings, "target")
     HookUnitFrameDrag(UI.watchtarget.wnd, settings, "watchtarget")
@@ -4504,6 +4629,7 @@ UI.UnLoad = function()
     RefreshFrameBarPresentation(UI.target.wnd, nil)
     RefreshFrameBarPresentation(UI.watchtarget.wnd, nil)
     RefreshFrameBarPresentation(UI.target_of_target.wnd, nil)
+    ResetClassIconFrames()
     ClearPartyOverlays()
     for _, widget in ipairs(UI.created or {}) do
         pcall(function()
@@ -4586,6 +4712,7 @@ UI.SetEnabled = function(enabled)
         ApplyValueLabelVisibility(UI.target.wnd, restoreValues)
         ApplyValueLabelVisibility(UI.watchtarget.wnd, restoreValues)
         ApplyValueLabelVisibility(UI.target_of_target.wnd, restoreValues)
+        ResetClassIconFrames()
         pcall(function()
             if UI.player.wnd ~= nil and UI.player.wnd.UpdateAll ~= nil then
                 UI.player.wnd:UpdateAll()
