@@ -44,6 +44,12 @@ SettingsCatalog.PAGES = {
         summary = "Movable speed meter for vehicles, mounts, gliders, and on-foot travel."
     },
     {
+        id = "mount_glider",
+        label = "Mount/Glider",
+        title = "Mount/Glider",
+        summary = "Specialized timers for mount and glider movement abilities."
+    },
+    {
         id = "loadouts",
         label = "Loadouts",
         title = "Gear Loadouts",
@@ -65,7 +71,7 @@ SettingsCatalog.PAGES = {
         id = "cooldown",
         label = "Cooldowns",
         title = "Cooldown Tracker",
-        summary = "Tracked buff and debuff icons for player, target, pet, watchtarget, and target of target."
+        summary = "Tracked buff and debuff icons for player, target, watchtarget, and target of target."
     }
 }
 

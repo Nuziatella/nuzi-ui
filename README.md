@@ -9,9 +9,10 @@ Because the stock frames are fine right up until you actually want them to look 
 - styles the stock `player`, `target`, `watchtarget`, `target of target`, and stock `party` frames
 - adds an optional movable player cast bar built on the stock X2 casting widget
 - adds an optional travel speed meter for vehicles, mounts, gliders, and on-foot movement
+- adds optional mount/glider movement-ability timers in their own settings page
 - adds optional per-character gear loadouts with a clickable swap bar and drag/drop editor
 - supports optional custom nameplates with matching layout controls
-- adds tracked cooldown and effect windows for `player`, `target`, `mount/pet`, `watchtarget`, and `target of target`
+- adds tracked cooldown and effect windows for `player`, `target`, `watchtarget`, and `target of target`
 - includes target overlay extras, aura layout controls, and a movable launcher icon
 - includes a `UI Repair` page for UI scale diagnostics and safe layout resets
 - supports backups, imports, and persistent settings in `.data`
@@ -29,7 +30,7 @@ Saved data lives in `nuzi-ui/.data` so your layout, cooldown tracking, and setti
 1. Open the `Nuzi UI` settings from the launcher icon.
 2. Pick which frame group you want to edit and adjust text, bars, auras, or plates.
 3. Enable only the overlays you actually want visible.
-4. If you want a player cast bar, travel speed meter, or gear loadouts, enable them on their pages and move them with `Shift + drag`.
+4. If you want a player cast bar, travel speed meter, mount/glider timers, or gear loadouts, enable them on their pages and move them with `Shift + drag`.
 5. If you use cooldown tracking, add effects by ID, search, or scan and place each tracker where it fits your UI.
 6. If frames look wrong after changing UI scale, open `UI Repair` and use Refresh, Reset Frames, or Center Frames.
 
@@ -64,13 +65,32 @@ The cooldown tracker is built into `Nuzi UI`.
 
 You can:
 
-- track buffs or debuffs on `player`, `target`, `mount/pet`, `watchtarget`, and `target of target`
+- track buffs or debuffs on `player`, `target`, `watchtarget`, and `target of target`
 - add tracked effects by ID, by search, or by scanning a unit
+- enter a cooldown length for tracked effects so the timer can count down after the buff appears
 - show active effects, missing effects, or both
 - switch each tracker between compact icons and icon-plus-bar rows
 - attach non-player trackers near their nameplate and move them with offsets
 
-Mount and glider ability buttons use internal client cooldown APIs that are not exposed to addons. Track their visible buff/debuff effects through `player` or `mount/pet`; direct mount/glider action cooldown rows need a client API hook first.
+Mount and glider ability buttons use internal client cooldown APIs that are not exposed to addons, so they are handled by the dedicated `Mount/Glider` page instead of this generic tracker.
+
+### Mount/Glider
+
+The Mount/Glider page adds a dedicated movement-ability tracker for the mounts, gliders, and magithopters you choose.
+
+You can:
+
+- choose one mount and one glider or magithopter from dropdown menus
+- choose which abilities from those devices should show on the bar
+- show ready icons dimmed and active timers bright
+- track visible mount and glider buffs from both the player and mount units
+- show the ability cooldown countdown after a tracked movement buff appears
+- detect shared hidden glider timers from mount/glider mana use
+- notify in chat when a tracked movement timer is ready
+- resize icons, spacing, icons per row, and timer text
+- move the strip with `Shift + drag`
+- lock its position once it is where you want it
+- share learned mount, glider, and magithropter definitions from `.data/mount_glider_devices.txt`
 
 ### Cast Bar
 
@@ -116,7 +136,7 @@ The settings window also handles profile safety tools.
 You can:
 
 - check your current screen size and UI scale on the `UI Repair` page
-- reset saved frame, cast bar, travel speed, loadout, launcher, nameplate, or cooldown positions
+- reset saved frame, cast bar, travel speed, mount/glider, loadout, launcher, nameplate, or cooldown positions
 - save backups
 - list previous backups
 - import a backup by index
@@ -124,7 +144,8 @@ You can:
 
 ## Notes
 
-- The launcher icon, settings window, overlays, cooldown trackers, cast bar, travel speed meter, and loadout UI all save their positions.
+- The launcher icon, settings window, overlays, cooldown trackers, cast bar, travel speed meter, mount/glider strip, and loadout UI all save their positions.
+- Learned mount, glider, and magithropter definitions also save to `.data/mount_glider_devices.txt` so they can be shared without copying another player's UI layout.
 - Cooldown tracker windows for non-player units use nameplate-relative offsets instead of fixed screen coordinates.
 - Backup files live in `.data/backups`.
 - Moving addon windows follows the same `Shift + drag` behavior as the other Nuzi addons.

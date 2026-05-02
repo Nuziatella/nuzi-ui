@@ -6,7 +6,6 @@ local SettingsCooldown = {}
 SettingsCooldown.UNIT_KEYS = {
     "player",
     "target",
-    "playerpet",
     "watchtarget",
     "target_of_target"
 }
@@ -14,7 +13,6 @@ SettingsCooldown.UNIT_KEYS = {
 SettingsCooldown.UNIT_LABELS = {
     "Player",
     "Target",
-    "Mount/Pet",
     "Watchtarget",
     "Target of Target"
 }
@@ -322,6 +320,9 @@ function SettingsCooldown.RefreshTrackedRows(state, unitCfg)
                     if type(meta) == "table" and tostring(meta.name or "") ~= "" then
                         text = string.format("%s %s %s", prefix, tostring(entry.id), tostring(meta.name or ""))
                     end
+                    if tonumber(entry.cooldown_ms) ~= nil and tonumber(entry.cooldown_ms) > 0 then
+                        text = string.format("%s  cd %ds", text, math.floor((tonumber(entry.cooldown_ms) / 1000) + 0.5))
+                    end
                     row.label:SetText(text)
                 else
                     row.label:SetText("")
@@ -350,14 +351,15 @@ function SettingsCooldown.RefreshTrackedRows(state, unitCfg)
     end
 end
 
-function SettingsCooldown.AddTrackedBuff(state, rawId, rawKind)
+function SettingsCooldown.AddTrackedBuff(state, rawId, rawKind, rawCooldownSeconds)
     if type(state) ~= "table" or state.settings == nil then
         return false
     end
 
     local normalized = SettingsCommon.NormalizeCooldownTrackedEntry({
         id = rawId,
-        kind = rawKind
+        kind = rawKind,
+        cooldown_s = rawCooldownSeconds
     })
     if normalized == nil then
         return false
@@ -372,17 +374,34 @@ function SettingsCooldown.AddTrackedBuff(state, rawId, rawKind)
         return false
     end
 
-    for _, v in ipairs(unitCfg.tracked_buffs) do
+    for idx, v in ipairs(unitCfg.tracked_buffs) do
         local existing = SettingsCommon.NormalizeCooldownTrackedEntry(v)
         if existing ~= nil and SettingsCommon.FormatBuffId(existing.id) == id and existing.kind == normalized.kind then
+            if tonumber(normalized.cooldown_ms) ~= nil and tonumber(normalized.cooldown_ms) > 0 then
+                unitCfg.tracked_buffs[idx] = {
+                    id = normalized.id,
+                    kind = normalized.kind,
+                    cooldown_ms = normalized.cooldown_ms
+                }
+                if type(state.on_apply) == "function" then
+                    pcall(function()
+                        state.on_apply()
+                    end)
+                end
+                return true
+            end
             return false
         end
     end
 
-    table.insert(unitCfg.tracked_buffs, {
+    local entry = {
         id = normalized.id,
         kind = normalized.kind
-    })
+    }
+    if tonumber(normalized.cooldown_ms) ~= nil and tonumber(normalized.cooldown_ms) > 0 then
+        entry.cooldown_ms = normalized.cooldown_ms
+    end
+    table.insert(unitCfg.tracked_buffs, entry)
     if type(state.on_apply) == "function" then
         pcall(function()
             state.on_apply()

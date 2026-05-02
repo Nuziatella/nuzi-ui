@@ -69,28 +69,6 @@ SettingsDefaults.DEFAULT_SETTINGS = {
                 cache_timeout_s = 300,
                 tracked_buffs = {}
             },
-            playerpet = {
-                enabled = false,
-                pos_x = 0,
-                pos_y = -8,
-                icon_size = 40,
-                icon_spacing = 5,
-                max_icons = 10,
-                lock_position = false,
-                show_timer = true,
-                timer_font_size = 16,
-                timer_color = { 255, 255, 255, 255 },
-                show_label = false,
-                label_font_size = 14,
-                label_color = { 255, 255, 255, 255 },
-                display_mode = "both",
-                display_style = "icons",
-                bar_width = 180,
-                bar_height = 14,
-                bar_fill_color = { 207, 74, 22, 255 },
-                bar_bg_color = { 18, 18, 18, 220 },
-                tracked_buffs = {}
-            },
             watchtarget = {
                 enabled = false,
                 pos_x = 0,
@@ -170,6 +148,27 @@ SettingsDefaults.DEFAULT_SETTINGS = {
         show_speed_text = true,
         show_bar = true,
         show_state_text = true
+    },
+    mount_glider = {
+        enabled = false,
+        pos_x = 0,
+        pos_y = 0,
+        position_initialized = false,
+        lock_position = false,
+        icon_size = 36,
+        icon_spacing = 6,
+        icons_per_row = 9,
+        show_ready_icons = true,
+        show_timer = true,
+        timer_font_size = 14,
+        use_mana_triggers = true,
+        notify_ready = true,
+        selected_mount = "",
+        selected_glider = "",
+        selected_abilities = {},
+        selected_devices = {},
+        learned_mounts = {},
+        learned_gliders = {}
     },
     gear_loadouts = {
         enabled = false,
@@ -495,7 +494,6 @@ function SettingsDefaults.EnsureCooldownTrackerDefaults(s)
 
     ensureUnit("player")
     ensureUnit("target")
-    ensureUnit("playerpet")
     ensureUnit("watchtarget")
     ensureUnit("target_of_target")
 end
@@ -606,7 +604,6 @@ function SettingsDefaults.TryMigrateCooldownTrackerFromCbt(s)
     SettingsDefaults.EnsureCooldownTrackerDefaults(s)
     migrateUnit("player", "player")
     migrateUnit("target", "target")
-    migrateUnit("playerpet", "playerpet")
     migrateUnit("watchtarget", "watchtarget")
     migrateUnit("target_of_target", "target_of_target")
 
@@ -633,7 +630,6 @@ local function MigrateCooldownTrackerAnchorOffsets(s)
     local units = type(tracker.units) == "table" and tracker.units or {}
     local legacyDefaults = {
         target = { x = 330, y = 170 },
-        playerpet = { x = 330, y = 30 },
         watchtarget = { x = 330, y = 240 },
         target_of_target = { x = 330, y = 310 }
     }

@@ -12,6 +12,7 @@ Store.SETTINGS_BACKUP_FILE_PATH = "nuzi-ui/.data/settings_backup.txt"
 Store.SETTINGS_BACKUP_INDEX_FILE_PATH = "nuzi-ui/.data/backups/index.txt"
 Store.SETTINGS_BACKUP_INDEX_FALLBACK_FILE_PATH = "nuzi-ui/.data/settings_backup_index.txt"
 Store.SETTINGS_BACKUP_DIR = "nuzi-ui/.data/backups"
+Store.MOUNT_GLIDER_DEVICES_FILE_PATH = "nuzi-ui/.data/mount_glider_devices.txt"
 Store.LEGACY_LOCAL_SETTINGS_FILE_PATH = "nuzi-ui/settings.txt"
 Store.LEGACY_LOCAL_SETTINGS_BACKUP_FILE_PATH = "nuzi-ui/settings_backup.txt"
 Store.LEGACY_LOCAL_SETTINGS_BACKUP_INDEX_FILE_PATH = "nuzi-ui/backups/index.txt"
@@ -67,6 +68,7 @@ end
 local function ensureDataDirectories(includeBackups)
     ensureParentDirectory(Store.SETTINGS_FILE_PATH)
     ensureParentDirectory(Store.SETTINGS_BACKUP_FILE_PATH)
+    ensureParentDirectory(Store.MOUNT_GLIDER_DEVICES_FILE_PATH)
     if includeBackups then
         ensureParentDirectory(Store.SETTINGS_BACKUP_INDEX_FILE_PATH)
     end
@@ -147,12 +149,104 @@ local function ensureStoreSettings(settings)
     return store.settings
 end
 
+local function copyTable(value)
+    return SettingsDefaults.CopyDefaultValue(value)
+end
+
+local function getMountGliderSettings(settings)
+    if type(settings) ~= "table" then
+        return nil
+    end
+    if type(settings.mount_glider) ~= "table" then
+        settings.mount_glider = {}
+    end
+    if type(settings.mount_glider.learned_mounts) ~= "table" then
+        settings.mount_glider.learned_mounts = {}
+    end
+    if type(settings.mount_glider.learned_gliders) ~= "table" then
+        settings.mount_glider.learned_gliders = {}
+    end
+    return settings.mount_glider
+end
+
+local function tableHasEntries(value)
+    if type(value) ~= "table" then
+        return false
+    end
+    for _ in pairs(value) do
+        return true
+    end
+    return false
+end
+
+local function buildMountGliderDevices(settings)
+    local cfg = getMountGliderSettings(settings)
+    if type(cfg) ~= "table" then
+        return {
+            learned_mounts = {},
+            learned_gliders = {}
+        }
+    end
+    return {
+        learned_mounts = copyTable(cfg.learned_mounts),
+        learned_gliders = copyTable(cfg.learned_gliders)
+    }
+end
+
+local function hasMountGliderDevices(settings)
+    local cfg = getMountGliderSettings(settings)
+    return type(cfg) == "table"
+        and (tableHasEntries(cfg.learned_mounts) or tableHasEntries(cfg.learned_gliders))
+end
+
 function Store.GetStore()
     return store
 end
 
 function Store.ReadSettingsFromFile(path)
     return Settings.ReadFlexibleTable(path, readOptions())
+end
+
+function Store.ReadMountGliderDevicesFile()
+    return Settings.ReadFlexibleTable(Store.MOUNT_GLIDER_DEVICES_FILE_PATH, readOptions())
+end
+
+function Store.LoadMountGliderDevices(settings)
+    if type(settings) ~= "table" then
+        return false
+    end
+
+    local devices, source, err = Store.ReadMountGliderDevicesFile()
+    if type(devices) == "table" then
+        local fileHasDevices = tableHasEntries(devices.learned_mounts) or tableHasEntries(devices.learned_gliders)
+        if fileHasDevices or not hasMountGliderDevices(settings) then
+            local cfg = getMountGliderSettings(settings)
+            cfg.learned_mounts = type(devices.learned_mounts) == "table" and copyTable(devices.learned_mounts) or {}
+            cfg.learned_gliders = type(devices.learned_gliders) == "table" and copyTable(devices.learned_gliders) or {}
+            return true, tostring(source or "")
+        end
+    end
+
+    if hasMountGliderDevices(settings) then
+        Store.SaveMountGliderDevices(settings)
+    end
+    return false, tostring(err or "")
+end
+
+function Store.SaveMountGliderDevices(settings)
+    if type(settings) ~= "table" then
+        return false
+    end
+    ensureParentDirectory(Store.MOUNT_GLIDER_DEVICES_FILE_PATH)
+    local ok = Settings.WriteTable(
+        Store.MOUNT_GLIDER_DEVICES_FILE_PATH,
+        buildMountGliderDevices(settings),
+        "serialized_then_flat"
+    )
+    if not ok then
+        logError("Failed to save mount/glider devices.")
+    end
+    return ok and true or false
 end
 
 function Store.LoadSettings()
@@ -164,6 +258,8 @@ function Store.LoadSettings()
     elseif meta.migrated and type(meta.source_path) == "string" and meta.source_path ~= "" then
         logInfo("Recovered settings from " .. tostring(meta.source_path))
     end
+
+    Store.LoadMountGliderDevices(settings)
 
     return settings, {
         file_missing = meta.has_primary == false,
@@ -188,7 +284,8 @@ function Store.SaveSettingsFile(settings)
     if not ok then
         logError("Failed to save settings.")
     end
-    return ok and true or false
+    local devicesOk = Store.SaveMountGliderDevices(settings)
+    return ok and devicesOk and true or false
 end
 
 function Store.SaveSettingsBackupFile(settings)

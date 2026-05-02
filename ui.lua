@@ -9,6 +9,7 @@ local TargetExtrasModule = SafeRequire("nuzi-ui/ui_target_extras", "nuzi-ui.ui_t
 local CooldownTracker = SafeRequire("nuzi-ui/cooldown_tracker", "nuzi-ui.cooldown_tracker")
 local CastBar = SafeRequire("nuzi-ui/castbar", "nuzi-ui.castbar")
 local TravelSpeed = SafeRequire("nuzi-ui/travel_speed", "nuzi-ui.travel_speed")
+local MountGlider = SafeRequire("nuzi-ui/mount_glider", "nuzi-ui.mount_glider")
 local GearLoadouts = SafeRequire("nuzi-ui/gear_loadouts", "nuzi-ui.gear_loadouts")
 local SettingsStore = SafeRequire("nuzi-ui/settings_store", "nuzi-ui.settings_store")
 
@@ -4532,6 +4533,11 @@ UI.ApplySettings = function(settings)
             TravelSpeed.ApplySettings(settings)
         end)
     end
+    if MountGlider ~= nil and MountGlider.ApplySettings ~= nil then
+        pcall(function()
+            MountGlider.ApplySettings(settings)
+        end)
+    end
     if GearLoadouts ~= nil and GearLoadouts.ApplySettings ~= nil then
         pcall(function()
             GearLoadouts.ApplySettings(settings)
@@ -4579,6 +4585,11 @@ UI.Init = function(settings)
             TravelSpeed.Init(settings)
         end)
     end
+    if MountGlider ~= nil and MountGlider.Init ~= nil then
+        pcall(function()
+            MountGlider.Init(settings)
+        end)
+    end
     if GearLoadouts ~= nil and GearLoadouts.Init ~= nil then
         pcall(function()
             GearLoadouts.Init(settings)
@@ -4606,6 +4617,11 @@ UI.UnLoad = function()
     if TravelSpeed ~= nil and TravelSpeed.Unload ~= nil then
         pcall(function()
             TravelSpeed.Unload()
+        end)
+    end
+    if MountGlider ~= nil and MountGlider.Unload ~= nil then
+        pcall(function()
+            MountGlider.Unload()
         end)
     end
     if GearLoadouts ~= nil and GearLoadouts.Unload ~= nil then
@@ -4687,6 +4703,11 @@ UI.SetEnabled = function(enabled)
     if TravelSpeed ~= nil and TravelSpeed.SetEnabled ~= nil then
         pcall(function()
             TravelSpeed.SetEnabled(UI.enabled)
+        end)
+    end
+    if MountGlider ~= nil and MountGlider.SetEnabled ~= nil then
+        pcall(function()
+            MountGlider.SetEnabled(UI.enabled)
         end)
     end
     if GearLoadouts ~= nil and GearLoadouts.SetEnabled ~= nil then
@@ -4864,6 +4885,15 @@ UI.OnUpdate = function(dt)
         end)
         if not ok and api.Log ~= nil and api.Log.Err ~= nil then
             api.Log:Err("[Nuzi UI] TravelSpeed.OnUpdate failed: " .. tostring(err))
+        end
+    end
+
+    if MountGlider ~= nil and MountGlider.OnUpdate ~= nil then
+        local ok, err = pcall(function()
+            MountGlider.OnUpdate(dt, UI.settings)
+        end)
+        if not ok and api.Log ~= nil and api.Log.Err ~= nil then
+            api.Log:Err("[Nuzi UI] MountGlider.OnUpdate failed: " .. tostring(err))
         end
     end
 

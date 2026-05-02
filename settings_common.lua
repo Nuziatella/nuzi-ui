@@ -45,28 +45,6 @@ local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
         cache_timeout_s = 300,
         tracked_buffs = {}
     },
-    playerpet = {
-        enabled = false,
-        pos_x = 0,
-        pos_y = -8,
-        icon_size = 40,
-        icon_spacing = 5,
-        max_icons = 10,
-        lock_position = false,
-        show_timer = true,
-        timer_font_size = 16,
-        timer_color = { 255, 255, 255, 255 },
-        show_label = false,
-        label_font_size = 14,
-        label_color = { 255, 255, 255, 255 },
-        display_mode = "both",
-        display_style = "icons",
-        bar_width = 180,
-        bar_height = 14,
-        bar_fill_color = { 207, 74, 22, 255 },
-        bar_bg_color = { 18, 18, 18, 220 },
-        tracked_buffs = {}
-    },
     watchtarget = {
         enabled = false,
         pos_x = 0,
@@ -197,10 +175,13 @@ end
 function SettingsCommon.NormalizeCooldownTrackedEntry(raw)
     local id = nil
     local kind = "any"
+    local cooldownMs = nil
 
     if type(raw) == "table" then
         id = tonumber(raw.id or raw.buff_id or raw.buffId or raw.spellId or raw.spell_id)
         kind = SettingsCommon.NormalizeCooldownTrackKind(raw.kind)
+        cooldownMs = tonumber(raw.cooldown_ms or raw.cooldownMs)
+            or ((tonumber(raw.cooldown_s or raw.cooldown_seconds or raw.cooldown) or 0) * 1000)
     else
         id = tonumber(raw)
     end
@@ -214,10 +195,14 @@ function SettingsCommon.NormalizeCooldownTrackedEntry(raw)
         return nil
     end
 
-    return {
+    local entry = {
         id = id,
         kind = kind
     }
+    if cooldownMs ~= nil and cooldownMs > 0 then
+        entry.cooldown_ms = math.floor(cooldownMs + 0.5)
+    end
+    return entry
 end
 
 function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)

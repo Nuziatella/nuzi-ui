@@ -10,6 +10,7 @@ local CooldownTracker = {
     windows = {},
     buff_meta_cache = {},
     duration_cache = {},
+    cooldown_state = {},
     target_cache = {},
     target_cache_unit_id = nil
 }
@@ -17,7 +18,6 @@ local CooldownTracker = {
 local UNIT_ORDER = {
     "player",
     "target",
-    "playerpet",
     "watchtarget",
     "target_of_target"
 }
@@ -25,7 +25,6 @@ local UNIT_ORDER = {
 local UNIT_LABELS = {
     player = "Player",
     target = "Target",
-    playerpet = "Pet",
     watchtarget = "Watch",
     target_of_target = "ToT"
 }
@@ -33,14 +32,12 @@ local UNIT_LABELS = {
 local UNIT_TOKENS = {
     player = { "player" },
     target = { "target" },
-    playerpet = { "playerpet1", "playerpet" },
     watchtarget = { "watchtarget" },
     target_of_target = { "targetoftarget", "target_of_target", "targettarget" }
 }
 
 local ANCHORED_UNITS = {
     target = true,
-    playerpet = true,
     watchtarget = true,
     target_of_target = true
 }
@@ -48,7 +45,6 @@ local ANCHORED_UNITS = {
 local DEFAULT_POSITIONS = {
     player = { x = 330, y = 100 },
     target = { x = 0, y = -8 },
-    playerpet = { x = 0, y = -8 },
     watchtarget = { x = 0, y = -8 },
     target_of_target = { x = 0, y = -8 }
 }
@@ -188,9 +184,12 @@ local function normalizeTrackedEntry(raw)
     end
     local id = nil
     local kind = "any"
+    local cooldownMs = nil
     if type(raw) == "table" then
         id = tonumber(raw.id or raw.buff_id or raw.buffId or raw.spellId or raw.spell_id)
         kind = normalizeTrackKind(raw.kind)
+        cooldownMs = tonumber(raw.cooldown_ms or raw.cooldownMs)
+            or ((tonumber(raw.cooldown_s or raw.cooldown_seconds or raw.cooldown) or 0) * 1000)
     else
         id = tonumber(raw)
     end
@@ -201,10 +200,14 @@ local function normalizeTrackedEntry(raw)
     if id <= 0 then
         return nil
     end
-    return {
+    local entry = {
         id = id,
         kind = kind
     }
+    if cooldownMs ~= nil and cooldownMs > 0 then
+        entry.cooldown_ms = math.floor(cooldownMs + 0.5)
+    end
+    return entry
 end
 
 local function isAnchoredUnit(unitKey)
@@ -942,6 +945,9 @@ end
 local function clearTargetCache()
     CooldownTracker.target_cache = {}
     CooldownTracker.target_cache_unit_id = nil
+    if type(CooldownTracker.cooldown_state) == "table" then
+        CooldownTracker.cooldown_state.target = nil
+    end
 end
 
 local function updateTargetCache(currentUnitId, liveFound, trackedEntries, unitCfg, nowMs)
@@ -1012,6 +1018,71 @@ local function buildActiveEntryMap(trackedEntries, liveFound)
     return out
 end
 
+local function getUnitCooldownState(unitKey)
+    if type(CooldownTracker.cooldown_state) ~= "table" then
+        CooldownTracker.cooldown_state = {}
+    end
+    if type(CooldownTracker.cooldown_state[unitKey]) ~= "table" then
+        CooldownTracker.cooldown_state[unitKey] = {}
+    end
+    return CooldownTracker.cooldown_state[unitKey]
+end
+
+local function startTrackedCooldown(unitKey, trackedEntry, live, nowMs)
+    local cooldownMs = tonumber(trackedEntry.cooldown_ms)
+    if cooldownMs == nil or cooldownMs <= 0 then
+        return nil
+    end
+    local state = getUnitCooldownState(unitKey)
+    local existing = state[trackedEntry.key]
+    if type(existing) == "table" and existing.live_seen == true then
+        return existing
+    end
+    local cooldown = {
+        live_seen = true,
+        end_at_ms = nowMs + cooldownMs,
+        duration_ms = cooldownMs,
+        buff_id = trackedEntry.id,
+        track_kind = trackedEntry.kind,
+        kind = type(live) == "table" and live.kind or trackedEntry.kind,
+        name = type(live) == "table" and live.name or nil,
+        icon_path = type(live) == "table" and live.icon_path or nil,
+        stacks = type(live) == "table" and live.stacks or nil
+    }
+    state[trackedEntry.key] = cooldown
+    return cooldown
+end
+
+local function getTrackedCooldownEntry(unitKey, trackedEntry, live, nowMs)
+    local state = getUnitCooldownState(unitKey)
+    local cooldown = state[trackedEntry.key]
+    if live ~= nil then
+        cooldown = startTrackedCooldown(unitKey, trackedEntry, live, nowMs)
+    elseif type(cooldown) == "table" then
+        cooldown.live_seen = false
+    end
+    if type(cooldown) ~= "table" then
+        return nil
+    end
+    local remaining = tonumber(cooldown.end_at_ms) ~= nil and (tonumber(cooldown.end_at_ms) - nowMs) or nil
+    if remaining == nil or remaining <= 0 then
+        state[trackedEntry.key] = nil
+        return nil
+    end
+    local meta = getTooltipInfo(trackedEntry.id)
+    return {
+        buff_id = trackedEntry.id,
+        track_kind = trackedEntry.kind,
+        kind = cooldown.kind or trackedEntry.kind,
+        name = cooldown.name or (type(meta) == "table" and tostring(meta.name or "") ~= "" and tostring(meta.name or "") or ("Buff #" .. tostring(trackedEntry.id))),
+        icon_path = cooldown.icon_path or (type(meta) == "table" and tostring(meta.path or "") or nil),
+        time_left_ms = remaining,
+        duration_ms = tonumber(cooldown.duration_ms) or tonumber(trackedEntry.cooldown_ms),
+        stacks = live ~= nil and live.stacks or cooldown.stacks,
+        state = live ~= nil and "active" or "cooldown"
+    }
+end
+
 local function buildMissingEntry(unitKey, trackedEntry)
     local meta = getTooltipInfo(trackedEntry.id)
     local missingState = (unitKey == "player") and "ready" or "missing"
@@ -1034,6 +1105,9 @@ local function collectUnitEntries(unitKey, unitCfg, nowMs)
         if unitKey == "target" then
             clearTargetCache()
         end
+        if type(CooldownTracker.cooldown_state) == "table" then
+            CooldownTracker.cooldown_state[unitKey] = nil
+        end
         return {}
     end
 
@@ -1051,11 +1125,15 @@ local function collectUnitEntries(unitKey, unitCfg, nowMs)
     local displayMode = normalizeDisplayMode(type(unitCfg) == "table" and unitCfg.display_mode or "both")
     local entries = {}
     for _, trackedEntry in ipairs(trackedEntries) do
-        local entry = type(activeByKey) == "table" and activeByKey[trackedEntry.key] or nil
+        local live = resolveLiveEntry(liveFound, trackedEntry)
+        local cooldownEntry = getTrackedCooldownEntry(unitKey, trackedEntry, live, nowMs)
+        local entry = cooldownEntry or (type(activeByKey) == "table" and activeByKey[trackedEntry.key] or nil)
         if entry ~= nil then
             if displayMode ~= "missing" then
                 entry.track_kind = trackedEntry.kind
-                entry.state = "active"
+                if entry.state == nil then
+                    entry.state = "active"
+                end
                 entries[#entries + 1] = entry
             end
         elseif displayMode ~= "active" then
@@ -1653,6 +1731,7 @@ end
 
 function CooldownTracker.ApplySettings(settings)
     CooldownTracker.settings = settings
+    CooldownTracker.cooldown_state = {}
     if type(settings) ~= "table" or type(settings.cooldown_tracker) ~= "table" then
         hideAllWindows()
         syncAllWindowInteractionStates()
@@ -1731,6 +1810,7 @@ function CooldownTracker.Unload()
     CooldownTracker.windows = {}
     CooldownTracker.buff_meta_cache = {}
     CooldownTracker.duration_cache = {}
+    CooldownTracker.cooldown_state = {}
     CooldownTracker.settings = nil
     CooldownTracker.accum_ms = 0
 end

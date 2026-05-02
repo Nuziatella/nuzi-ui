@@ -780,6 +780,117 @@ SettingsSchema.PAGES = {
             }
         }
     },
+    mount_glider = {
+        sections = {
+            {
+                id = "mount_glider_behavior",
+                title = "Mount/Glider Timers",
+                hint = "Select the mounts, gliders, and magithopters you own, then show a dedicated row of movement timers for each one.",
+                fields = {
+                    checkbox("mount_glider_enabled", "polarUiMountGliderEnabled", "Enable mount/glider timers"),
+                    hint(
+                        "mount_glider_move_hint",
+                        "polarUiMountGliderMoveHint",
+                        "Drag in game to move the strip. If Shift movement is enabled in General, hold Shift while dragging.",
+                        { width = 520, depends_on = { control = "mount_glider_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "mount_glider_lock_position",
+                        "polarUiMountGliderLockPosition",
+                        "Lock timer strip position",
+                        { depends_on = { control = "mount_glider_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "mount_glider_show_ready_icons",
+                        "polarUiMountGliderShowReadyIcons",
+                        "Show ready icons",
+                        { depends_on = { control = "mount_glider_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "mount_glider_show_timer",
+                        "polarUiMountGliderShowTimer",
+                        "Show timer text",
+                        { depends_on = { control = "mount_glider_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "mount_glider_use_mana_triggers",
+                        "polarUiMountGliderUseManaTriggers",
+                        "Detect hidden timers from mana use",
+                        { depends_on = { control = "mount_glider_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "mount_glider_notify_ready",
+                        "polarUiMountGliderNotifyReady",
+                        "Notify when a timer is ready",
+                        { depends_on = { control = "mount_glider_enabled", checked = true } }
+                    ),
+                    hint(
+                        "mount_glider_icon_layout_hint",
+                        "polarUiMountGliderIconLayoutHint",
+                        "The in-game strip shows selected mounts, gliders, and magithopters as icons with tracked skill icons grouped below them.",
+                        { width = 520, depends_on = { control = "mount_glider_enabled", checked = true } }
+                    )
+                }
+            },
+            {
+                id = "mount_glider_devices",
+                title = "Devices",
+                hint = "Choose one mount and one glider or magithopter, then pick the abilities that should appear on the timer bar.",
+                fields = {
+                    hint(
+                        "mount_glider_share_hint",
+                        "polarUiMountGliderShareHint",
+                        "Learned devices save to nuzi-ui/.data/mount_glider_devices.txt if you want to share them.",
+                        { width = 520 }
+                    ),
+                    custom("mount_glider_devices", { estimate_height = 610 })
+                }
+            },
+            {
+                id = "mount_glider_layout",
+                title = "Layout",
+                hint = "Tune the strip size and spacing while keeping it separate from combat cooldowns.",
+                fields = {
+                    slider(
+                        "mount_glider_icon_size",
+                        "polarUiMountGliderIconSize",
+                        "Bar icon size",
+                        28,
+                        96,
+                        1,
+                        { depends_on = { control = "mount_glider_enabled", checked = true } }
+                    ),
+                    slider(
+                        "mount_glider_icon_spacing",
+                        "polarUiMountGliderIconSpacing",
+                        "Icon spacing",
+                        0,
+                        20,
+                        1,
+                        { depends_on = { control = "mount_glider_enabled", checked = true } }
+                    ),
+                    slider(
+                        "mount_glider_icons_per_row",
+                        "polarUiMountGliderIconsPerRow",
+                        "Icons per row",
+                        1,
+                        12,
+                        1,
+                        { depends_on = { control = "mount_glider_enabled", checked = true } }
+                    ),
+                    slider(
+                        "mount_glider_timer_font_size",
+                        "polarUiMountGliderTimerFontSize",
+                        "Timer text size",
+                        8,
+                        24,
+                        1,
+                        { depends_on = { control = "mount_glider_enabled", checked = true } }
+                    )
+                }
+            }
+        }
+    },
     loadouts = {
         sections = {
             {

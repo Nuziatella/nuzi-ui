@@ -163,9 +163,14 @@ function CooldownPage.Build(state, page, gap)
     controls.ct_add_buff = CreateButton("polarUiCooldownAddBuff", page, "Add", 145, y - 6)
     CreateLabel("polarUiCooldownTrackKindLabel", page, "Track as", 225, y, 15)
     controls.ct_track_kind = CreateComboBox(page, SettingsCooldown.TRACK_KIND_LABELS, 290, y - 4, 110, 24)
-    CreateLabel("polarUiCooldownSearchLabel", page, "Search", 420, y, 15)
-    controls.ct_search_text = CreateEdit("polarUiCooldownSearchText", page, "", 470, y - 4, 135, 22)
-    controls.ct_search_btn = CreateButton("polarUiCooldownSearchBtn", page, "Find", 615, y - 6)
+    CreateLabel("polarUiCooldownNewCooldownLabel", page, "Cooldown sec", 420, y, 15)
+    controls.ct_new_cooldown_s = CreateEdit("polarUiCooldownNewCooldownS", page, "", 525, y - 4, 70, 22)
+    setDigit(controls.ct_new_cooldown_s)
+    y = y + 34
+
+    CreateLabel("polarUiCooldownSearchLabel", page, "Search", 15, y, 15)
+    controls.ct_search_text = CreateEdit("polarUiCooldownSearchText", page, "", 75, y - 4, 220, 22)
+    controls.ct_search_btn = CreateButton("polarUiCooldownSearchBtn", page, "Find", 305, y - 6)
     if controls.ct_search_btn ~= nil then
         controls.ct_search_btn:SetExtent(60, 22)
     end

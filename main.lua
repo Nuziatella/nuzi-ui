@@ -42,7 +42,7 @@ local SettingsStore = modules.settings_store
 local NuziUiAddon = {
     name = "Nuzi UI",
     author = "Nuzi",
-    version = "4.1.2",
+    version = "4.1.3",
     desc = "Interface overhaul"
 }
 
@@ -181,10 +181,12 @@ local function logRuntimeSummary()
 end
 
 local function onUpdate(dt)
-    if UI == nil or UI.OnUpdate == nil then
-        return
+    if UI ~= nil and UI.OnUpdate ~= nil then
+        logger:Try("UI.OnUpdate", UI.OnUpdate, dt)
     end
-    logger:Try("UI.OnUpdate", UI.OnUpdate, dt)
+    if SettingsPage ~= nil and SettingsPage.OnUpdate ~= nil then
+        logger:Try("SettingsPage.OnUpdate", SettingsPage.OnUpdate, dt)
+    end
 end
 
 local function onUiReloaded()

@@ -211,10 +211,11 @@ local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAG
     { id = "bars", label = "Bars", title = "Bars", summary = "Frame sizing, alpha, bar colors, textures, and value placement." },
     { id = "castbar", label = "Cast Bar", title = "Cast Bar", summary = "Movable player cast bar with customizable colors, text, and textures." },
     { id = "travel", label = "Travel", title = "Travel Speed", summary = "Movable speed meter for vehicles, mounts, gliders, and on-foot travel." },
+    { id = "mount_glider", label = "Mount/Glider", title = "Mount/Glider", summary = "Specialized timers for mount and glider movement abilities." },
     { id = "loadouts", label = "Loadouts", title = "Gear Loadouts", summary = "Per-character gear loadout bar with a drag/drop equipment editor." },
     { id = "auras", label = "Auras", title = "Auras", summary = "Aura windows, icon layout, and buff or debuff anchor controls." },
     { id = "plates", label = "Nameplates", title = "Nameplates", summary = "Visibility rules, offsets, debuff icons, colors, and runtime nameplate behavior." },
-    { id = "cooldown", label = "Cooldowns", title = "Cooldown Tracker", summary = "Tracked buff and debuff icons for player, target, pet, watchtarget, and target of target." }
+    { id = "cooldown", label = "Cooldowns", title = "Cooldown Tracker", summary = "Tracked buff and debuff icons for player, target, watchtarget, and target of target." }
 }
 
 local ClampInt = SettingsCommon.ClampInt
@@ -817,8 +818,15 @@ UpdateNavigationState = function(activePageId)
     SetReadableControlText(SettingsPage.controls.page_header_summary, meta.summary or "")
 end
 
-local function AddCooldownTrackedBuffToSelectedUnit(rawId, rawKind)
-    return SettingsCooldown.AddTrackedBuff(SettingsPage, rawId, rawKind)
+local function GetCooldownSecondsEditText()
+    local text = GetEditText(SettingsPage.controls.ct_new_cooldown_s)
+    text = tostring(text or "")
+    text = text:gsub("%s+", "")
+    return text
+end
+
+local function AddCooldownTrackedBuffToSelectedUnit(rawId, rawKind, rawCooldownSeconds)
+    return SettingsCooldown.AddTrackedBuff(SettingsPage, rawId, rawKind, rawCooldownSeconds)
 end
 
 local function RefreshCooldownSearchRows()
@@ -1015,7 +1023,7 @@ local SetWrappedText = SettingsWidgets.SetWrappedText
 local RefreshControls
 local ApplyControlsToSettings
 
-local SCHEMA_PAGE_IDS = { "general", "repair", "npc", "text", "bars", "castbar", "travel", "loadouts", "auras", "plates" }
+local SCHEMA_PAGE_IDS = { "general", "repair", "npc", "text", "bars", "castbar", "travel", "mount_glider", "loadouts", "auras", "plates" }
 local SCHEMA_PAGE_LEFT = 18
 local SCHEMA_PAGE_TOP = 18
 local SCHEMA_CARD_WIDTH = 650
@@ -1165,7 +1173,8 @@ local CUSTOM_SCHEMA_RENDERERS = {
     plates_guild_colors = function(parent, y) return CallCustomSchemaRenderer("BuildPlatesGuildColorEditor", parent, y) end,
     ui_repair_diagnostics = function(parent, y) return CallCustomSchemaRenderer("BuildRepairDiagnostics", parent, y) end,
     ui_repair_actions = function(parent, y) return CallCustomSchemaRenderer("BuildRepairActions", parent, y) end,
-    gear_loadouts_editor_button = function(parent, y) return CallCustomSchemaRenderer("BuildGearLoadoutActions", parent, y) end
+    gear_loadouts_editor_button = function(parent, y) return CallCustomSchemaRenderer("BuildGearLoadoutActions", parent, y) end,
+    mount_glider_devices = function(parent, y) return CallCustomSchemaRenderer("BuildMountGliderSelector", parent, y) end
 }
 
 local function BuildSchemaField(parent, y, field)
@@ -1561,6 +1570,54 @@ RefreshControls = function()
             SettingsPage.controls.travel_speed_font_size,
             SettingsPage.controls.travel_speed_font_size_val,
             tonumber(travelSpeed.font_size) or 20
+        )
+    end
+
+    local mountGlider = type(s.mount_glider) == "table" and s.mount_glider or {}
+    if SettingsPage.controls.mount_glider_enabled ~= nil then
+        SettingsPage.controls.mount_glider_enabled:SetChecked(mountGlider.enabled and true or false)
+    end
+    if SettingsPage.controls.mount_glider_lock_position ~= nil then
+        SettingsPage.controls.mount_glider_lock_position:SetChecked(mountGlider.lock_position and true or false)
+    end
+    if SettingsPage.controls.mount_glider_show_ready_icons ~= nil then
+        SettingsPage.controls.mount_glider_show_ready_icons:SetChecked(mountGlider.show_ready_icons ~= false)
+    end
+    if SettingsPage.controls.mount_glider_show_timer ~= nil then
+        SettingsPage.controls.mount_glider_show_timer:SetChecked(mountGlider.show_timer ~= false)
+    end
+    if SettingsPage.controls.mount_glider_use_mana_triggers ~= nil then
+        SettingsPage.controls.mount_glider_use_mana_triggers:SetChecked(mountGlider.use_mana_triggers ~= false)
+    end
+    if SettingsPage.controls.mount_glider_notify_ready ~= nil then
+        SettingsPage.controls.mount_glider_notify_ready:SetChecked(mountGlider.notify_ready ~= false)
+    end
+    if SettingsPage.controls.mount_glider_icon_size ~= nil then
+        refreshSlider(
+            SettingsPage.controls.mount_glider_icon_size,
+            SettingsPage.controls.mount_glider_icon_size_val,
+            tonumber(mountGlider.icon_size) or 36
+        )
+    end
+    if SettingsPage.controls.mount_glider_icon_spacing ~= nil then
+        refreshSlider(
+            SettingsPage.controls.mount_glider_icon_spacing,
+            SettingsPage.controls.mount_glider_icon_spacing_val,
+            tonumber(mountGlider.icon_spacing) or 6
+        )
+    end
+    if SettingsPage.controls.mount_glider_icons_per_row ~= nil then
+        refreshSlider(
+            SettingsPage.controls.mount_glider_icons_per_row,
+            SettingsPage.controls.mount_glider_icons_per_row_val,
+            tonumber(mountGlider.icons_per_row) or 9
+        )
+    end
+    if SettingsPage.controls.mount_glider_timer_font_size ~= nil then
+        refreshSlider(
+            SettingsPage.controls.mount_glider_timer_font_size,
+            SettingsPage.controls.mount_glider_timer_font_size_val,
+            tonumber(mountGlider.timer_font_size) or 14
         )
     end
 
@@ -2395,6 +2452,40 @@ ApplyControlsToSettings = function()
     end
     if SettingsPage.controls.travel_speed_font_size ~= nil then
         s.travel_speed.font_size = GetSliderValue(SettingsPage.controls.travel_speed_font_size)
+    end
+
+    if type(s.mount_glider) ~= "table" then
+        s.mount_glider = {}
+    end
+    if SettingsPage.controls.mount_glider_enabled ~= nil then
+        s.mount_glider.enabled = SettingsPage.controls.mount_glider_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.mount_glider_lock_position ~= nil then
+        s.mount_glider.lock_position = SettingsPage.controls.mount_glider_lock_position:GetChecked() and true or false
+    end
+    if SettingsPage.controls.mount_glider_show_ready_icons ~= nil then
+        s.mount_glider.show_ready_icons = SettingsPage.controls.mount_glider_show_ready_icons:GetChecked() and true or false
+    end
+    if SettingsPage.controls.mount_glider_show_timer ~= nil then
+        s.mount_glider.show_timer = SettingsPage.controls.mount_glider_show_timer:GetChecked() and true or false
+    end
+    if SettingsPage.controls.mount_glider_use_mana_triggers ~= nil then
+        s.mount_glider.use_mana_triggers = SettingsPage.controls.mount_glider_use_mana_triggers:GetChecked() and true or false
+    end
+    if SettingsPage.controls.mount_glider_notify_ready ~= nil then
+        s.mount_glider.notify_ready = SettingsPage.controls.mount_glider_notify_ready:GetChecked() and true or false
+    end
+    if SettingsPage.controls.mount_glider_icon_size ~= nil then
+        s.mount_glider.icon_size = GetSliderValue(SettingsPage.controls.mount_glider_icon_size)
+    end
+    if SettingsPage.controls.mount_glider_icon_spacing ~= nil then
+        s.mount_glider.icon_spacing = GetSliderValue(SettingsPage.controls.mount_glider_icon_spacing)
+    end
+    if SettingsPage.controls.mount_glider_icons_per_row ~= nil then
+        s.mount_glider.icons_per_row = GetSliderValue(SettingsPage.controls.mount_glider_icons_per_row)
+    end
+    if SettingsPage.controls.mount_glider_timer_font_size ~= nil then
+        s.mount_glider.timer_font_size = GetSliderValue(SettingsPage.controls.mount_glider_timer_font_size)
     end
 
     if type(s.gear_loadouts) ~= "table" then
@@ -3495,6 +3586,10 @@ local function EnsureWindow()
         { SettingsPage.controls.travel_speed_width, SettingsPage.controls.travel_speed_width_val },
         { SettingsPage.controls.travel_speed_scale, SettingsPage.controls.travel_speed_scale_val },
         { SettingsPage.controls.travel_speed_font_size, SettingsPage.controls.travel_speed_font_size_val },
+        { SettingsPage.controls.mount_glider_icon_size, SettingsPage.controls.mount_glider_icon_size_val },
+        { SettingsPage.controls.mount_glider_icon_spacing, SettingsPage.controls.mount_glider_icon_spacing_val },
+        { SettingsPage.controls.mount_glider_icons_per_row, SettingsPage.controls.mount_glider_icons_per_row_val },
+        { SettingsPage.controls.mount_glider_timer_font_size, SettingsPage.controls.mount_glider_timer_font_size_val },
         { SettingsPage.controls.gear_loadouts_button_size, SettingsPage.controls.gear_loadouts_button_size_val },
         { SettingsPage.controls.gear_loadouts_button_width, SettingsPage.controls.gear_loadouts_button_width_val },
         { SettingsPage.controls.frame_alpha, SettingsPage.controls.frame_alpha_val },
@@ -3670,6 +3765,12 @@ local function EnsureWindow()
         SettingsPage.controls.travel_speed_show_speed_text,
         SettingsPage.controls.travel_speed_show_bar,
         SettingsPage.controls.travel_speed_show_state_text,
+        SettingsPage.controls.mount_glider_enabled,
+        SettingsPage.controls.mount_glider_lock_position,
+        SettingsPage.controls.mount_glider_show_ready_icons,
+        SettingsPage.controls.mount_glider_show_timer,
+        SettingsPage.controls.mount_glider_use_mana_triggers,
+        SettingsPage.controls.mount_glider_notify_ready,
         SettingsPage.controls.gear_loadouts_enabled,
         SettingsPage.controls.gear_loadouts_lock_bar,
         SettingsPage.controls.gear_loadouts_lock_editor,
@@ -3926,7 +4027,7 @@ local function EnsureWindow()
                     if id == "" then
                         return
                     end
-                    AddCooldownTrackedBuffToSelectedUnit(id, entry.kind)
+                    AddCooldownTrackedBuffToSelectedUnit(id, entry.kind, GetCooldownSecondsEditText())
                     RefreshControls()
                 end)
             end
@@ -3952,9 +4053,12 @@ local function EnsureWindow()
 
             local kindIdx = GetComboBoxIndex1Based(SettingsPage.controls.ct_track_kind, #COOLDOWN_TRACK_KIND_LABELS)
             SettingsPage.cooldown_track_kind = GetCooldownTrackKindFromIndex(kindIdx)
-            AddCooldownTrackedBuffToSelectedUnit(txt, SettingsPage.cooldown_track_kind)
+            AddCooldownTrackedBuffToSelectedUnit(txt, SettingsPage.cooldown_track_kind, GetCooldownSecondsEditText())
             if SettingsPage.controls.ct_new_buff_id ~= nil and SettingsPage.controls.ct_new_buff_id.SetText ~= nil then
                 SettingsPage.controls.ct_new_buff_id:SetText("")
+            end
+            if SettingsPage.controls.ct_new_cooldown_s ~= nil and SettingsPage.controls.ct_new_cooldown_s.SetText ~= nil then
+                SettingsPage.controls.ct_new_cooldown_s:SetText("")
             end
             RefreshControls()
         end)
@@ -3983,7 +4087,7 @@ local function EnsureWindow()
                     end
                     local kindIdx = GetComboBoxIndex1Based(SettingsPage.controls.ct_track_kind, #COOLDOWN_TRACK_KIND_LABELS)
                     SettingsPage.cooldown_track_kind = GetCooldownTrackKindFromIndex(kindIdx)
-                    AddCooldownTrackedBuffToSelectedUnit(rawId, SettingsPage.cooldown_track_kind)
+                    AddCooldownTrackedBuffToSelectedUnit(rawId, SettingsPage.cooldown_track_kind, GetCooldownSecondsEditText())
                     RefreshControls()
                 end)
             end
@@ -4261,7 +4365,16 @@ function SettingsPage.toggle()
     end
 end
 
+function SettingsPage.OnUpdate(dt)
+    if SettingsSchemaCustom ~= nil and type(SettingsSchemaCustom.OnUpdate) == "function" then
+        SettingsSchemaCustom.OnUpdate(MakeCustomSchemaContext(), dt)
+    end
+end
+
 function SettingsPage.Unload()
+    if SettingsSchemaCustom ~= nil and type(SettingsSchemaCustom.Unload) == "function" then
+        SettingsSchemaCustom.Unload()
+    end
     if SettingsPage.window ~= nil then
         pcall(function()
             SettingsPage.window:Show(false)
