@@ -179,6 +179,100 @@ local function tableHasEntries(value)
     return false
 end
 
+local function integerString(value)
+    local number = tonumber(value)
+    if number == nil then
+        return nil
+    end
+    return string.format("%.0f", math.floor(number + 0.5))
+end
+
+local function trailingNumber(value)
+    local number = tonumber(string.match(tostring(value or ""), "_(%d+)$"))
+    if number == nil then
+        return nil
+    end
+    return math.floor(number + 0.5)
+end
+
+local function normalizeIdList(values)
+    if type(values) ~= "table" then
+        return nil
+    end
+    local out = {}
+    for _, value in ipairs(values) do
+        local text = integerString(value)
+        if text ~= nil then
+            out[#out + 1] = text
+        end
+    end
+    return out
+end
+
+local function normalizeLearnedAbilityIds(ability)
+    if type(ability) ~= "table" then
+        return
+    end
+    local keyId = trailingNumber(ability.key)
+    local isBuff = tostring(ability.icon_type or "") == "buff"
+        or ability.spell_id ~= nil
+        or ability.buff_id ~= nil
+        or type(ability.buff_ids) == "table"
+    if isBuff and keyId ~= nil then
+        ability.spell_id = integerString(keyId)
+        ability.buff_ids = { integerString(keyId) }
+        ability.icon_id = integerString(keyId)
+        ability.icon_type = "buff"
+        ability.exact_spell_id = true
+    else
+        if ability.spell_id ~= nil then
+            ability.spell_id = integerString(ability.spell_id)
+        end
+        if ability.buff_id ~= nil then
+            ability.buff_id = integerString(ability.buff_id)
+        end
+        if type(ability.buff_ids) == "table" then
+            ability.buff_ids = normalizeIdList(ability.buff_ids)
+        end
+        if ability.icon_id ~= nil then
+            ability.icon_id = integerString(ability.icon_id)
+        end
+    end
+    if ability.mount_mana_spent ~= nil then
+        ability.mount_mana_spent = integerString(ability.mount_mana_spent)
+    end
+end
+
+local function normalizeLearnedDeviceIds(device)
+    if type(device) ~= "table" then
+        return
+    end
+    local itemId = tonumber(string.match(tostring(device.key or ""), "^learned_glider_(%d+)$"))
+    if itemId ~= nil then
+        device.item_ids = { integerString(itemId) }
+    elseif type(device.item_ids) == "table" then
+        device.item_ids = normalizeIdList(device.item_ids)
+    end
+    if device.item_id ~= nil then
+        device.item_id = integerString(device.item_id)
+    end
+    for _, ability in ipairs(device.abilities or {}) do
+        normalizeLearnedAbilityIds(ability)
+    end
+end
+
+local function normalizeMountGliderDeviceIds(settings)
+    local cfg = getMountGliderSettings(settings)
+    if type(cfg) ~= "table" then
+        return
+    end
+    for _, listKey in ipairs({ "learned_mounts", "learned_gliders" }) do
+        for _, device in ipairs(type(cfg[listKey]) == "table" and cfg[listKey] or {}) do
+            normalizeLearnedDeviceIds(device)
+        end
+    end
+end
+
 local function buildMountGliderDevices(settings)
     local cfg = getMountGliderSettings(settings)
     if type(cfg) ~= "table" then
@@ -238,6 +332,7 @@ function Store.SaveMountGliderDevices(settings)
         return false
     end
     ensureParentDirectory(Store.MOUNT_GLIDER_DEVICES_FILE_PATH)
+    normalizeMountGliderDeviceIds(settings)
     local ok = Settings.WriteTable(
         Store.MOUNT_GLIDER_DEVICES_FILE_PATH,
         buildMountGliderDevices(settings),
@@ -260,6 +355,7 @@ function Store.LoadSettings()
     end
 
     Store.LoadMountGliderDevices(settings)
+    normalizeMountGliderDeviceIds(settings)
 
     return settings, {
         file_missing = meta.has_primary == false,
@@ -279,6 +375,7 @@ function Store.SaveSettingsFile(settings)
     end
     ensureDataDirectories(false)
     normalizeSettings(settings)
+    normalizeMountGliderDeviceIds(settings)
     ensureStoreSettings(settings)
     local ok = store:Save()
     if not ok then

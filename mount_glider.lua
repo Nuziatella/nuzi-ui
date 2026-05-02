@@ -7,12 +7,15 @@ local MountGlider = {
     settings = nil,
     enabled = true,
     frame = nil,
+    frames = {},
     slots = {},
     slots_by_key = {},
     row_labels = {},
     icon_cache = {},
     buff_scan = {},
+    previous_buff_scan = {},
     manual_timers = {},
+    pending_mount_mana_spends = {},
     accum_ms = 0,
     mana_initialized = false,
     last_mount_id = nil,
@@ -21,6 +24,7 @@ local MountGlider = {
 }
 
 local WINDOW_ID = "NuziUiMountGliderTracker"
+local TRACKER_GROUPS = { "mount", "glider" }
 local DEFAULT_ICON_SIZE = 36
 local DEFAULT_ICON_SPACING = 6
 local DEFAULT_ICONS_PER_ROW = 9
@@ -28,9 +32,12 @@ local DEFAULT_TIMER_FONT_SIZE = 14
 local DEFAULT_OFFSET_FROM_BOTTOM = 260
 local UPDATE_INTERVAL_MS = 50
 local ACTIVE_ALPHA = 1
+local MOUNT_MANA_MATCH_TOLERANCE = 10
+local MOUNT_MANA_TRIGGER_DELAY_MS = 1000
 
 local BUFF_UNITS = { "playerpet", "playerpet1", "playerpet2", "slave", "player" }
-local MOUNT_MANA_UNITS = { "playerpet", "playerpet1", "playerpet2", "slave" }
+local MOUNT_MANA_UNITS = { "playerpet1", "playerpet", "slave", "playerpet2" }
+local DEFAULT_MOUNT_ICON_PATH = "ui/icon/pet_command/pet_mount.dds"
 
 local MANA_TRIGGERS = {
     [6] = { trigger = "glider_boost", duration_ms = 60000 },
@@ -238,15 +245,15 @@ local function migrateSelectedDevices(cfg)
     cfg.selected_devices = {}
 end
 
-local function getConfiguredDevices(cfg)
+local function getConfiguredDevices(cfg, group)
     migrateSelectedDevices(cfg)
     local out = {}
     local mount = Catalog.GetDevice(type(cfg) == "table" and cfg.selected_mount or nil, cfg)
-    if type(mount) == "table" and mount.kind == "Mount" then
+    if (group == nil or group == "mount") and type(mount) == "table" and mount.kind == "Mount" then
         out[#out + 1] = mount
     end
     local glider = Catalog.GetDevice(type(cfg) == "table" and cfg.selected_glider or nil, cfg)
-    if type(glider) == "table" and glider.kind ~= "Mount" then
+    if (group == nil or group == "glider") and type(glider) == "table" and glider.kind ~= "Mount" then
         out[#out + 1] = glider
     end
     return out
@@ -442,6 +449,13 @@ end
 
 local getIconPath
 
+local function getDefaultDeviceIconPath(device)
+    if type(device) == "table" and tostring(device.kind or "") == "Mount" then
+        return DEFAULT_MOUNT_ICON_PATH
+    end
+    return nil
+end
+
 local function getDeviceIconPath(device)
     if type(device) ~= "table" then
         return nil
@@ -453,13 +467,7 @@ local function getDeviceIconPath(device)
     if path ~= nil then
         return path
     end
-    for _, ability in ipairs(device.abilities or {}) do
-        path = getIconPath(ability)
-        if path ~= nil then
-            return path
-        end
-    end
-    return nil
+    return getDefaultDeviceIconPath(device)
 end
 
 getIconPath = function(ability, fallbackDevice)
@@ -533,14 +541,14 @@ local function createIcon(parent, id)
     return nil
 end
 
-local function ensureSlot(slotKey, device, ability)
+local function ensureSlot(frame, slotKey, device, ability, group)
     local slot = MountGlider.slots_by_key[slotKey]
     if type(slot) == "table" then
         slot.device = device
         slot.ability = ability
+        slot.group = group
         return slot
     end
-    local frame = MountGlider.frame
     if frame == nil or frame.CreateChildWidget == nil then
         return nil
     end
@@ -603,6 +611,7 @@ local function ensureSlot(slotKey, device, ability)
         timer = timer,
         device = device,
         ability = ability,
+        group = group,
         manual_end_ms = MountGlider.manual_timers[slotKey],
         live_seen = false,
         was_active = false
@@ -727,19 +736,37 @@ local function hideRowLabels()
     end
 end
 
-local function ensurePosition(cfg, width, height)
+local function getPositionKeys(group)
+    if group == "mount" then
+        return "mount_pos_x", "mount_pos_y", "mount_position_initialized"
+    end
+    return "glider_pos_x", "glider_pos_y", "glider_position_initialized"
+end
+
+local function getDefaultPosition(group, width, height)
+    local screenWidth, screenHeight = getScreenSize()
+    local offset = group == "mount" and (DEFAULT_OFFSET_FROM_BOTTOM + 80) or DEFAULT_OFFSET_FROM_BOTTOM
+    return math.max(0, math.floor(((screenWidth - width) / 2) + 0.5)),
+        math.max(0, math.floor((screenHeight - offset - height) + 0.5))
+end
+
+local function ensurePosition(cfg, width, height, group)
     if type(cfg) ~= "table" then
         return 0, 0
     end
-    if cfg.position_initialized ~= true then
-        local screenWidth, screenHeight = getScreenSize()
-        cfg.pos_x = math.max(0, math.floor(((screenWidth - width) / 2) + 0.5))
-        cfg.pos_y = math.max(0, math.floor((screenHeight - DEFAULT_OFFSET_FROM_BOTTOM - height) + 0.5))
-        cfg.position_initialized = true
+    local xKey, yKey, initKey = getPositionKeys(group)
+    if cfg[initKey] ~= true then
+        if cfg.position_initialized == true and tonumber(cfg.pos_x) ~= nil and tonumber(cfg.pos_y) ~= nil then
+            cfg[xKey] = cfg.pos_x
+            cfg[yKey] = group == "mount" and cfg.pos_y or (tonumber(cfg.pos_y) + height + 16)
+        else
+            cfg[xKey], cfg[yKey] = getDefaultPosition(group, width, height)
+        end
+        cfg[initKey] = true
     end
-    cfg.pos_x = clampInt(cfg.pos_x, -5000, 5000, 0)
-    cfg.pos_y = clampInt(cfg.pos_y, -5000, 5000, 0)
-    return cfg.pos_x, cfg.pos_y
+    cfg[xKey] = clampInt(cfg[xKey], -5000, 5000, 0)
+    cfg[yKey] = clampInt(cfg[yKey], -5000, 5000, 0)
+    return cfg[xKey], cfg[yKey]
 end
 
 local function saveSettings()
@@ -761,7 +788,7 @@ local function syncInteractionState(frame)
     setWidgetInteractive(frame, interactive)
 end
 
-local function attachDragHandlers(frame)
+local function attachDragHandlers(frame, group)
     if frame == nil or frame.__nuzi_mount_drag_handlers then
         return
     end
@@ -806,10 +833,11 @@ local function attachDragHandlers(frame)
         local cfg = getConfig()
         local x, y = readWindowOffset(frame)
         if type(cfg) == "table" and x ~= nil and y ~= nil then
-            cfg.pos_x = clampInt(x, -5000, 5000, tonumber(cfg.pos_x) or 0)
-            cfg.pos_y = clampInt(y, -5000, 5000, tonumber(cfg.pos_y) or 0)
-            cfg.position_initialized = true
-            anchorTopLeft(frame, cfg.pos_x, cfg.pos_y)
+            local xKey, yKey, initKey = getPositionKeys(group)
+            cfg[xKey] = clampInt(x, -5000, 5000, tonumber(cfg[xKey]) or 0)
+            cfg[yKey] = clampInt(y, -5000, 5000, tonumber(cfg[yKey]) or 0)
+            cfg[initKey] = true
+            anchorTopLeft(frame, cfg[xKey], cfg[yKey])
             saveSettings()
         end
         clearCursor()
@@ -817,15 +845,16 @@ local function attachDragHandlers(frame)
     end)
 end
 
-local function ensureFrame()
-    if MountGlider.frame ~= nil then
-        return MountGlider.frame
+local function ensureFrame(group)
+    group = group == "mount" and "mount" or "glider"
+    if MountGlider.frames[group] ~= nil then
+        return MountGlider.frames[group]
     end
     if api == nil or api.Interface == nil or api.Interface.CreateEmptyWindow == nil then
         return nil
     end
     local frame = safeCall(function()
-        return api.Interface:CreateEmptyWindow(WINDOW_ID, "UIParent")
+        return api.Interface:CreateEmptyWindow(WINDOW_ID .. widgetKey(group), "UIParent")
     end)
     if frame == nil then
         return nil
@@ -840,15 +869,17 @@ local function ensureFrame()
         frame:SetUILayer("game")
     end)
     setWidgetVisible(frame, false)
-    MountGlider.frame = frame
-    attachDragHandlers(frame)
+    MountGlider.frames[group] = frame
+    if MountGlider.frame == nil then
+        MountGlider.frame = frame
+    end
+    attachDragHandlers(frame, group)
     return frame
 end
 
 local function scanBuffs()
-    for key in pairs(MountGlider.buff_scan) do
-        MountGlider.buff_scan[key] = nil
-    end
+    MountGlider.previous_buff_scan = MountGlider.buff_scan or {}
+    MountGlider.buff_scan = {}
 
     for _, unit in ipairs(BUFF_UNITS) do
         if unitExists(unit) then
@@ -938,19 +969,93 @@ local function startManualTimerForMountManaSpent(cfg, spent, nowMs)
     end
     spent = math.floor(spent + 0.5)
     local selected = getConfiguredDevices(cfg)
+    local bestDelta = nil
+    local matches = {}
     for _, device in ipairs(selected) do
         for _, ability in ipairs(device.abilities or {}) do
-            if tonumber(ability.mount_mana_spent) == spent
+            local cost = tonumber(ability.mount_mana_spent)
+            local delta = cost ~= nil and math.abs(cost - spent) or nil
+            if delta ~= nil
+                and delta <= MOUNT_MANA_MATCH_TOLERANCE
                 and Catalog.IsAbilitySelected(cfg.selected_abilities, device, ability) then
-                local durationMs = tonumber(ability.duration_ms) or 0
-                local endMs = (tonumber(nowMs) or getUiMsec()) + durationMs
-                local slotKey = getSlotKey(device, ability)
-                MountGlider.manual_timers[slotKey] = endMs
-                local slot = MountGlider.slots_by_key[slotKey]
-                if type(slot) == "table" then
-                    slot.manual_end_ms = endMs
+                if bestDelta == nil or delta < bestDelta then
+                    bestDelta = delta
+                    matches = {}
+                end
+                if delta == bestDelta then
+                    matches[#matches + 1] = {
+                        device = device,
+                        ability = ability
+                    }
                 end
             end
+        end
+    end
+    for _, match in ipairs(matches) do
+        local durationMs = tonumber(match.ability.duration_ms) or 0
+        local endMs = (tonumber(nowMs) or getUiMsec()) + durationMs
+        local slotKey = getSlotKey(match.device, match.ability)
+        MountGlider.manual_timers[slotKey] = endMs
+        local slot = MountGlider.slots_by_key[slotKey]
+        if type(slot) == "table" then
+            slot.manual_end_ms = endMs
+        end
+    end
+end
+
+local function selectedMountBuffJustStarted(cfg)
+    local selected = getConfiguredDevices(cfg, "mount")
+    for _, device in ipairs(selected) do
+        for _, ability in ipairs(device.abilities or {}) do
+            if Catalog.IsAbilitySelected(cfg.selected_abilities, device, ability) then
+                for _, id in ipairs(asIdList(ability.buff_ids or ability.buff_id)) do
+                    id = tonumber(id)
+                    local live = id ~= nil and MountGlider.buff_scan[id] or nil
+                    if live ~= nil then
+                        local previous = MountGlider.previous_buff_scan[id]
+                        local liveLeft = tonumber(live.time_left_ms) or 0
+                        local previousLeft = type(previous) == "table" and tonumber(previous.time_left_ms) or nil
+                        if previousLeft == nil or liveLeft > previousLeft + 500 then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function queueMountManaSpent(spent, nowMs)
+    spent = tonumber(spent)
+    if spent == nil or spent <= 0 then
+        return
+    end
+    MountGlider.pending_mount_mana_spends[#MountGlider.pending_mount_mana_spends + 1] = {
+        spent = math.floor(spent + 0.5),
+        ready_ms = (tonumber(nowMs) or getUiMsec()) + MOUNT_MANA_TRIGGER_DELAY_MS
+    }
+end
+
+local function clearPendingMountManaSpends()
+    for key in pairs(MountGlider.pending_mount_mana_spends) do
+        MountGlider.pending_mount_mana_spends[key] = nil
+    end
+end
+
+local function processPendingMountManaSpends(cfg, nowMs)
+    if #MountGlider.pending_mount_mana_spends == 0 then
+        return
+    end
+    if selectedMountBuffJustStarted(cfg) then
+        clearPendingMountManaSpends()
+        return
+    end
+    for index = #MountGlider.pending_mount_mana_spends, 1, -1 do
+        local pending = MountGlider.pending_mount_mana_spends[index]
+        if tonumber(pending.ready_ms) <= nowMs then
+            startManualTimerForMountManaSpent(cfg, pending.spent, nowMs)
+            table.remove(MountGlider.pending_mount_mana_spends, index)
         end
     end
 end
@@ -958,6 +1063,7 @@ end
 local function checkManaSpent(cfg, nowMs)
     if type(cfg) ~= "table" or cfg.use_mana_triggers == false then
         MountGlider.mana_initialized = false
+        clearPendingMountManaSpends()
         return
     end
 
@@ -979,7 +1085,7 @@ local function checkManaSpent(cfg, nowMs)
                 startManualTimerForTrigger(cfg, trigger.trigger, trigger.duration_ms, nowMs)
             end
             if spent > 0 then
-                startManualTimerForMountManaSpent(cfg, spent, nowMs)
+                queueMountManaSpent(spent, nowMs)
             end
         end
         MountGlider.last_mount_id = mountId
@@ -987,6 +1093,7 @@ local function checkManaSpent(cfg, nowMs)
     else
         MountGlider.last_mount_id = nil
         MountGlider.last_mount_mana = 0
+        clearPendingMountManaSpends()
     end
 
     local playerSpent = (tonumber(MountGlider.last_player_mana) or 0) - (tonumber(playerMana) or 0)
@@ -1038,8 +1145,8 @@ local function clearSlotState(slotKey)
     MountGlider.manual_timers[slotKey] = nil
 end
 
-local function makeAbilityEntry(cfg, device, ability, slotKey, nowMs, useDeviceIcon)
-    local slot = ensureSlot(slotKey, device, ability)
+local function makeAbilityEntry(frame, cfg, device, ability, slotKey, nowMs, useDeviceIcon, group)
+    local slot = ensureSlot(frame, slotKey, device, ability, group)
     if slot == nil then
         return nil
     end
@@ -1087,11 +1194,10 @@ local function makeAbilityEntry(cfg, device, ability, slotKey, nowMs, useDeviceI
     }
 end
 
-local function collectClusters(cfg, nowMs)
-    scanBuffs()
+local function collectClusters(frame, cfg, nowMs, group)
     local clusters = {}
     local showReady = type(cfg) ~= "table" or cfg.show_ready_icons ~= false
-    local selected = getConfiguredDevices(cfg)
+    local selected = getConfiguredDevices(cfg, group)
 
     for _, device in ipairs(selected) do
         local selectedAbilities = {}
@@ -1111,7 +1217,7 @@ local function collectClusters(cfg, nowMs)
 
         if #selectedAbilities == 1 then
             local ability = selectedAbilities[1]
-            local entry = makeAbilityEntry(cfg, device, ability, getSlotKey(device, ability), nowMs, true)
+            local entry = makeAbilityEntry(frame, cfg, device, ability, getSlotKey(device, ability), nowMs, true, group)
             if entry ~= nil and (entry.active or showReady) then
                 cluster.device_entry = entry
             end
@@ -1124,7 +1230,7 @@ local function collectClusters(cfg, nowMs)
             }
             cluster.device_entry = {
                 ability = deviceAbility,
-                slot = ensureSlot(tostring(device.key or device.name or "") .. ".__device", device, deviceAbility),
+                slot = ensureSlot(frame, tostring(device.key or device.name or "") .. ".__device", device, deviceAbility, group),
                 active = false,
                 remaining_ms = nil
             }
@@ -1132,7 +1238,7 @@ local function collectClusters(cfg, nowMs)
                 cluster.device_entry.slot.use_device_icon = true
             end
             for _, ability in ipairs(selectedAbilities) do
-                local entry = makeAbilityEntry(cfg, device, ability, getSlotKey(device, ability), nowMs, false)
+                local entry = makeAbilityEntry(frame, cfg, device, ability, getSlotKey(device, ability), nowMs, false, group)
                 if entry ~= nil and (entry.active or showReady) then
                     cluster.children[#cluster.children + 1] = entry
                 end
@@ -1220,19 +1326,19 @@ local function applySlotState(entry, cfg)
     setWidgetVisible(slot.timer, showTimer)
 end
 
-local function renderFrame(frame, cfg)
+local function renderFrame(frame, cfg, group, nowMs)
     if frame == nil or type(cfg) ~= "table" then
         return
     end
 
-    local nowMs = getUiMsec()
-    checkManaSpent(cfg, nowMs)
-    local clusters = collectClusters(cfg, nowMs)
+    local clusters = collectClusters(frame, cfg, nowMs, group)
     if #clusters == 0 then
         setWidgetVisible(frame, false)
         for _, slot in ipairs(MountGlider.slots) do
-            setWidgetVisible(slot.frame, false)
-            setWidgetVisible(slot.overlay, false)
+            if slot.group == group then
+                setWidgetVisible(slot.frame, false)
+                setWidgetVisible(slot.overlay, false)
+            end
         end
         hideRowLabels()
         return
@@ -1244,7 +1350,7 @@ local function renderFrame(frame, cfg)
         frame:SetExtent(width, height)
     end)
     if not frame.__nuzi_mount_dragging then
-        local x, y = ensurePosition(cfg, width, height)
+        local x, y = ensurePosition(cfg, width, height, group)
         anchorTopLeft(frame, x, y)
     end
 
@@ -1267,7 +1373,7 @@ local function renderFrame(frame, cfg)
     end
 
     for _, slot in ipairs(MountGlider.slots) do
-        if not visibleSlots[slot] then
+        if slot.group == group and not visibleSlots[slot] then
             setWidgetVisible(slot.frame, false)
             setWidgetVisible(slot.icon, false)
             setWidgetVisible(slot.timer, false)
@@ -1279,6 +1385,40 @@ local function renderFrame(frame, cfg)
     syncInteractionState(frame)
 end
 
+local function hideFrames()
+    for _, frame in pairs(MountGlider.frames) do
+        if frame ~= nil then
+            setWidgetVisible(frame, false)
+        end
+    end
+end
+
+local function isAnyFrameDragging()
+    for _, frame in pairs(MountGlider.frames) do
+        if frame ~= nil and frame.__nuzi_mount_dragging then
+            return true
+        end
+    end
+    return false
+end
+
+local function syncFrames()
+    for _, frame in pairs(MountGlider.frames) do
+        syncInteractionState(frame)
+    end
+end
+
+local function renderFrames(cfg)
+    local nowMs = getUiMsec()
+    scanBuffs()
+    checkManaSpent(cfg, nowMs)
+    processPendingMountManaSpends(cfg, nowMs)
+    for _, group in ipairs(TRACKER_GROUPS) do
+        local frame = ensureFrame(group)
+        renderFrame(frame, cfg, group, nowMs)
+    end
+end
+
 function MountGlider.Init(settings)
     MountGlider.settings = settings
     MountGlider.enabled = type(settings) == "table" and settings.enabled == true
@@ -1286,13 +1426,11 @@ function MountGlider.Init(settings)
     MountGlider.mana_initialized = false
     local active, cfg = isActive()
     if not active then
-        if MountGlider.frame ~= nil then
-            setWidgetVisible(MountGlider.frame, false)
-        end
+        clearPendingMountManaSpends()
+        hideFrames()
         return
     end
-    local frame = ensureFrame()
-    renderFrame(frame, cfg)
+    renderFrames(cfg)
 end
 
 function MountGlider.ApplySettings(settings)
@@ -1300,19 +1438,17 @@ function MountGlider.ApplySettings(settings)
     local active, cfg = isActive()
     if not active then
         MountGlider.mana_initialized = false
-        if MountGlider.frame ~= nil then
-            setWidgetVisible(MountGlider.frame, false)
-        end
+        clearPendingMountManaSpends()
+        hideFrames()
         return
     end
-    local frame = ensureFrame()
-    renderFrame(frame, cfg)
+    renderFrames(cfg)
 end
 
 function MountGlider.SetEnabled(enabled)
     MountGlider.enabled = enabled and true or false
-    if not MountGlider.enabled and MountGlider.frame ~= nil then
-        setWidgetVisible(MountGlider.frame, false)
+    if not MountGlider.enabled then
+        hideFrames()
     end
 end
 
@@ -1323,37 +1459,35 @@ function MountGlider.OnUpdate(dt, settings)
     local active, cfg = isActive()
     if not active then
         MountGlider.mana_initialized = false
-        if MountGlider.frame ~= nil then
-            setWidgetVisible(MountGlider.frame, false)
-        end
+        clearPendingMountManaSpends()
+        hideFrames()
         return
     end
-    local frame = ensureFrame()
-    if frame == nil then
-        return
-    end
-    syncInteractionState(frame)
+    syncFrames()
 
     MountGlider.accum_ms = (tonumber(MountGlider.accum_ms) or 0) + (tonumber(dt) or 0)
-    if MountGlider.accum_ms < UPDATE_INTERVAL_MS and not frame.__nuzi_mount_dragging then
+    if MountGlider.accum_ms < UPDATE_INTERVAL_MS and not isAnyFrameDragging() then
         return
     end
     MountGlider.accum_ms = 0
-    renderFrame(frame, cfg)
+    renderFrames(cfg)
 end
 
 function MountGlider.Unload()
-    if MountGlider.frame ~= nil then
-        MountGlider.frame.__nuzi_mount_dragging = false
-        setWidgetVisible(MountGlider.frame, false)
-        if api ~= nil and api.Interface ~= nil and api.Interface.Free ~= nil then
-            safeCall(function()
-                api.Interface:Free(MountGlider.frame)
-            end)
+    for _, frame in pairs(MountGlider.frames) do
+        if frame ~= nil then
+            frame.__nuzi_mount_dragging = false
+            setWidgetVisible(frame, false)
+            if api ~= nil and api.Interface ~= nil and api.Interface.Free ~= nil then
+                safeCall(function()
+                    api.Interface:Free(frame)
+                end)
+            end
         end
     end
     clearCursor()
     MountGlider.frame = nil
+    MountGlider.frames = {}
     MountGlider.slots = {}
     MountGlider.slots_by_key = {}
     MountGlider.row_labels = {}

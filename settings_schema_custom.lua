@@ -219,6 +219,12 @@ local function resetMountGliderPosition(settings)
     settings.mount_glider.pos_x = 0
     settings.mount_glider.pos_y = 0
     settings.mount_glider.position_initialized = false
+    settings.mount_glider.mount_pos_x = 0
+    settings.mount_glider.mount_pos_y = 0
+    settings.mount_glider.mount_position_initialized = false
+    settings.mount_glider.glider_pos_x = 0
+    settings.mount_glider.glider_pos_y = 0
+    settings.mount_glider.glider_position_initialized = false
 end
 
 local function resetGearLoadoutsPosition(settings)
@@ -561,19 +567,28 @@ local function formatCooldownSeconds(value)
     return tostring(math.floor((ms / 1000) + 0.5))
 end
 
-local function findLearnedAbility(cfg, deviceKey, abilityKey)
+local function findLearnedDevice(cfg, deviceKey)
     if type(cfg) ~= "table" then
         return nil
     end
     for _, listKey in ipairs({ "learned_mounts", "learned_gliders" }) do
-        for _, device in ipairs(type(cfg[listKey]) == "table" and cfg[listKey] or {}) do
+        for deviceIndex, device in ipairs(type(cfg[listKey]) == "table" and cfg[listKey] or {}) do
             if type(device) == "table" and device.key == deviceKey then
-                for _, ability in ipairs(type(device.abilities) == "table" and device.abilities or {}) do
-                    if type(ability) == "table" and ability.key == abilityKey then
-                        return ability
-                    end
-                end
+                return device, listKey, deviceIndex
             end
+        end
+    end
+    return nil
+end
+
+local function findLearnedAbility(cfg, deviceKey, abilityKey)
+    local device, listKey, deviceIndex = findLearnedDevice(cfg, deviceKey)
+    if type(device) ~= "table" then
+        return nil
+    end
+    for abilityIndex, ability in ipairs(type(device.abilities) == "table" and device.abilities or {}) do
+        if type(ability) == "table" and ability.key == abilityKey then
+            return ability, device, listKey, deviceIndex, abilityIndex
         end
     end
     return nil
@@ -625,6 +640,7 @@ local function refreshAbilityRows(context, group)
         setWidgetShown(row.checkbox, show)
         setWidgetShown(row.cooldown_edit, show)
         setWidgetShown(row.cooldown_button, show)
+        setWidgetShown(row.remove_button, show)
         if show then
             setCheckboxText(context, row.checkbox, tostring(ability.label or ability.key or "Ability"))
             row.device_key = device.key
@@ -693,6 +709,54 @@ local function refreshLearnedMountMenu(context)
     controls.mount_glider_mount_label_count = #mountLabels
 end
 
+local function removeLearnedAbility(context, row)
+    local cfg = getMountGliderSettings(context)
+    local controls = getControls(context)
+    if type(cfg) ~= "table" or type(row) ~= "table" then
+        return
+    end
+    local ability, device, listKey, deviceIndex, abilityIndex = findLearnedAbility(cfg, row.device_key, row.ability_key)
+    if type(ability) ~= "table" or type(device) ~= "table" then
+        setReadableText(context, controls.mount_glider_learning_status, "Select a learned ability first.")
+        return
+    end
+
+    table.remove(device.abilities, abilityIndex)
+    if type(cfg.selected_abilities[device.key]) == "table" then
+        cfg.selected_abilities[device.key][ability.key] = nil
+    end
+
+    local removedDevice = false
+    if #device.abilities == 0 then
+        table.remove(cfg[listKey], deviceIndex)
+        cfg.selected_abilities[device.key] = nil
+        if cfg.selected_mount == device.key then
+            cfg.selected_mount = ""
+        end
+        if cfg.selected_glider == device.key then
+            cfg.selected_glider = ""
+        end
+        removedDevice = true
+    else
+        local labels = {}
+        for _, item in ipairs(device.abilities) do
+            labels[#labels + 1] = tostring(item.label or item.key)
+        end
+        device.summary = table.concat(labels, ", ")
+    end
+
+    refreshLearnedMountMenu(context)
+    refreshLearnedGliderMenu(context)
+    refreshMountGliderSelector(context)
+    saveApplyMountGlider(context)
+
+    local text = "Removed " .. tostring(ability.label or ability.key or "ability") .. "."
+    if removedDevice then
+        text = text .. " Removed the learned device because it has no skills left."
+    end
+    setReadableText(context, controls.mount_glider_learning_status, text)
+end
+
 local function removeLearnedDevice(context, group)
     local cfg = getMountGliderSettings(context)
     local controls = getControls(context)
@@ -747,7 +811,8 @@ local function addMountSkill(context)
     local controls = getControls(context)
     local ok, message = MountGliderLearning.AddMountSkill(
         getMountGliderSettings(context),
-        getEditText(controls.mount_glider_mount_skill_name)
+        getEditText(controls.mount_glider_mount_skill_name),
+        getEditText(controls.mount_glider_mount_skill_mana)
     )
     setReadableText(context, controls.mount_glider_learning_status, message)
     return ok
@@ -765,7 +830,7 @@ local function finishMountGliderLearning(context)
     if type(cfg) ~= "table" then
         return
     end
-    local ok, message, key = MountGliderLearning.Finish(cfg)
+    local ok, message, key, abilityKeys = MountGliderLearning.Finish(cfg)
     local controls = getControls(context)
     setReadableText(context, controls.mount_glider_learning_status, message)
     if not ok then
@@ -776,6 +841,11 @@ local function finishMountGliderLearning(context)
     local device = MountGliderCatalog.GetDevice(cfg.selected_glider, cfg)
     if type(device) == "table" then
         MountGliderCatalog.EnsureAbilitySelection(cfg.selected_abilities, device)
+        if type(cfg.selected_abilities[device.key]) == "table" then
+            for _, abilityKey in ipairs(type(abilityKeys) == "table" and abilityKeys or {}) do
+                cfg.selected_abilities[device.key][abilityKey] = true
+            end
+        end
     end
     refreshLearnedGliderMenu(context)
     refreshMountGliderSelector(context)
@@ -787,7 +857,7 @@ local function finishMountLearning(context)
     if type(cfg) ~= "table" then
         return
     end
-    local ok, message, key = MountGliderLearning.FinishMount(cfg)
+    local ok, message, key, abilityKeys = MountGliderLearning.FinishMount(cfg)
     local controls = getControls(context)
     setReadableText(context, controls.mount_glider_learning_status, message)
     if not ok then
@@ -798,6 +868,11 @@ local function finishMountLearning(context)
     local device = MountGliderCatalog.GetDevice(cfg.selected_mount, cfg)
     if type(device) == "table" then
         MountGliderCatalog.EnsureAbilitySelection(cfg.selected_abilities, device)
+        if type(cfg.selected_abilities[device.key]) == "table" then
+            for _, abilityKey in ipairs(type(abilityKeys) == "table" and abilityKeys or {}) do
+                cfg.selected_abilities[device.key][abilityKey] = true
+            end
+        end
     end
     refreshLearnedMountMenu(context)
     refreshMountGliderSelector(context)
@@ -1012,12 +1087,15 @@ function Custom.BuildMountGliderSelector(context, parent, y)
         local label = row.checkbox ~= nil and row.checkbox.__polar_label_widget or nil
         if label ~= nil and label.SetExtent ~= nil then
             pcall(function()
-                label:SetExtent(220, 18)
+                label:SetExtent(210, 18)
             end)
         end
         row.cooldown_edit = CreateEdit(prefix .. "Cooldown" .. tostring(index), parent, "", 270, rowY - 4, 48, 22)
         row.cooldown_button = createRepairButton(parent, prefix .. "CooldownSave" .. tostring(index), "Save CD", 326, rowY - 6, 84, function()
             saveAbilityCooldown(context, row)
+        end)
+        row.remove_button = createRepairButton(parent, prefix .. "Remove" .. tostring(index), "Remove", 416, rowY - 6, 82, function()
+            removeLearnedAbility(context, row)
         end)
         return row
     end
@@ -1034,19 +1112,19 @@ function Custom.BuildMountGliderSelector(context, parent, y)
     CreateLabel("polarUiMountGliderMountCooldownLabel", parent, "Cooldown", 270, y, 13, 90)
     y = y + 24
     controls.mount_glider_mount_ability_rows = {}
-    for index = 1, 6 do
+    for index = 1, 8 do
         controls.mount_glider_mount_ability_rows[index] = createAbilityRow("polarUiMountGliderMountAbility", index, y)
         y = y + 24
     end
 
     y = y + 8
-    createRepairButton(parent, "polarUiMountGliderMountAdd", "Add Mount", 0, y, 116, function()
+    createRepairButton(parent, "polarUiMountGliderMountAdd", "Add/Update Mount", 0, y, 150, function()
         startMountAdding(context)
     end)
-    createRepairButton(parent, "polarUiMountGliderMountLearnFinish", "End Mount", 130, y, 116, function()
+    createRepairButton(parent, "polarUiMountGliderMountLearnFinish", "End Mount", 164, y, 116, function()
         finishMountLearning(context)
     end)
-    createRepairButton(parent, "polarUiMountGliderMountRemove", "Remove Learned", 260, y, 150, function()
+    createRepairButton(parent, "polarUiMountGliderMountRemove", "Remove Learned", 294, y, 150, function()
         removeLearnedDevice(context, "mount")
     end)
     y = y + 34
@@ -1056,7 +1134,10 @@ function Custom.BuildMountGliderSelector(context, parent, y)
     y = y + 30
     CreateLabel("polarUiMountGliderMountSkillNameLabel", parent, "No-buff skill name", 0, y, 13, 120)
     controls.mount_glider_mount_skill_name = CreateEdit("polarUiMountGliderMountSkillName", parent, "", 120, y - 4, 180, 22)
-    createRepairButton(parent, "polarUiMountGliderMountLearnStart", "Add No-Buff Skill", 314, y - 6, 136, function()
+    y = y + 28
+    CreateLabel("polarUiMountGliderMountSkillManaLabel", parent, "Mana cost", 0, y, 13, 120)
+    controls.mount_glider_mount_skill_mana = CreateEdit("polarUiMountGliderMountSkillMana", parent, "", 120, y - 4, 80, 22)
+    createRepairButton(parent, "polarUiMountGliderMountLearnStart", "Add No-Buff Skill", 214, y - 6, 136, function()
         addMountSkill(context)
     end)
     y = y + 30
@@ -1074,19 +1155,19 @@ function Custom.BuildMountGliderSelector(context, parent, y)
     CreateLabel("polarUiMountGliderGliderCooldownLabel", parent, "Cooldown", 270, y, 13, 90)
     y = y + 24
     controls.mount_glider_glider_ability_rows = {}
-    for index = 1, 6 do
+    for index = 1, 8 do
         controls.mount_glider_glider_ability_rows[index] = createAbilityRow("polarUiMountGliderGliderAbility", index, y)
         y = y + 24
     end
 
     y = y + 8
-    createRepairButton(parent, "polarUiMountGliderLearnStart", "Add Glider/Magithopter", 0, y, 180, function()
+    createRepairButton(parent, "polarUiMountGliderLearnStart", "Add/Update Glider", 0, y, 160, function()
         startMountGliderLearning(context)
     end)
-    createRepairButton(parent, "polarUiMountGliderLearnFinish", "End Adding", 194, y, 116, function()
+    createRepairButton(parent, "polarUiMountGliderLearnFinish", "End Adding", 174, y, 116, function()
         finishMountGliderLearning(context)
     end)
-    createRepairButton(parent, "polarUiMountGliderRemove", "Remove Learned", 324, y, 150, function()
+    createRepairButton(parent, "polarUiMountGliderRemove", "Remove Learned", 304, y, 150, function()
         removeLearnedDevice(context, "glider")
     end)
     y = y + 32

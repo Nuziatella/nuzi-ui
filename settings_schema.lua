@@ -791,13 +791,13 @@ SettingsSchema.PAGES = {
                     hint(
                         "mount_glider_move_hint",
                         "polarUiMountGliderMoveHint",
-                        "Drag in game to move the strip. If Shift movement is enabled in General, hold Shift while dragging.",
+                        "Drag each in-game strip to move it. If Shift movement is enabled in General, hold Shift while dragging.",
                         { width = 520, depends_on = { control = "mount_glider_enabled", checked = true } }
                     ),
                     checkbox(
                         "mount_glider_lock_position",
                         "polarUiMountGliderLockPosition",
-                        "Lock timer strip position",
+                        "Lock timer strip positions",
                         { depends_on = { control = "mount_glider_enabled", checked = true } }
                     ),
                     checkbox(
@@ -827,7 +827,7 @@ SettingsSchema.PAGES = {
                     hint(
                         "mount_glider_icon_layout_hint",
                         "polarUiMountGliderIconLayoutHint",
-                        "The in-game strip shows selected mounts, gliders, and magithopters as icons with tracked skill icons grouped below them.",
+                        "Mounts and gliders/magithopters use separate in-game strips with tracked skill icons grouped below each device.",
                         { width = 520, depends_on = { control = "mount_glider_enabled", checked = true } }
                     )
                 }
@@ -843,7 +843,7 @@ SettingsSchema.PAGES = {
                         "Learned devices save to nuzi-ui/.data/mount_glider_devices.txt if you want to share them.",
                         { width = 520 }
                     ),
-                    custom("mount_glider_devices", { estimate_height = 610 })
+                    custom("mount_glider_devices", { estimate_height = 740 })
                 }
             },
             {

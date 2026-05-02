@@ -320,6 +320,10 @@ local function copyAbility(raw)
     if type(raw) ~= "table" or tostring(raw.key or "") == "" then
         return nil
     end
+    local keyId = tonumber(string.match(tostring(raw.key or ""), "_(%d+)$"))
+    if keyId ~= nil then
+        keyId = math.floor(keyId + 0.5)
+    end
     local out = {
         key = tostring(raw.key),
         label = tostring(raw.label or raw.key),
@@ -359,6 +363,15 @@ local function copyAbility(raw)
     if type(out.buff_ids) == "table" and #out.buff_ids > 1 and out.exact_spell_id then
         out.buff_ids = { out.buff_ids[1] }
     end
+    if out.learned == true
+        and out.icon_type == "buff"
+        and keyId ~= nil
+        and (out.spell_id ~= nil or type(out.buff_ids) == "table") then
+        out.spell_id = keyId
+        out.buff_ids = { keyId }
+        out.icon_id = keyId
+        out.exact_spell_id = true
+    end
     return out
 end
 
@@ -385,6 +398,10 @@ local function copyLearnedDevice(raw)
         end
     elseif tonumber(raw.item_id) ~= nil then
         device.item_ids[1] = math.floor(tonumber(raw.item_id) + 0.5)
+    end
+    local keyItemId = tonumber(string.match(tostring(raw.key or ""), "^learned_glider_(%d+)$"))
+    if keyItemId ~= nil then
+        device.item_ids = { math.floor(keyItemId + 0.5) }
     end
     for _, abilityDef in ipairs(raw.abilities or {}) do
         local copied = copyAbility(abilityDef)

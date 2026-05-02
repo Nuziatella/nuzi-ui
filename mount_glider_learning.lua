@@ -3,7 +3,7 @@ local api = require("api")
 local Learning = {}
 
 local BUFF_UNITS = { "playerpet", "playerpet1", "playerpet2", "slave", "player" }
-local MOUNT_UNITS = { "playerpet", "playerpet1", "playerpet2", "slave" }
+local MOUNT_UNITS = { "playerpet1", "playerpet", "slave", "playerpet2" }
 local SCAN_INTERVAL_MS = 250
 local MAX_CAPTURE_MS = 90000
 local DEFAULT_GLIDER_COOLDOWN_MS = 60000
@@ -86,6 +86,19 @@ local function getDisplayName(value)
     return ""
 end
 
+local function getIconPath(value)
+    if type(value) ~= "table" then
+        return ""
+    end
+    for _, key in ipairs({ "iconPath", "icon_path", "icon", "path", "texturePath", "texture" }) do
+        local text = trim(value[key])
+        if text ~= "" then
+            return text
+        end
+    end
+    return ""
+end
+
 local function getEquippedBackpack()
     local slot = type(EQUIP_SLOT) == "table" and EQUIP_SLOT.BACKPACK or nil
     if slot == nil or api == nil or api.Equipment == nil or api.Equipment.GetEquippedItemTooltipInfo == nil then
@@ -109,6 +122,45 @@ local function getEquippedBackpack()
         slot_type = tostring(info.slotType or ""),
         special_skill_names = extractSpecialSkillNames(info)
     }
+end
+
+local function getBagCapacity()
+    if api == nil or api.Bag == nil or api.Bag.Capacity == nil then
+        return 0
+    end
+    return tonumber(safeCall(function()
+        return api.Bag:Capacity()
+    end)) or 0
+end
+
+local function getBagItem(index)
+    if api == nil or api.Bag == nil or api.Bag.GetBagItemInfo == nil then
+        return nil
+    end
+    local info = safeCall(function()
+        return api.Bag:GetBagItemInfo(1, index)
+    end)
+    return type(info) == "table" and info or nil
+end
+
+local function findBagItemByName(name)
+    name = string.lower(trim(name))
+    if name == "" then
+        return nil
+    end
+    local capacity = getBagCapacity()
+    for index = 1, capacity do
+        local info = getBagItem(index)
+        if type(info) == "table" and string.lower(getDisplayName(info)) == name then
+            local itemType = tonumber(info.itemType or info.item_type)
+            return {
+                item_type = itemType ~= nil and math.floor(itemType + 0.5) or nil,
+                path = getIconPath(info),
+                name = getDisplayName(info)
+            }
+        end
+    end
+    return nil
 end
 
 local function validUnitId(value)
@@ -186,7 +238,7 @@ local function getSummonedMount()
                 unit = unit,
                 unit_id = id,
                 name = name,
-                path = type(info) == "table" and tostring(info.path or info.iconPath or "") or "",
+                path = getIconPath(info),
                 mana = getUnitMana(unit)
             }
         end
@@ -296,6 +348,16 @@ local function summarizeAbilities(abilities)
     return "Captured: " .. table.concat(labels, ", ")
 end
 
+local function getAbilityKeys(abilities)
+    local keys = {}
+    for _, ability in ipairs(abilities or {}) do
+        if type(ability) == "table" and tostring(ability.key or "") ~= "" then
+            keys[#keys + 1] = ability.key
+        end
+    end
+    return keys
+end
+
 local function getKind(itemName)
     local lower = string.lower(tostring(itemName or ""))
     if string.find(lower, "magithopter", 1, true) ~= nil then
@@ -331,6 +393,9 @@ local function isDeviceAura(entry)
     entry.name = name ~= "" and name or ("Ability " .. formatId(id))
     return true
 end
+
+local abilitiesMatch
+local mergeAbility
 
 local function updateStatus(text)
     if session ~= nil then
@@ -374,21 +439,31 @@ local function captureAbility(entry)
     return true
 end
 
-local function captureManaAbility(spent)
+local function mergeSessionAbility(ability)
+    if session == nil or type(ability) ~= "table" then
+        return false
+    end
+    for _, existing in ipairs(session.abilities or {}) do
+        if abilitiesMatch(existing, ability) then
+            mergeAbility(existing, ability)
+            return true
+        end
+    end
+    session.abilities[#session.abilities + 1] = ability
+    return true
+end
+
+local function captureManaAbility(spent, labelOverride)
     spent = tonumber(spent)
     if spent == nil or session == nil or spent < MIN_MOUNT_MANA_SPEND then
         return false
     end
     spent = math.floor(spent + 0.5)
-    if session.captured_mana[spent] == true then
-        return false
-    end
-    local label = trim(session.pending_ability_name)
+    local label = trim(labelOverride or session.pending_ability_name)
     if label == "" then
         return false
     end
-    session.captured_mana[spent] = true
-    session.abilities[#session.abilities + 1] = {
+    local ability = {
         key = makeAbilityKey(label, spent),
         label = label,
         mount_mana_spent = spent,
@@ -397,9 +472,75 @@ local function captureManaAbility(spent)
         icon_path = tostring(session.mount_icon_path or ""),
         learned = true
     }
+    session.captured_mana[spent] = true
+    mergeSessionAbility(ability)
     session.pending_ability_name = ""
     updateStatus(summarizeAbilities(session.abilities) .. ". Enter another name and click Add No-Buff Skill, or click End Mount.")
     return true
+end
+
+abilitiesMatch = function(left, right)
+    if type(left) ~= "table" or type(right) ~= "table" then
+        return false
+    end
+    if tostring(left.key or "") ~= "" and left.key == right.key then
+        return true
+    end
+    if tonumber(left.spell_id) ~= nil and tonumber(left.spell_id) == tonumber(right.spell_id) then
+        return true
+    end
+    if tonumber(left.mount_mana_spent) ~= nil
+        and tonumber(left.mount_mana_spent) == tonumber(right.mount_mana_spent) then
+        return true
+    end
+    if tonumber(left.spell_id) == nil
+        and tonumber(right.spell_id) == nil
+        and trim(left.label) ~= ""
+        and string.lower(trim(left.label)) == string.lower(trim(right.label)) then
+        return true
+    end
+    return false
+end
+
+mergeAbility = function(existing, incoming)
+    local durationMs = tonumber(existing.duration_ms)
+    for key, value in pairs(incoming) do
+        existing[key] = value
+    end
+    if durationMs ~= nil then
+        existing.duration_ms = durationMs
+    end
+end
+
+local function mergeDevice(existing, incoming)
+    existing.name = incoming.name
+    existing.kind = incoming.kind
+    existing.summary = incoming.summary
+    existing.learned = true
+    if type(existing.icon_path) ~= "string" or existing.icon_path == "" then
+        existing.icon_path = incoming.icon_path
+    end
+    if type(existing.item_ids) ~= "table" or #existing.item_ids == 0 then
+        existing.item_ids = incoming.item_ids
+    end
+    if type(existing.abilities) ~= "table" then
+        existing.abilities = {}
+    end
+    for _, incomingAbility in ipairs(incoming.abilities or {}) do
+        local matched = nil
+        for _, existingAbility in ipairs(existing.abilities) do
+            if abilitiesMatch(existingAbility, incomingAbility) then
+                matched = existingAbility
+                break
+            end
+        end
+        if matched ~= nil then
+            mergeAbility(matched, incomingAbility)
+        else
+            existing.abilities[#existing.abilities + 1] = incomingAbility
+        end
+    end
+    existing.summary = summarizeAbilities(existing.abilities):gsub("^Captured:%s*", "")
 end
 
 local function saveLearnedDevice(cfg, device, listKey)
@@ -411,12 +552,42 @@ local function saveLearnedDevice(cfg, device, listKey)
         cfg[listKey] = {}
     end
     for index, existing in ipairs(cfg[listKey]) do
-        if type(existing) == "table" and existing.key == device.key then
-            cfg[listKey][index] = device
+        local sameKey = type(existing) == "table" and existing.key == device.key
+        local sameMountName = type(existing) == "table"
+            and listKey == "learned_mounts"
+            and tostring(existing.name or "") ~= ""
+            and existing.name == device.name
+        if sameKey or sameMountName then
+            device.key = existing.key
+            mergeDevice(existing, device)
             return
         end
     end
     cfg[listKey][#cfg[listKey] + 1] = device
+end
+
+local function copyValue(value)
+    if type(value) ~= "table" then
+        return value
+    end
+    local out = {}
+    for key, item in pairs(value) do
+        out[key] = copyValue(item)
+    end
+    return out
+end
+
+local function findExistingMount(cfg, name)
+    name = string.lower(trim(name))
+    if type(cfg) ~= "table" or name == "" then
+        return nil
+    end
+    for _, mount in ipairs(type(cfg.learned_mounts) == "table" and cfg.learned_mounts or {}) do
+        if type(mount) == "table" and string.lower(trim(mount.name)) == name then
+            return mount
+        end
+    end
+    return nil
 end
 
 function Learning.Start(settings)
@@ -458,10 +629,31 @@ function Learning.StartMount(settings)
         session = nil
         return false, "Summon your mount first."
     end
+    local bagItem = findBagItemByName(mount.name)
+    local iconPath = bagItem ~= nil and tostring(bagItem.path or "") or ""
+    if iconPath == "" then
+        iconPath = tostring(mount.path or "")
+    end
+    local existing = findExistingMount(settings, mount.name)
+    local existingAbilities = {}
+    if type(existing) == "table" then
+        for _, ability in ipairs(existing.abilities or {}) do
+            existingAbilities[#existingAbilities + 1] = copyValue(ability)
+        end
+        if iconPath == "" then
+            iconPath = tostring(existing.icon_path or "")
+        end
+    end
     if session ~= nil
         and session.active == true
         and session.mode == "mount"
         and tostring(session.mount_unit_id or "") == tostring(mount.unit_id or "") then
+        if iconPath ~= "" then
+            session.mount_icon_path = iconPath
+        end
+        if bagItem ~= nil and tonumber(bagItem.item_type) ~= nil then
+            session.mount_item_type = math.floor(tonumber(bagItem.item_type) + 0.5)
+        end
         updateStatus("Learning " .. session.item_name .. ". Click Add Buff Skills or enter a skill name for Add No-Buff Skill.")
         return true, session.status
     end
@@ -472,7 +664,8 @@ function Learning.StartMount(settings)
         item_name = mount.name,
         mount_unit = mount.unit,
         mount_unit_id = mount.unit_id,
-        mount_icon_path = mount.path,
+        mount_icon_path = iconPath,
+        mount_item_type = bagItem ~= nil and bagItem.item_type or nil,
         pending_ability_name = "",
         mount_buff_scan = false,
         last_mount_mana = mount.mana,
@@ -481,7 +674,7 @@ function Learning.StartMount(settings)
         baseline = makeBaseline(),
         captured = {},
         captured_mana = {},
-        abilities = {},
+        abilities = existingAbilities,
         elapsed_ms = 0,
         scan_ms = 0,
         revision = 0,
@@ -514,7 +707,7 @@ function Learning.AddMountBuffSkills(settings)
     return true, session.status
 end
 
-function Learning.AddMountSkill(settings, abilityName)
+function Learning.AddMountSkill(settings, abilityName, manaCost)
     abilityName = trim(abilityName)
     if abilityName == "" then
         return false, "Enter the mount skill name first."
@@ -531,6 +724,13 @@ function Learning.AddMountSkill(settings, abilityName)
         or session.mode ~= "mount"
         or tostring(session.mount_unit_id or "") ~= tostring(mount.unit_id or "") then
         return false, "Click Add Mount for the summoned mount first."
+    end
+
+    local manualCost = tonumber(manaCost)
+    if manualCost ~= nil and manualCost >= MIN_MOUNT_MANA_SPEND then
+        session.mount_buff_scan = false
+        captureManaAbility(manualCost, abilityName)
+        return true, session.status
     end
 
     session.pending_ability_name = abilityName
@@ -563,8 +763,9 @@ function Learning.Finish(cfg)
     session.active = false
     local message = "Added " .. session.item_name .. " with " .. tostring(#session.abilities) .. " tracked "
         .. (#session.abilities == 1 and "ability." or "abilities.")
+    local abilityKeys = getAbilityKeys(session.abilities)
     session = nil
-    return true, message, key
+    return true, message, device.key, abilityKeys
 end
 
 function Learning.FinishMount(cfg)
@@ -583,14 +784,16 @@ function Learning.FinishMount(cfg)
         summary = summarizeAbilities(session.abilities):gsub("^Captured:%s*", ""),
         learned = true,
         icon_path = session.mount_icon_path,
+        item_ids = tonumber(session.mount_item_type) ~= nil and { session.mount_item_type } or nil,
         abilities = session.abilities
     }
     saveLearnedDevice(cfg, device, "learned_mounts")
     session.active = false
     local message = "Added " .. session.item_name .. " with " .. tostring(#session.abilities) .. " tracked "
         .. (#session.abilities == 1 and "ability." or "abilities.")
+    local abilityKeys = getAbilityKeys(session.abilities)
     session = nil
-    return true, message, key
+    return true, message, device.key, abilityKeys
 end
 
 function Learning.Cancel()
