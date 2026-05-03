@@ -58,6 +58,43 @@ local function SetCachedTextColor(widget, rgba)
     widget.__polar_text_color_key = colorKey
 end
 
+local function LerpColor(a, b, t)
+    if t < 0 then
+        t = 0
+    elseif t > 1 then
+        t = 1
+    end
+    return {
+        math.floor(((tonumber(a[1]) or 0) + (((tonumber(b[1]) or 0) - (tonumber(a[1]) or 0)) * t)) + 0.5),
+        math.floor(((tonumber(a[2]) or 0) + (((tonumber(b[2]) or 0) - (tonumber(a[2]) or 0)) * t)) + 0.5),
+        math.floor(((tonumber(a[3]) or 0) + (((tonumber(b[3]) or 0) - (tonumber(a[3]) or 0)) * t)) + 0.5),
+        255
+    }
+end
+
+local function GetGearscoreColor(style, gearscore)
+    if type(style) ~= "table" or style.target_gearscore_gradient ~= true then
+        return type(style) == "table" and style.target_gearscore_color or nil
+    end
+    local value = tonumber(gearscore)
+    if value == nil then
+        return style.target_gearscore_color
+    end
+    local low = { 60, 220, 80, 255 }
+    local mid = { 255, 220, 60, 255 }
+    local high = { 255, 64, 48, 255 }
+    if value <= 4500 then
+        return low
+    elseif value >= 8000 then
+        return high
+    end
+    local t = (value - 4500) / 3500
+    if t <= 0.5 then
+        return LerpColor(low, mid, t * 2)
+    end
+    return LerpColor(mid, high, (t - 0.5) * 2)
+end
+
 local function IsFieldEnabled(style, key)
     if type(style) ~= "table" then
         return true
@@ -119,8 +156,14 @@ function TargetExtras.Ensure(ctx, settings, baseStyle)
     local mdefColor = targetStyle.target_mdef_color
     local guildX = tonumber(targetStyle.target_guild_offset_x) or 10
     local guildY = tonumber(targetStyle.target_guild_offset_y) or -18
-    local classRowY = showGuildField and (guildY - 18) or guildY
-    local gearRowY = classRowY - 18
+    local classX = tonumber(targetStyle.target_class_offset_x) or 10
+    local classY = tonumber(targetStyle.target_class_offset_y) or -36
+    local pdefX = tonumber(targetStyle.target_pdef_offset_x) or 110
+    local pdefY = tonumber(targetStyle.target_pdef_offset_y) or -36
+    local mdefX = tonumber(targetStyle.target_mdef_offset_x) or 190
+    local mdefY = tonumber(targetStyle.target_mdef_offset_y) or -36
+    local gearscoreX = tonumber(targetStyle.target_gearscore_offset_x) or 10
+    local gearscoreY = tonumber(targetStyle.target_gearscore_offset_y) or -54
 
     if UI.target.wnd == nil then
         return
@@ -144,7 +187,7 @@ function TargetExtras.Ensure(ctx, settings, baseStyle)
         UI.target.class_name = UI.target.wnd:CreateChildWidget("label", "polarUiTargetClass", 0, true)
         table.insert(UI.created, UI.target.class_name)
         ctx.SetNotClickable(UI.target.class_name)
-        UI.target.class_name:AddAnchor("TOPLEFT", UI.target.wnd, 10, -18)
+        UI.target.class_name:AddAnchor("TOPLEFT", UI.target.wnd, 10, -36)
         UI.target.class_name.style:SetAlign(ALIGN.LEFT)
         UI.target.class_name.style:SetShadow(overlayShadow)
         ctx.ApplyTextColor(UI.target.class_name, FONT_COLOR.WHITE)
@@ -158,7 +201,7 @@ function TargetExtras.Ensure(ctx, settings, baseStyle)
         UI.target.gearscore = UI.target.wnd:CreateChildWidget("label", "polarUiTargetGearscore", 0, true)
         table.insert(UI.created, UI.target.gearscore)
         ctx.SetNotClickable(UI.target.gearscore)
-        UI.target.gearscore:AddAnchor("TOPLEFT", UI.target.wnd, 10, -36)
+        UI.target.gearscore:AddAnchor("TOPLEFT", UI.target.wnd, 10, -54)
         UI.target.gearscore.style:SetAlign(ALIGN.LEFT)
         UI.target.gearscore.style:SetShadow(overlayShadow)
         ctx.ApplyTextColor(UI.target.gearscore, FONT_COLOR.WHITE)
@@ -230,42 +273,29 @@ function TargetExtras.Ensure(ctx, settings, baseStyle)
                 ResetAnchors(UI.target.guild)
                 UI.target.guild:AddAnchor("TOPLEFT", UI.target.wnd, guildX, guildY)
             end
-
-            local previousRowWidget = nil
-
             if UI.target.class_name ~= nil then
                 ResetAnchors(UI.target.class_name)
                 if showClassField then
-                    UI.target.class_name:AddAnchor("TOPLEFT", UI.target.wnd, guildX, classRowY)
-                    previousRowWidget = UI.target.class_name
+                    UI.target.class_name:AddAnchor("TOPLEFT", UI.target.wnd, classX, classY)
                 end
             end
             if UI.target.pdef ~= nil then
                 ResetAnchors(UI.target.pdef)
                 if showPdefField then
-                    if previousRowWidget ~= nil then
-                        UI.target.pdef:AddAnchor("TOPLEFT", previousRowWidget, "TOPRIGHT", 10, 0)
-                    else
-                        UI.target.pdef:AddAnchor("TOPLEFT", UI.target.wnd, guildX, classRowY)
-                    end
-                    previousRowWidget = UI.target.pdef
+                    UI.target.pdef:AddAnchor("TOPLEFT", UI.target.wnd, pdefX, pdefY)
                 end
             end
             if UI.target.mdef ~= nil then
                 ResetAnchors(UI.target.mdef)
                 if showMdefField then
-                    if previousRowWidget ~= nil then
-                        UI.target.mdef:AddAnchor("TOPLEFT", previousRowWidget, "TOPRIGHT", 10, 0)
-                    else
-                        UI.target.mdef:AddAnchor("TOPLEFT", UI.target.wnd, guildX, classRowY)
-                    end
+                    UI.target.mdef:AddAnchor("TOPLEFT", UI.target.wnd, mdefX, mdefY)
                 end
             end
 
             if UI.target.gearscore ~= nil then
                 ResetAnchors(UI.target.gearscore)
                 if showGearscoreField then
-                    UI.target.gearscore:AddAnchor("TOPLEFT", UI.target.wnd, guildX, gearRowY)
+                    UI.target.gearscore:AddAnchor("TOPLEFT", UI.target.wnd, gearscoreX, gearscoreY)
                 end
             end
 
@@ -395,6 +425,7 @@ function TargetExtras.Update(ctx, settings)
         gearscoreText = gs .. "gs"
     end
     SetCachedText(UI.target.gearscore, gearscoreText)
+    SetCachedTextColor(UI.target.gearscore, GetGearscoreColor(targetStyle, gs))
     SetCachedVisible(UI.target.gearscore, showGearscoreField and gearscoreText ~= "")
 
     SetCachedText(UI.target.class_name, className)

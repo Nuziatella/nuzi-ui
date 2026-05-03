@@ -51,7 +51,9 @@ local DEFAULT_POSITIONS = {
 
 local READY_TIMER_COLOR = { 144, 255, 172, 255 }
 local MISSING_TIMER_COLOR = { 255, 196, 120, 255 }
+local COOLDOWN_TIMER_COLOR = { 255, 72, 72, 255 }
 local DEFAULT_BAR_FILL_COLOR = { 207, 74, 22, 255 }
+local COOLDOWN_BAR_FILL_COLOR = { 220, 42, 42, 255 }
 local DEFAULT_BAR_BG_COLOR = { 18, 18, 18, 220 }
 
 local function safeCall(fn, ...)
@@ -176,6 +178,17 @@ local function normalizeDisplayStyle(rawStyle)
         return "bars"
     end
     return "icons"
+end
+
+local function normalizeBarOrder(rawOrder)
+    if type(SettingsCommon) == "table" and type(SettingsCommon.NormalizeCooldownBarOrder) == "function" then
+        return SettingsCommon.NormalizeCooldownBarOrder(rawOrder)
+    end
+    local order = string.lower(tostring(rawOrder or "uptime_first"))
+    if order == "cooldown_first" or order == "cooldown" then
+        return "cooldown_first"
+    end
+    return "uptime_first"
 end
 
 local function normalizeTrackedEntry(raw)
@@ -374,6 +387,19 @@ local function setLabelColor(label, rgba)
     end
 end
 
+local function setLabelAlign(label, align)
+    if label == nil or label.style == nil or align == nil then
+        return
+    end
+    local sig = tostring(align)
+    if label.__nuzi_align_sig ~= sig then
+        label.__nuzi_align_sig = sig
+        safeCall(function()
+            label.style:SetAlign(align)
+        end)
+    end
+end
+
 local function setLabelFontSize(label, value)
     if label == nil or label.style == nil then
         return
@@ -540,8 +566,11 @@ local function createIconSlot(id, parent)
     local stackLabel = createLabel(icon, id .. "Stack", 12, (ALIGN ~= nil and ALIGN.RIGHT) or nil)
     local nameLabel = createLabel(parent, id .. "Name", 12, (ALIGN ~= nil and ALIGN.CENTER) or nil)
     local barTimerLabel = createLabel(parent, id .. "BarTimer", 12, (ALIGN ~= nil and ALIGN.RIGHT) or nil)
+    local cooldownTimerLabel = createLabel(parent, id .. "CooldownTimer", 12, (ALIGN ~= nil and ALIGN.CENTER) or nil)
     local barBg = createColorDrawable(parent, DEFAULT_BAR_BG_COLOR, "background")
     local barFill = createColorDrawable(parent, DEFAULT_BAR_FILL_COLOR, "artwork")
+    local cooldownBarBg = createColorDrawable(parent, DEFAULT_BAR_BG_COLOR, "background")
+    local cooldownBarFill = createColorDrawable(parent, COOLDOWN_BAR_FILL_COLOR, "artwork")
 
     if timerLabel ~= nil then
         safeCall(function()
@@ -561,7 +590,10 @@ local function createIconSlot(id, parent)
         name = nameLabel,
         bar_timer = barTimerLabel,
         bar_bg = barBg,
-        bar_fill = barFill
+        bar_fill = barFill,
+        cooldown_timer = cooldownTimerLabel,
+        cooldown_bar_bg = cooldownBarBg,
+        cooldown_bar_fill = cooldownBarFill
     }
 end
 
@@ -1028,6 +1060,45 @@ local function getUnitCooldownState(unitKey)
     return CooldownTracker.cooldown_state[unitKey]
 end
 
+local function getLiveExpireAtMs(live, nowMs)
+    if type(live) ~= "table" then
+        return nil
+    end
+    local timeLeft = tonumber(live.time_left_ms)
+    if timeLeft == nil then
+        return nil
+    end
+    return nowMs + timeLeft
+end
+
+local function liveWasRefreshed(cooldown, live, nowMs)
+    if type(cooldown) ~= "table" or type(live) ~= "table" then
+        return false
+    end
+    local nextExpire = getLiveExpireAtMs(live, nowMs)
+    local prevExpire = tonumber(cooldown.live_expire_at_ms)
+    if nextExpire ~= nil and prevExpire ~= nil and nextExpire > prevExpire + 500 then
+        return true
+    end
+
+    local nextTimeLeft = tonumber(live.time_left_ms)
+    local prevTimeLeft = tonumber(cooldown.live_time_left_ms)
+    return nextTimeLeft ~= nil and prevTimeLeft ~= nil and nextTimeLeft > prevTimeLeft + 500
+end
+
+local function updateCooldownLiveSnapshot(cooldown, live, nowMs)
+    if type(cooldown) ~= "table" or type(live) ~= "table" then
+        return
+    end
+    cooldown.live_expire_at_ms = getLiveExpireAtMs(live, nowMs)
+    cooldown.live_time_left_ms = tonumber(live.time_left_ms)
+    cooldown.live_duration_ms = tonumber(live.duration_ms)
+    cooldown.kind = live.kind or cooldown.kind
+    cooldown.name = live.name or cooldown.name
+    cooldown.icon_path = live.icon_path or cooldown.icon_path
+    cooldown.stacks = live.stacks
+end
+
 local function startTrackedCooldown(unitKey, trackedEntry, live, nowMs)
     local cooldownMs = tonumber(trackedEntry.cooldown_ms)
     if cooldownMs == nil or cooldownMs <= 0 then
@@ -1036,7 +1107,15 @@ local function startTrackedCooldown(unitKey, trackedEntry, live, nowMs)
     local state = getUnitCooldownState(unitKey)
     local existing = state[trackedEntry.key]
     if type(existing) == "table" and existing.live_seen == true then
-        return existing
+        local existingReady = existing.ready == true
+            or (tonumber(existing.end_at_ms) ~= nil and nowMs >= tonumber(existing.end_at_ms))
+        if existingReady and liveWasRefreshed(existing, live, nowMs) then
+            existing = nil
+        else
+            updateCooldownLiveSnapshot(existing, live, nowMs)
+            existing.live_seen = true
+            return existing
+        end
     end
     local cooldown = {
         live_seen = true,
@@ -1049,6 +1128,7 @@ local function startTrackedCooldown(unitKey, trackedEntry, live, nowMs)
         icon_path = type(live) == "table" and live.icon_path or nil,
         stacks = type(live) == "table" and live.stacks or nil
     }
+    updateCooldownLiveSnapshot(cooldown, live, nowMs)
     state[trackedEntry.key] = cooldown
     return cooldown
 end
@@ -1064,22 +1144,55 @@ local function getTrackedCooldownEntry(unitKey, trackedEntry, live, nowMs)
     if type(cooldown) ~= "table" then
         return nil
     end
+    local meta = getTooltipInfo(trackedEntry.id)
+    local durationMs = tonumber(cooldown.duration_ms) or tonumber(trackedEntry.cooldown_ms)
+    local name = cooldown.name or (type(meta) == "table" and tostring(meta.name or "") ~= "" and tostring(meta.name or "") or ("Buff #" .. tostring(trackedEntry.id)))
+    local iconPath = cooldown.icon_path or (type(meta) == "table" and tostring(meta.path or "") or nil)
+    if cooldown.ready == true then
+        return {
+            buff_id = trackedEntry.id,
+            track_kind = trackedEntry.kind,
+            kind = cooldown.kind or trackedEntry.kind,
+            name = name,
+            icon_path = iconPath,
+            time_left_ms = nil,
+            duration_ms = nil,
+            cooldown_ready = true,
+            cooldown_duration_ms = durationMs,
+            stacks = live ~= nil and live.stacks or cooldown.stacks,
+            state = "ready"
+        }
+    end
     local remaining = tonumber(cooldown.end_at_ms) ~= nil and (tonumber(cooldown.end_at_ms) - nowMs) or nil
     if remaining == nil or remaining <= 0 then
-        state[trackedEntry.key] = nil
-        return nil
+        cooldown.ready = true
+        cooldown.end_at_ms = nil
+        return {
+            buff_id = trackedEntry.id,
+            track_kind = trackedEntry.kind,
+            kind = cooldown.kind or trackedEntry.kind,
+            name = name,
+            icon_path = iconPath,
+            time_left_ms = nil,
+            duration_ms = nil,
+            cooldown_ready = true,
+            cooldown_duration_ms = durationMs,
+            stacks = live ~= nil and live.stacks or cooldown.stacks,
+            state = "ready"
+        }
     end
-    local meta = getTooltipInfo(trackedEntry.id)
     return {
         buff_id = trackedEntry.id,
         track_kind = trackedEntry.kind,
         kind = cooldown.kind or trackedEntry.kind,
-        name = cooldown.name or (type(meta) == "table" and tostring(meta.name or "") ~= "" and tostring(meta.name or "") or ("Buff #" .. tostring(trackedEntry.id))),
-        icon_path = cooldown.icon_path or (type(meta) == "table" and tostring(meta.path or "") or nil),
+        name = name,
+        icon_path = iconPath,
         time_left_ms = remaining,
-        duration_ms = tonumber(cooldown.duration_ms) or tonumber(trackedEntry.cooldown_ms),
+        duration_ms = durationMs,
+        cooldown_time_left_ms = remaining,
+        cooldown_duration_ms = durationMs,
         stacks = live ~= nil and live.stacks or cooldown.stacks,
-        state = live ~= nil and "active" or "cooldown"
+        state = "cooldown"
     }
 end
 
@@ -1127,14 +1240,24 @@ local function collectUnitEntries(unitKey, unitCfg, nowMs)
     for _, trackedEntry in ipairs(trackedEntries) do
         local live = resolveLiveEntry(liveFound, trackedEntry)
         local cooldownEntry = getTrackedCooldownEntry(unitKey, trackedEntry, live, nowMs)
-        local entry = cooldownEntry or (type(activeByKey) == "table" and activeByKey[trackedEntry.key] or nil)
+        local entry = type(activeByKey) == "table" and activeByKey[trackedEntry.key] or nil
         if entry ~= nil then
             if displayMode ~= "missing" then
                 entry.track_kind = trackedEntry.kind
                 if entry.state == nil then
                     entry.state = "active"
                 end
+                if cooldownEntry ~= nil then
+                    entry.cooldown_time_left_ms = cooldownEntry.cooldown_time_left_ms
+                    entry.cooldown_duration_ms = cooldownEntry.cooldown_duration_ms
+                    entry.cooldown_ready = cooldownEntry.cooldown_ready
+                end
                 entries[#entries + 1] = entry
+            end
+        elseif cooldownEntry ~= nil then
+            if displayMode ~= "missing" then
+                cooldownEntry.track_kind = trackedEntry.kind
+                entries[#entries + 1] = cooldownEntry
             end
         elseif displayMode ~= "active" then
             entries[#entries + 1] = buildMissingEntry(unitKey, trackedEntry)
@@ -1212,6 +1335,61 @@ local function getBarProgress(entry)
         return 1
     end
     local duration = rememberEntryDuration(entry)
+    if duration == nil or duration <= 0 then
+        return 1
+    end
+    local progress = timeLeft / duration
+    if progress < 0 then
+        return 0
+    elseif progress > 1 then
+        return 1
+    end
+    return progress
+end
+
+local function getCooldownTimeLeftMs(entry)
+    if type(entry) ~= "table" then
+        return nil
+    end
+    local value = tonumber(entry.cooldown_time_left_ms)
+    if value == nil and entry.state == "cooldown" then
+        value = tonumber(entry.time_left_ms)
+    end
+    return value
+end
+
+local function isCooldownReady(entry)
+    return type(entry) == "table" and entry.cooldown_ready == true
+end
+
+local function hasCooldownDisplay(entry)
+    return isCooldownReady(entry) or getCooldownTimeLeftMs(entry) ~= nil
+end
+
+local function shouldShowSeparateCooldown(entry)
+    return type(entry) == "table" and entry.state == "active" and hasCooldownDisplay(entry)
+end
+
+local function getCooldownDurationMs(entry)
+    if type(entry) ~= "table" then
+        return nil
+    end
+    local value = tonumber(entry.cooldown_duration_ms)
+    if value == nil and entry.state == "cooldown" then
+        value = tonumber(entry.duration_ms)
+    end
+    return value
+end
+
+local function getCooldownBarProgress(entry)
+    if isCooldownReady(entry) then
+        return 1
+    end
+    local timeLeft = getCooldownTimeLeftMs(entry)
+    if timeLeft == nil then
+        return nil
+    end
+    local duration = getCooldownDurationMs(entry)
     if duration == nil or duration <= 0 then
         return 1
     end
@@ -1462,6 +1640,9 @@ local function hideSlot(slot)
     showWidget(slot.bar_timer, false)
     showWidget(slot.bar_bg, false)
     showWidget(slot.bar_fill, false)
+    showWidget(slot.cooldown_timer, false)
+    showWidget(slot.cooldown_bar_bg, false)
+    showWidget(slot.cooldown_bar_fill, false)
 end
 
 local function updateWindow(unitKey, unitCfg, entries)
@@ -1484,9 +1665,26 @@ local function updateWindow(unitKey, unitCfg, entries)
     local barHeight = clampInt(unitCfg.bar_height, 4, 32, 14)
     local barFillColor = type(unitCfg.bar_fill_color) == "table" and unitCfg.bar_fill_color or DEFAULT_BAR_FILL_COLOR
     local barBgColor = type(unitCfg.bar_bg_color) == "table" and unitCfg.bar_bg_color or DEFAULT_BAR_BG_COLOR
+    local cooldownBarOrder = normalizeBarOrder(unitCfg.cooldown_bar_order)
+    local barGap = 2
+    local hasAnyCooldownLine = false
+    local hasAnySeparateCooldown = false
+    for index = 1, count do
+        local entry = entries[index]
+        if hasCooldownDisplay(entry) then
+            if shouldShowSeparateCooldown(entry) then
+                hasAnySeparateCooldown = true
+            end
+            if shouldShowSeparateCooldown(entry) or (type(entry) == "table" and entry.state == "cooldown") then
+                hasAnyCooldownLine = true
+            end
+        end
+    end
     local labelHeight = showLabel and (labelFontSize + 8) or 0
+    local cooldownTextHeight = (displayStyle ~= "bars" and showTimer and hasAnyCooldownLine) and (timerFontSize + 6) or 0
     local rowLabelHeight = showLabel and (labelFontSize + 4) or 0
-    local rowHeight = math.max(iconSize, rowLabelHeight + barHeight)
+    local barStackHeight = hasAnySeparateCooldown and ((barHeight * 2) + barGap) or barHeight
+    local rowHeight = math.max(iconSize, rowLabelHeight + barStackHeight)
     local windowWidth
     local windowHeight
     if displayStyle == "bars" then
@@ -1494,7 +1692,7 @@ local function updateWindow(unitKey, unitCfg, entries)
         windowHeight = count > 0 and ((count * rowHeight) + ((count - 1) * spacing)) or rowHeight
     else
         windowWidth = math.max(iconSize, (count > 0 and ((count * iconSize) + ((count - 1) * spacing)) or iconSize))
-        windowHeight = iconSize + labelHeight
+        windowHeight = iconSize + cooldownTextHeight + labelHeight
     end
 
     safeCall(function()
@@ -1545,6 +1743,15 @@ local function updateWindow(unitKey, unitCfg, entries)
                 local iconY = math.max(0, math.floor((rowHeight - iconSize) / 2))
                 local textX = iconSize + spacing
                 local barY = rowY + rowLabelHeight
+                local cooldownTimeLeft = getCooldownTimeLeftMs(entry)
+                local cooldownReady = isCooldownReady(entry)
+                local hasSeparateCooldown = shouldShowSeparateCooldown(entry)
+                local mainBarY = barY
+                local cooldownBarY = barY + barHeight + barGap
+                if hasSeparateCooldown and cooldownBarOrder == "cooldown_first" then
+                    mainBarY = barY + barHeight + barGap
+                    cooldownBarY = barY
+                end
                 safeCall(function()
                     if slot.icon.SetExtent ~= nil then
                         slot.icon:SetExtent(iconSize, iconSize)
@@ -1569,7 +1776,7 @@ local function updateWindow(unitKey, unitCfg, entries)
                 end
 
                 setDrawableColor(slot.bar_bg, barBgColor)
-                setDrawableRect(slot.bar_bg, state.window, textX, barY, barWidth, barHeight)
+                setDrawableRect(slot.bar_bg, state.window, textX, mainBarY, barWidth, barHeight)
                 showWidget(slot.bar_bg, true)
 
                 local progress = getBarProgress(entry)
@@ -1582,9 +1789,11 @@ local function updateWindow(unitKey, unitCfg, entries)
                     fillColor = READY_TIMER_COLOR
                 elseif entry.state == "missing" then
                     fillColor = MISSING_TIMER_COLOR
+                elseif entry.state == "cooldown" then
+                    fillColor = COOLDOWN_BAR_FILL_COLOR
                 end
                 setDrawableColor(slot.bar_fill, fillColor)
-                setDrawableRect(slot.bar_fill, state.window, textX, barY, math.max(1, fillWidth), barHeight)
+                setDrawableRect(slot.bar_fill, state.window, textX, mainBarY, math.max(1, fillWidth), barHeight)
                 showWidget(slot.bar_fill, progress > 0)
 
                 showWidget(slot.timer, false)
@@ -1595,8 +1804,9 @@ local function updateWindow(unitKey, unitCfg, entries)
                         if slot.bar_timer.RemoveAllAnchors ~= nil then
                             slot.bar_timer:RemoveAllAnchors()
                         end
-                        slot.bar_timer:AddAnchor("TOPLEFT", state.window, textX + 3, barY - 1)
+                        slot.bar_timer:AddAnchor("TOPLEFT", state.window, textX + 3, mainBarY - 1)
                     end)
+                    setLabelAlign(slot.bar_timer, (ALIGN ~= nil and ALIGN.RIGHT) or nil)
                     setLabelFontSize(slot.bar_timer, math.max(8, math.min(timerFontSize, barHeight + 6)))
                     if entry.state == "ready" then
                         setLabelColor(slot.bar_timer, READY_TIMER_COLOR)
@@ -1606,14 +1816,55 @@ local function updateWindow(unitKey, unitCfg, entries)
                         setLabelColor(slot.bar_timer, MISSING_TIMER_COLOR)
                         setLabelText(slot.bar_timer, showTimer and "Missing" or "")
                         showWidget(slot.bar_timer, showTimer)
+                    elseif entry.state == "cooldown" then
+                        setLabelColor(slot.bar_timer, COOLDOWN_TIMER_COLOR)
+                        setLabelText(slot.bar_timer, showTimer and formatTimeLeftMs(entry.time_left_ms) or "")
+                        showWidget(slot.bar_timer, showTimer and entry.time_left_ms ~= nil)
                     else
                         setLabelColor(slot.bar_timer, timerColor)
                         setLabelText(slot.bar_timer, showTimer and formatTimeLeftMs(entry.time_left_ms) or "")
                         showWidget(slot.bar_timer, showTimer and entry.time_left_ms ~= nil)
                     end
                 end
+
+                if hasSeparateCooldown then
+                    setDrawableColor(slot.cooldown_bar_bg, barBgColor)
+                    setDrawableRect(slot.cooldown_bar_bg, state.window, textX, cooldownBarY, barWidth, barHeight)
+                    showWidget(slot.cooldown_bar_bg, true)
+
+                    local cooldownProgress = getCooldownBarProgress(entry) or 0
+                    local cooldownFillWidth = math.floor((barWidth * cooldownProgress) + 0.5)
+                    if cooldownProgress > 0 and cooldownFillWidth < 1 then
+                        cooldownFillWidth = 1
+                    end
+                    setDrawableColor(slot.cooldown_bar_fill, cooldownReady and READY_TIMER_COLOR or COOLDOWN_BAR_FILL_COLOR)
+                    setDrawableRect(slot.cooldown_bar_fill, state.window, textX, cooldownBarY, math.max(1, cooldownFillWidth), barHeight)
+                    showWidget(slot.cooldown_bar_fill, cooldownProgress > 0)
+
+                    if slot.cooldown_timer ~= nil then
+                        safeCall(function()
+                            slot.cooldown_timer:SetExtent(math.max(20, barWidth - 6), barHeight)
+                            if slot.cooldown_timer.RemoveAllAnchors ~= nil then
+                                slot.cooldown_timer:RemoveAllAnchors()
+                            end
+                            slot.cooldown_timer:AddAnchor("TOPLEFT", state.window, textX + 3, cooldownBarY - 1)
+                        end)
+                        setLabelAlign(slot.cooldown_timer, (ALIGN ~= nil and ALIGN.RIGHT) or nil)
+                        setLabelFontSize(slot.cooldown_timer, math.max(8, math.min(timerFontSize, barHeight + 6)))
+                        setLabelColor(slot.cooldown_timer, cooldownReady and READY_TIMER_COLOR or COOLDOWN_TIMER_COLOR)
+                        setLabelText(slot.cooldown_timer, showTimer and (cooldownReady and "Ready" or formatTimeLeftMs(cooldownTimeLeft)) or "")
+                        showWidget(slot.cooldown_timer, showTimer and (cooldownReady or cooldownTimeLeft ~= nil))
+                    end
+                else
+                    showWidget(slot.cooldown_timer, false)
+                    showWidget(slot.cooldown_bar_bg, false)
+                    showWidget(slot.cooldown_bar_fill, false)
+                end
             else
                 local x = (index - 1) * (iconSize + spacing)
+                local cooldownTimeLeft = getCooldownTimeLeftMs(entry)
+                local cooldownReady = isCooldownReady(entry)
+                local hasCooldownText = showTimer and (shouldShowSeparateCooldown(entry) or entry.state == "cooldown")
                 safeCall(function()
                     if slot.icon.SetExtent ~= nil then
                         slot.icon:SetExtent(iconSize, iconSize)
@@ -1629,13 +1880,15 @@ local function updateWindow(unitKey, unitCfg, entries)
                         if slot.name.RemoveAllAnchors ~= nil then
                             slot.name:RemoveAllAnchors()
                         end
-                        slot.name:AddAnchor("TOPLEFT", state.window, x - 10, iconSize + 2)
+                        slot.name:AddAnchor("TOPLEFT", state.window, x - 10, iconSize + cooldownTextHeight + 2)
                     end)
                 end
 
                 showWidget(slot.bar_timer, false)
                 showWidget(slot.bar_bg, false)
                 showWidget(slot.bar_fill, false)
+                showWidget(slot.cooldown_bar_bg, false)
+                showWidget(slot.cooldown_bar_fill, false)
 
                 if slot.timer ~= nil then
                     setLabelFontSize(slot.timer, timerFontSize)
@@ -1647,10 +1900,32 @@ local function updateWindow(unitKey, unitCfg, entries)
                         setLabelColor(slot.timer, MISSING_TIMER_COLOR)
                         setLabelText(slot.timer, showTimer and "Missing" or "")
                         showWidget(slot.timer, showTimer)
+                    elseif entry.state == "cooldown" then
+                        setLabelText(slot.timer, "")
+                        showWidget(slot.timer, false)
                     else
                         setLabelColor(slot.timer, timerColor)
                         setLabelText(slot.timer, showTimer and formatTimeLeftMs(entry.time_left_ms) or "")
                         showWidget(slot.timer, showTimer and entry.time_left_ms ~= nil)
+                    end
+                end
+
+                if slot.cooldown_timer ~= nil then
+                    if hasCooldownText then
+                        safeCall(function()
+                            slot.cooldown_timer:SetExtent(iconSize + 20, cooldownTextHeight)
+                            if slot.cooldown_timer.RemoveAllAnchors ~= nil then
+                                slot.cooldown_timer:RemoveAllAnchors()
+                            end
+                            slot.cooldown_timer:AddAnchor("TOPLEFT", state.window, x - 10, iconSize + 1)
+                        end)
+                        setLabelAlign(slot.cooldown_timer, (ALIGN ~= nil and ALIGN.CENTER) or nil)
+                        setLabelFontSize(slot.cooldown_timer, math.max(8, timerFontSize))
+                        setLabelColor(slot.cooldown_timer, cooldownReady and READY_TIMER_COLOR or COOLDOWN_TIMER_COLOR)
+                        setLabelText(slot.cooldown_timer, cooldownReady and "Ready" or formatTimeLeftMs(cooldownTimeLeft))
+                        showWidget(slot.cooldown_timer, true)
+                    else
+                        showWidget(slot.cooldown_timer, false)
                     end
                 end
 

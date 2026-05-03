@@ -68,6 +68,8 @@ You can:
 - track buffs or debuffs on `player`, `target`, `watchtarget`, and `target of target`
 - add tracked effects by ID, by search, or by scanning a unit
 - enter a cooldown length for tracked effects so the timer can count down after the buff appears
+- edit cooldown seconds directly from the tracked effects list
+- show buff uptime and configured cooldown as separate timers, with switchable bar order
 - show active effects, missing effects, or both
 - switch each tracker between compact icons and icon-plus-bar rows
 - attach non-player trackers near their nameplate and move them with offsets
@@ -80,11 +82,12 @@ The Mount/Glider page adds a dedicated movement-ability tracker for the mounts, 
 
 You can:
 
-- choose one mount and one glider or magithopter from dropdown menus
-- choose which abilities from those devices should show on the bar
+- use the dropdown menus to edit learned mounts, gliders, or magithopters
+- choose which checked abilities from those devices should show on the bar
 - show ready icons dimmed and active timers bright
 - track visible mount and glider buffs from both the player and mount units
 - show the ability cooldown countdown after a tracked movement buff appears
+- add no-buff glider or magithopter cooldowns that start when the glider name buff appears
 - detect shared hidden glider timers from mount/glider mana use
 - notify in chat when a tracked movement timer is ready
 - resize icons, spacing, icons per row, and timer text

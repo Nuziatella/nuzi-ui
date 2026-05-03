@@ -491,30 +491,35 @@ local function migrateMountGliderSelection(context)
     if type(cfg) ~= "table" then
         return
     end
+    if type(cfg.selected_abilities) ~= "table" then
+        cfg.selected_abilities = {}
+    end
     local hasMount = cfg.selected_mount ~= ""
     local hasGlider = cfg.selected_glider ~= ""
-    if hasMount and MountGliderCatalog.GetDevice(cfg.selected_mount, cfg) == nil then
+    local mount = hasMount and MountGliderCatalog.GetDevice(cfg.selected_mount, cfg) or nil
+    local glider = hasGlider and MountGliderCatalog.GetDevice(cfg.selected_glider, cfg) or nil
+    if hasMount and mount == nil then
         cfg.selected_abilities[cfg.selected_mount] = nil
         cfg.selected_mount = ""
         hasMount = false
+    elseif mount ~= nil then
+        MountGliderCatalog.EnsureAbilitySelection(cfg.selected_abilities, mount)
     end
-    if hasGlider and MountGliderCatalog.GetDevice(cfg.selected_glider, cfg) == nil then
+    if hasGlider and glider == nil then
         cfg.selected_abilities[cfg.selected_glider] = nil
         cfg.selected_glider = ""
         hasGlider = false
-    end
-    if hasMount and hasGlider then
-        return
+    elseif glider ~= nil then
+        MountGliderCatalog.EnsureAbilitySelection(cfg.selected_abilities, glider)
     end
     for _, device in ipairs(MountGliderCatalog.GetDevices(cfg)) do
         if cfg.selected_devices[device.key] == true then
+            MountGliderCatalog.EnsureAbilitySelection(cfg.selected_abilities, device)
             if device.kind == "Mount" and not hasMount then
                 cfg.selected_mount = device.key
-                MountGliderCatalog.EnsureAbilitySelection(cfg.selected_abilities, device)
                 hasMount = true
             elseif device.kind ~= "Mount" and not hasGlider then
                 cfg.selected_glider = device.key
-                MountGliderCatalog.EnsureAbilitySelection(cfg.selected_abilities, device)
                 hasGlider = true
             end
         end
@@ -552,10 +557,23 @@ end
 
 local function setMountGliderStatus(context)
     local controls = getControls(context)
+    local cfg = getMountGliderSettings(context)
     local mount = getSelectedDevice(context, "mount")
     local glider = getSelectedDevice(context, "glider")
-    local text = "Mount: " .. tostring(type(mount) == "table" and mount.name or "None")
-        .. "  Glider: " .. tostring(type(glider) == "table" and glider.name or "None")
+    local mountCount = 0
+    local gliderCount = 0
+    for _, device in ipairs(MountGliderCatalog.GetDevices(cfg)) do
+        if MountGliderCatalog.HasSelectedAbility(cfg.selected_abilities, device) then
+            if device.kind == "Mount" then
+                mountCount = mountCount + 1
+            else
+                gliderCount = gliderCount + 1
+            end
+        end
+    end
+    local text = "Editing mount: " .. tostring(type(mount) == "table" and mount.name or "None")
+        .. "  Editing glider: " .. tostring(type(glider) == "table" and glider.name or "None")
+        .. "  Tracked: " .. tostring(mountCount) .. " mounts, " .. tostring(gliderCount) .. " gliders/magithopters"
     setReadableText(context, controls.mount_glider_devices_status, text)
 end
 
@@ -796,6 +814,17 @@ end
 local function startMountGliderLearning(context)
     local ok, message = MountGliderLearning.Start(getMountGliderSettings(context))
     local controls = getControls(context)
+    setReadableText(context, controls.mount_glider_learning_status, message)
+    return ok
+end
+
+local function addGliderSkill(context)
+    local controls = getControls(context)
+    local ok, message = MountGliderLearning.AddGliderSkill(
+        getMountGliderSettings(context),
+        getEditText(controls.mount_glider_glider_skill_name),
+        getEditText(controls.mount_glider_glider_skill_cooldown)
+    )
     setReadableText(context, controls.mount_glider_learning_status, message)
     return ok
 end
@@ -1171,6 +1200,15 @@ function Custom.BuildMountGliderSelector(context, parent, y)
         removeLearnedDevice(context, "glider")
     end)
     y = y + 32
+
+    CreateLabel("polarUiMountGliderGliderSkillNameLabel", parent, "No-buff skill name", 0, y, 13, 120)
+    controls.mount_glider_glider_skill_name = CreateEdit("polarUiMountGliderGliderSkillName", parent, "", 120, y - 4, 170, 22)
+    CreateLabel("polarUiMountGliderGliderSkillCooldownLabel", parent, "CD sec", 302, y, 13, 52)
+    controls.mount_glider_glider_skill_cooldown = CreateEdit("polarUiMountGliderGliderSkillCooldown", parent, "", 352, y - 4, 48, 22)
+    createRepairButton(parent, "polarUiMountGliderGliderSkillAdd", "Add No-Buff", 410, y - 6, 108, function()
+        addGliderSkill(context)
+    end)
+    y = y + 34
 
     controls.mount_glider_learning_status = CreateHintLabel("polarUiMountGliderLearningStatus", parent, "", 0, y, 520)
     setReadableText(context, controls.mount_glider_learning_status, MountGliderLearning.GetStatus())

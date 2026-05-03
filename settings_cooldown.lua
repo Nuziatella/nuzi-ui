@@ -33,6 +33,16 @@ local DISPLAY_STYLE_KEYS = {
     "bars"
 }
 
+SettingsCooldown.BAR_ORDER_LABELS = {
+    "Uptime above cooldown",
+    "Cooldown above uptime"
+}
+
+local BAR_ORDER_KEYS = {
+    "uptime_first",
+    "cooldown_first"
+}
+
 SettingsCooldown.TRACK_KIND_LABELS = {
     "Any",
     "Buff",
@@ -73,6 +83,15 @@ end
 function SettingsCooldown.GetDisplayStyleIndex(style)
     style = SettingsCommon.NormalizeCooldownDisplayStyle(style)
     return SettingsCommon.GetIndexFromKey(DISPLAY_STYLE_KEYS, style)
+end
+
+function SettingsCooldown.GetBarOrderFromIndex(idx)
+    return SettingsCommon.GetKeyFromIndex(BAR_ORDER_KEYS, idx)
+end
+
+function SettingsCooldown.GetBarOrderIndex(order)
+    order = SettingsCommon.NormalizeCooldownBarOrder(order)
+    return SettingsCommon.GetIndexFromKey(BAR_ORDER_KEYS, order)
 end
 
 function SettingsCooldown.GetTrackKindFromIndex(idx)
@@ -320,19 +339,39 @@ function SettingsCooldown.RefreshTrackedRows(state, unitCfg)
                     if type(meta) == "table" and tostring(meta.name or "") ~= "" then
                         text = string.format("%s %s %s", prefix, tostring(entry.id), tostring(meta.name or ""))
                     end
-                    if tonumber(entry.cooldown_ms) ~= nil and tonumber(entry.cooldown_ms) > 0 then
-                        text = string.format("%s  cd %ds", text, math.floor((tonumber(entry.cooldown_ms) / 1000) + 0.5))
-                    end
                     row.label:SetText(text)
                 else
                     row.label:SetText("")
                 end
             end
+            if row.cooldown_edit ~= nil and row.cooldown_edit.SetText ~= nil then
+                if show then
+                    local cooldownSeconds = ""
+                    if tonumber(entry.cooldown_ms) ~= nil and tonumber(entry.cooldown_ms) > 0 then
+                        cooldownSeconds = tostring(math.floor((tonumber(entry.cooldown_ms) / 1000) + 0.5))
+                    end
+                    row.cooldown_edit:SetText(cooldownSeconds)
+                else
+                    row.cooldown_edit:SetText("")
+                end
+            end
             if row.label ~= nil and row.label.Show ~= nil then
                 row.label:Show(show)
             end
+            if row.cooldown_edit ~= nil and row.cooldown_edit.Show ~= nil then
+                row.cooldown_edit:Show(show)
+            end
+            if row.cooldown_save ~= nil and row.cooldown_save.Show ~= nil then
+                row.cooldown_save:Show(show)
+            end
             if row.remove ~= nil and row.remove.Show ~= nil then
                 row.remove:Show(show)
+            end
+            if row.cooldown_edit ~= nil then
+                row.cooldown_edit.__polar_buff_index = idx
+            end
+            if row.cooldown_save ~= nil then
+                row.cooldown_save.__polar_buff_index = idx
             end
             if row.remove ~= nil then
                 row.remove.__polar_buff_index = idx
@@ -402,6 +441,61 @@ function SettingsCooldown.AddTrackedBuff(state, rawId, rawKind, rawCooldownSecon
         entry.cooldown_ms = normalized.cooldown_ms
     end
     table.insert(unitCfg.tracked_buffs, entry)
+    if type(state.on_apply) == "function" then
+        pcall(function()
+            state.on_apply()
+        end)
+    end
+    return true
+end
+
+function SettingsCooldown.SetTrackedBuffCooldown(state, rawIndex, rawCooldownSeconds)
+    if type(state) ~= "table" or state.settings == nil then
+        return false
+    end
+
+    local idx = tonumber(rawIndex)
+    if idx == nil then
+        return false
+    end
+    idx = math.floor(idx + 0.5)
+
+    SettingsCooldown.EnsureTables(state.settings)
+    local unitKey = tostring(state.cooldown_unit_key or "player")
+    local tracker = state.settings.cooldown_tracker
+    local unitCfg = type(tracker) == "table" and type(tracker.units) == "table" and tracker.units[unitKey] or nil
+    if type(unitCfg) ~= "table" or type(unitCfg.tracked_buffs) ~= "table" then
+        return false
+    end
+    if idx < 1 or idx > #unitCfg.tracked_buffs then
+        return false
+    end
+
+    local existing = SettingsCommon.NormalizeCooldownTrackedEntry(unitCfg.tracked_buffs[idx])
+    if existing == nil then
+        return false
+    end
+
+    local seconds = tonumber(rawCooldownSeconds) or 0
+    if seconds < 0 then
+        seconds = 0
+    end
+    seconds = math.floor(seconds + 0.5)
+
+    local entry = {
+        id = existing.id,
+        kind = existing.kind
+    }
+    if seconds > 0 then
+        entry.cooldown_ms = seconds * 1000
+    end
+    unitCfg.tracked_buffs[idx] = entry
+
+    if type(state.on_save) == "function" then
+        pcall(function()
+            state.on_save()
+        end)
+    end
     if type(state.on_apply) == "function" then
         pcall(function()
             state.on_apply()

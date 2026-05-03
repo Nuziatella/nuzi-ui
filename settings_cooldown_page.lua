@@ -116,6 +116,10 @@ function CooldownPage.Build(state, page, gap)
     createSlider(controls, "ct_bar_height", "polarUiCooldownBarHeight", page, "Bar height", 15, y, 4, 32, 1)
     y = y + 24
 
+    CreateLabel("polarUiCooldownBarOrderLabel", page, "Bar order", 15, y, 15)
+    controls.ct_bar_order = CreateComboBox(page, SettingsCooldown.BAR_ORDER_LABELS, 110, y - 4, 220, 24)
+    y = y + 34
+
     CreateLabel("polarUiCooldownBarFillColorTitle", page, "Bar fill color (RGB)", 15, y, 15)
     y = createColorSliders(controls, "ct_bar_fill", "polarUiCooldownBarFill", page, y + 22)
 
@@ -206,18 +210,28 @@ function CooldownPage.Build(state, page, gap)
     controls.ct_page_label = CreateLabel("polarUiCooldownPageLabel", page, "1 / 1", 215, y + 6, 14)
     y = y + 34
 
+    CreateLabel("polarUiCooldownTrackedEffectHeader", page, "Effect", 15, y, 13, 360)
+    CreateLabel("polarUiCooldownTrackedCooldownHeader", page, "CD sec", 405, y, 13, 60)
+    y = y + 22
+
     controls.ct_buff_rows = {}
     for i = 1, SettingsCooldown.BUFFS_PER_PAGE do
         local rowY = y + ((i - 1) * 26)
         local label = CreateLabel("polarUiCooldownBuffRowLabel" .. tostring(i), page, "", 15, rowY + 6, 14)
         if label ~= nil then
-            label:SetExtent(520, 18)
+            label:SetExtent(380, 18)
         end
-        local remove = CreateButton("polarUiCooldownBuffRowRemove" .. tostring(i), page, "Remove", 545, rowY)
+        local cooldownEdit = CreateEdit("polarUiCooldownBuffRowCooldown" .. tostring(i), page, "", 405, rowY - 1, 55, 22)
+        setDigit(cooldownEdit)
+        local cooldownSave = CreateButton("polarUiCooldownBuffRowCooldownSave" .. tostring(i), page, "Save", 466, rowY)
+        if cooldownSave ~= nil then
+            cooldownSave:SetExtent(58, 22)
+        end
+        local remove = CreateButton("polarUiCooldownBuffRowRemove" .. tostring(i), page, "Remove", 535, rowY)
         if remove ~= nil then
             remove:SetExtent(90, 22)
         end
-        controls.ct_buff_rows[i] = { label = label, remove = remove }
+        controls.ct_buff_rows[i] = { label = label, cooldown_edit = cooldownEdit, cooldown_save = cooldownSave, remove = remove }
     end
     y = y + (SettingsCooldown.BUFFS_PER_PAGE * 26) + 20
 

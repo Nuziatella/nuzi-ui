@@ -12,7 +12,9 @@ local MountGlider = {
     slots_by_key = {},
     row_labels = {},
     icon_cache = {},
+    buff_name_cache = {},
     buff_scan = {},
+    buff_scan_list = {},
     previous_buff_scan = {},
     manual_timers = {},
     pending_mount_mana_spends = {},
@@ -101,6 +103,17 @@ local function widgetKey(value)
     return tostring(value or ""):gsub("[^%w_]", "_")
 end
 
+local function trimText(value)
+    local text = tostring(value or "")
+    return string.match(text, "^%s*(.-)%s*$") or text
+end
+
+local function normalizeName(value)
+    local text = string.lower(trimText(value))
+    text = string.gsub(text, "%s+", " ")
+    return text
+end
+
 local function getSlotKey(device, ability)
     return tostring(device.key or device.name or "") .. "." .. tostring(ability.key or ability.label or "")
 end
@@ -181,6 +194,48 @@ local function getBuffId(buff)
     return tonumber(buff.buff_id or buff.buffId or buff.id or buff.spellId or buff.spell_id)
 end
 
+local function getObjectName(value)
+    if type(value) ~= "table" then
+        return ""
+    end
+    for _, key in ipairs({ "name", "itemName", "item_name", "buffName", "buff_name", "title", "skillName", "skill_name" }) do
+        local text = trimText(value[key])
+        if text ~= "" then
+            return text
+        end
+    end
+    return ""
+end
+
+local function getBuffTooltipName(id)
+    id = tonumber(id)
+    if id == nil then
+        return ""
+    end
+    id = math.floor(id + 0.5)
+    if MountGlider.buff_name_cache[id] ~= nil then
+        return MountGlider.buff_name_cache[id] or ""
+    end
+    if api == nil or api.Ability == nil or api.Ability.GetBuffTooltip == nil then
+        MountGlider.buff_name_cache[id] = false
+        return ""
+    end
+    local tooltip = safeCall(function()
+        return api.Ability:GetBuffTooltip(id, 1)
+    end)
+    local name = getObjectName(tooltip)
+    MountGlider.buff_name_cache[id] = name ~= "" and name or false
+    return name
+end
+
+local function getBuffName(buff, id)
+    local name = getObjectName(buff)
+    if name ~= "" then
+        return name
+    end
+    return getBuffTooltipName(id or getBuffId(buff))
+end
+
 local function getBuffTimeLeftMs(buff)
     if type(buff) ~= "table" then
         return nil
@@ -214,30 +269,35 @@ local function migrateSelectedDevices(cfg)
     if type(cfg) ~= "table" or type(cfg.selected_devices) ~= "table" then
         return
     end
+    if type(cfg.selected_abilities) ~= "table" then
+        cfg.selected_abilities = {}
+    end
     local hasMount = type(cfg.selected_mount) == "string" and cfg.selected_mount ~= ""
     local hasGlider = type(cfg.selected_glider) == "string" and cfg.selected_glider ~= ""
-    if hasMount and Catalog.GetDevice(cfg.selected_mount, cfg) == nil then
+    local mount = hasMount and Catalog.GetDevice(cfg.selected_mount, cfg) or nil
+    local glider = hasGlider and Catalog.GetDevice(cfg.selected_glider, cfg) or nil
+    if hasMount and mount == nil then
         cfg.selected_abilities[cfg.selected_mount] = nil
         cfg.selected_mount = ""
         hasMount = false
+    elseif mount ~= nil then
+        Catalog.EnsureAbilitySelection(cfg.selected_abilities, mount)
     end
-    if hasGlider and Catalog.GetDevice(cfg.selected_glider, cfg) == nil then
+    if hasGlider and glider == nil then
         cfg.selected_abilities[cfg.selected_glider] = nil
         cfg.selected_glider = ""
         hasGlider = false
-    end
-    if hasMount and hasGlider then
-        return
+    elseif glider ~= nil then
+        Catalog.EnsureAbilitySelection(cfg.selected_abilities, glider)
     end
     for _, device in ipairs(Catalog.GetDevices(cfg)) do
         if cfg.selected_devices[device.key] == true then
+            Catalog.EnsureAbilitySelection(cfg.selected_abilities, device)
             if device.kind == "Mount" and not hasMount then
                 cfg.selected_mount = device.key
-                Catalog.EnsureAbilitySelection(cfg.selected_abilities, device)
                 hasMount = true
             elseif device.kind ~= "Mount" and not hasGlider then
                 cfg.selected_glider = device.key
-                Catalog.EnsureAbilitySelection(cfg.selected_abilities, device)
                 hasGlider = true
             end
         end
@@ -248,13 +308,16 @@ end
 local function getConfiguredDevices(cfg, group)
     migrateSelectedDevices(cfg)
     local out = {}
-    local mount = Catalog.GetDevice(type(cfg) == "table" and cfg.selected_mount or nil, cfg)
-    if (group == nil or group == "mount") and type(mount) == "table" and mount.kind == "Mount" then
-        out[#out + 1] = mount
+    if type(cfg) ~= "table" then
+        return out
     end
-    local glider = Catalog.GetDevice(type(cfg) == "table" and cfg.selected_glider or nil, cfg)
-    if (group == nil or group == "glider") and type(glider) == "table" and glider.kind ~= "Mount" then
-        out[#out + 1] = glider
+    for _, device in ipairs(Catalog.GetDevices(cfg)) do
+        if ((group == nil)
+            or (group == "mount" and device.kind == "Mount")
+            or (group == "glider" and device.kind ~= "Mount"))
+            and Catalog.HasSelectedAbility(cfg.selected_abilities, device) then
+            out[#out + 1] = device
+        end
     end
     return out
 end
@@ -394,11 +457,6 @@ local function applyTimerStyle(label, fontSize)
                 label.style:SetAlign(align)
             end)
         end
-    end
-    if label.style.SetFont ~= nil then
-        safeCall(function()
-            label.style:SetFont("bold")
-        end)
     end
     if label.style.SetOutline ~= nil then
         safeCall(function()
@@ -880,6 +938,7 @@ end
 local function scanBuffs()
     MountGlider.previous_buff_scan = MountGlider.buff_scan or {}
     MountGlider.buff_scan = {}
+    MountGlider.buff_scan_list = {}
 
     for _, unit in ipairs(BUFF_UNITS) do
         if unitExists(unit) then
@@ -887,14 +946,26 @@ local function scanBuffs()
             for index = 1, count do
                 local buff = getBuff(unit, index)
                 local id = getBuffId(buff)
+                local timeLeft = getBuffTimeLeftMs(buff)
+                local name = getBuffName(buff, id)
+                if id ~= nil or name ~= "" then
+                    local entry = {
+                        id = id,
+                        buff = buff,
+                        name = name,
+                        time_left_ms = timeLeft
+                    }
+                    MountGlider.buff_scan_list[#MountGlider.buff_scan_list + 1] = entry
+                end
                 if id ~= nil then
                     id = math.floor(id + 0.5)
-                    local timeLeft = getBuffTimeLeftMs(buff)
                     local previous = MountGlider.buff_scan[id]
                     if previous == nil
                         or ((tonumber(timeLeft) or -1) > (tonumber(previous.time_left_ms) or -1)) then
                         MountGlider.buff_scan[id] = {
+                            id = id,
                             buff = buff,
+                            name = name,
                             time_left_ms = timeLeft
                         }
                     end
@@ -909,6 +980,26 @@ local function getLiveForAbility(ability)
     for _, id in ipairs(asIdList(ability.buff_ids or ability.buff_id)) do
         local live = MountGlider.buff_scan[tonumber(id)]
         if live ~= nil
+            and (best == nil
+                or ((tonumber(live.time_left_ms) or -1) > (tonumber(best.time_left_ms) or -1))) then
+            best = live
+        end
+    end
+    return best
+end
+
+local function isDeviceTriggerAbility(ability)
+    return type(ability) == "table" and ability.device_trigger == true
+end
+
+local function getLiveForDevice(device)
+    local deviceName = normalizeName(type(device) == "table" and device.name or "")
+    if deviceName == "" then
+        return nil
+    end
+    local best = nil
+    for _, live in ipairs(MountGlider.buff_scan_list or {}) do
+        if normalizeName(type(live) == "table" and live.name or "") == deviceName
             and (best == nil
                 or ((tonumber(live.time_left_ms) or -1) > (tonumber(best.time_left_ms) or -1))) then
             best = live
@@ -1152,6 +1243,9 @@ local function makeAbilityEntry(frame, cfg, device, ability, slotKey, nowMs, use
     end
     slot.use_device_icon = useDeviceIcon and true or false
     local live = getLiveForAbility(ability)
+    if live == nil and isDeviceTriggerAbility(ability) then
+        live = getLiveForDevice(device)
+    end
     if live ~= nil then
         local liveTimeLeft = tonumber(live.time_left_ms)
         local refreshed = liveTimeLeft ~= nil
@@ -1492,7 +1586,9 @@ function MountGlider.Unload()
     MountGlider.slots_by_key = {}
     MountGlider.row_labels = {}
     MountGlider.icon_cache = {}
+    MountGlider.buff_name_cache = {}
     MountGlider.buff_scan = {}
+    MountGlider.buff_scan_list = {}
     MountGlider.manual_timers = {}
     MountGlider.accum_ms = 0
     MountGlider.mana_initialized = false

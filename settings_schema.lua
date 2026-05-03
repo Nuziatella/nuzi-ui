@@ -222,7 +222,7 @@ SettingsSchema.PAGES = {
                     slider("overlay_font_size", "polarUiOverlayFontSize", "Target overlay font size", 8, 30, 1),
                     slider("gs_font_size", "polarUiGsFontSize", "Gearscore font size", 8, 30, 1),
                     slider("class_font_size", "polarUiClassFontSize", "Class font size", 8, 30, 1),
-                    slider("target_guild_font_size", "polarUiTargetGuildFontSize", "Target guild font size", 8, 30, 1)
+                    slider("target_guild_font_size", "polarUiTargetGuildFontSize", "Expedition/family font size", 8, 30, 1)
                 }
             },
             {
@@ -230,22 +230,40 @@ SettingsSchema.PAGES = {
                 title = "Target Overlay Fields",
                 hint = "Choose which extra target details remain visible on the overlay.",
                 fields = {
-                    checkbox("target_guild_visible", "polarUiTargetGuildVisible", "Show guild/family text"),
+                    checkbox("target_guild_visible", "polarUiTargetGuildVisible", "Show expedition/family text"),
                     checkbox("target_class_visible", "polarUiTargetClassVisible", "Show class text"),
                     checkbox("target_pdef_visible", "polarUiTargetPdefVisible", "Show PDEF text"),
                     checkbox("target_mdef_visible", "polarUiTargetMdefVisible", "Show MDEF text"),
-                    checkbox("target_gearscore_visible", "polarUiTargetGearscoreVisible", "Show gearscore text")
+                    checkbox("target_gearscore_visible", "polarUiTargetGearscoreVisible", "Show gearscore text"),
+                    checkbox("target_gearscore_gradient", "polarUiTargetGearscoreGradient", "Gradient gearscore color")
+                }
+            },
+            {
+                id = "text_overlay_position",
+                title = "Target Overlay Position",
+                hint = "Fine tune where each target overlay field sits above the target frame.",
+                fields = {
+                    slider("target_guild_offset_x", "polarUiTargetGuildOffsetX", "Expedition/family offset X", -200, 200, 1),
+                    slider("target_guild_offset_y", "polarUiTargetGuildOffsetY", "Expedition/family offset Y", -200, 200, 1),
+                    slider("target_class_offset_x", "polarUiTargetClassOffsetX", "Class offset X", -200, 200, 1),
+                    slider("target_class_offset_y", "polarUiTargetClassOffsetY", "Class offset Y", -200, 200, 1),
+                    slider("target_pdef_offset_x", "polarUiTargetPdefOffsetX", "PDEF offset X", -200, 200, 1),
+                    slider("target_pdef_offset_y", "polarUiTargetPdefOffsetY", "PDEF offset Y", -200, 200, 1),
+                    slider("target_mdef_offset_x", "polarUiTargetMdefOffsetX", "MDEF offset X", -200, 200, 1),
+                    slider("target_mdef_offset_y", "polarUiTargetMdefOffsetY", "MDEF offset Y", -200, 200, 1),
+                    slider("target_gearscore_offset_x", "polarUiTargetGsOffsetX", "Gearscore offset X", -200, 200, 1),
+                    slider("target_gearscore_offset_y", "polarUiTargetGsOffsetY", "Gearscore offset Y", -200, 200, 1)
                 }
             },
             {
                 id = "text_overlay_colors",
                 title = "Target Overlay Colors",
-                hint = "Adjust the per-field colors used for guild, class, defense, and gearscore text.",
+                hint = "Adjust the per-field colors used for expedition, family, class, defense, and gearscore text.",
                 fields = {
-                    label(nil, "polarUiTargetGuildColorHeader", "Guild Color", { font_size = 15 }),
-                    slider("target_guild_r", "polarUiTargetGuildR", "Guild R", 0, 255, 1),
-                    slider("target_guild_g", "polarUiTargetGuildG", "Guild G", 0, 255, 1),
-                    slider("target_guild_b", "polarUiTargetGuildB", "Guild B", 0, 255, 1),
+                    label(nil, "polarUiTargetGuildColorHeader", "Expedition/Family Color", { font_size = 15 }),
+                    slider("target_guild_r", "polarUiTargetGuildR", "Expedition R", 0, 255, 1),
+                    slider("target_guild_g", "polarUiTargetGuildG", "Expedition G", 0, 255, 1),
+                    slider("target_guild_b", "polarUiTargetGuildB", "Expedition B", 0, 255, 1),
                     label(nil, "polarUiTargetClassColorHeader", "Class Color", { font_size = 15, advance = 28 }),
                     slider("target_class_r", "polarUiTargetClassR", "Class R", 0, 255, 1),
                     slider("target_class_g", "polarUiTargetClassG", "Class G", 0, 255, 1),
@@ -284,9 +302,7 @@ SettingsSchema.PAGES = {
                     slider("hp_value_offset_x", "polarUiHpValueOffsetX", "HP value offset X", -200, 200, 1),
                     slider("hp_value_offset_y", "polarUiHpValueOffsetY", "HP value offset Y", -120, 120, 1),
                     slider("mp_value_offset_x", "polarUiMpValueOffsetX", "MP value offset X", -200, 200, 1),
-                    slider("mp_value_offset_y", "polarUiMpValueOffsetY", "MP value offset Y", -120, 120, 1),
-                    slider("target_guild_offset_x", "polarUiTargetGuildOffsetX", "Target guild offset X", -200, 200, 1),
-                    slider("target_guild_offset_y", "polarUiTargetGuildOffsetY", "Target guild offset Y", -200, 200, 1)
+                    slider("mp_value_offset_y", "polarUiMpValueOffsetY", "MP value offset Y", -120, 120, 1)
                 }
             },
             {
@@ -835,15 +851,15 @@ SettingsSchema.PAGES = {
             {
                 id = "mount_glider_devices",
                 title = "Devices",
-                hint = "Choose one mount and one glider or magithopter, then pick the abilities that should appear on the timer bar.",
+                hint = "Use the dropdowns to edit each learned mount, glider, or magithopter, then check the abilities that should appear on the timer bar.",
                 fields = {
                     hint(
                         "mount_glider_share_hint",
                         "polarUiMountGliderShareHint",
-                        "Learned devices save to nuzi-ui/.data/mount_glider_devices.txt if you want to share them.",
+                        "Learned devices save to nuzi-ui/.data/mount_glider_devices.txt. No-buff glider cooldowns start from the glider name buff.",
                         { width = 520 }
                     ),
-                    custom("mount_glider_devices", { estimate_height = 740 })
+                    custom("mount_glider_devices", { estimate_height = 780 })
                 }
             },
             {

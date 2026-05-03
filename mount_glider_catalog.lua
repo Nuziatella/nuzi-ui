@@ -332,7 +332,8 @@ local function copyAbility(raw)
         icon_id = tonumber(raw.icon_id),
         icon_path = type(raw.icon_path) == "string" and raw.icon_path or nil,
         exact_spell_id = raw.exact_spell_id == true,
-        learned = raw.learned == true
+        learned = raw.learned == true,
+        device_trigger = raw.device_trigger == true or raw.manual_trigger == true
     }
     if tonumber(raw.spell_id) ~= nil then
         out.spell_id = math.floor(tonumber(raw.spell_id) + 0.5)
@@ -501,6 +502,22 @@ function Catalog.GetGliderDevices(config)
         end
     end
     return out
+end
+
+function Catalog.HasSelectedAbility(selectedAbilities, device)
+    if type(selectedAbilities) ~= "table" or type(device) ~= "table" or type(device.abilities) ~= "table" then
+        return false
+    end
+    local deviceAbilities = selectedAbilities[device.key]
+    if type(deviceAbilities) ~= "table" then
+        return false
+    end
+    for _, ability in ipairs(device.abilities) do
+        if deviceAbilities[ability.key] == true then
+            return true
+        end
+    end
+    return false
 end
 
 function Catalog.GetSelectedDevices(selected)

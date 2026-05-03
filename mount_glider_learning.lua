@@ -479,6 +479,28 @@ local function captureManaAbility(spent, labelOverride)
     return true
 end
 
+local function captureDeviceTriggerGliderAbility(label, cooldownSeconds)
+    label = trim(label)
+    local seconds = tonumber(cooldownSeconds)
+    if session == nil or label == "" or seconds == nil or seconds <= 0 then
+        return false
+    end
+    seconds = math.floor(seconds + 0.5)
+    local ability = {
+        key = makeAbilityKey(label, "manual"),
+        label = label,
+        duration_ms = seconds * 1000,
+        icon_type = "item",
+        icon_id = tonumber(session.item_type),
+        icon_path = tostring(session.item_path or ""),
+        learned = true,
+        device_trigger = true
+    }
+    mergeSessionAbility(ability)
+    updateStatus(summarizeAbilities(session.abilities) .. ". This cooldown starts when the glider name buff appears.")
+    return true
+end
+
 abilitiesMatch = function(left, right)
     if type(left) ~= "table" or type(right) ~= "table" then
         return false
@@ -738,6 +760,33 @@ function Learning.AddMountSkill(settings, abilityName, manaCost)
     session.last_mount_mana = mount.mana
     updateStatus("Use " .. abilityName .. " now. I will capture the mount mana spend.")
     return true, session.status
+end
+
+function Learning.AddGliderSkill(settings, abilityName, cooldownSeconds)
+    abilityName = trim(abilityName)
+    if abilityName == "" then
+        return false, "Enter the glider skill name first."
+    end
+    if tonumber(cooldownSeconds) == nil or tonumber(cooldownSeconds) <= 0 then
+        return false, "Enter the glider skill cooldown in seconds."
+    end
+    local item = getEquippedBackpack()
+    if item == nil then
+        return false, "Equip a glider or magithopter in your back slot first."
+    end
+    if session == nil
+        or session.active ~= true
+        or session.mode ~= "glider"
+        or tostring(session.item_type or "") ~= tostring(item.item_type or "") then
+        local ok, message = Learning.Start(settings)
+        if not ok then
+            return false, message
+        end
+    end
+    if captureDeviceTriggerGliderAbility(abilityName, cooldownSeconds) then
+        return true, session.status
+    end
+    return false, "Enter the glider skill name and cooldown."
 end
 
 function Learning.Finish(cfg)

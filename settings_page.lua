@@ -178,6 +178,7 @@ local STYLE_TARGET_KEYS = {
 local COOLDOWN_UNIT_KEYS = SettingsCooldown.UNIT_KEYS
 local COOLDOWN_DISPLAY_MODE_LABELS = SettingsCooldown.DISPLAY_MODE_LABELS
 local COOLDOWN_DISPLAY_STYLE_LABELS = SettingsCooldown.DISPLAY_STYLE_LABELS
+local COOLDOWN_BAR_ORDER_LABELS = SettingsCooldown.BAR_ORDER_LABELS
 local COOLDOWN_TRACK_KIND_LABELS = SettingsCooldown.TRACK_KIND_LABELS
 
 local CASTBAR_TEXTURE_MODE_KEYS = {
@@ -260,6 +261,14 @@ end
 
 local function GetCooldownDisplayStyleIndex(style)
     return SettingsCooldown.GetDisplayStyleIndex(style)
+end
+
+local function GetCooldownBarOrderFromIndex(idx)
+    return SettingsCooldown.GetBarOrderFromIndex(idx)
+end
+
+local function GetCooldownBarOrderIndex(order)
+    return SettingsCooldown.GetBarOrderIndex(order)
 end
 
 local function GetCooldownTrackKindFromIndex(idx)
@@ -1984,6 +1993,9 @@ RefreshControls = function()
         if SettingsPage.controls.target_gearscore_visible ~= nil then
             SettingsPage.controls.target_gearscore_visible:SetChecked(displayStyle.target_gearscore_visible ~= false)
         end
+        if SettingsPage.controls.target_gearscore_gradient ~= nil then
+            SettingsPage.controls.target_gearscore_gradient:SetChecked(displayStyle.target_gearscore_gradient and true or false)
+        end
         if SettingsPage.controls.target_pdef_visible ~= nil then
             SettingsPage.controls.target_pdef_visible:SetChecked(displayStyle.target_pdef_visible ~= false)
         end
@@ -2027,6 +2039,30 @@ RefreshControls = function()
                 SettingsPage.controls.target_guild_offset_y_val,
                 tonumber(displayStyle.target_guild_offset_y) or -18
             )
+        end
+        if SettingsPage.controls.target_class_offset_x ~= nil then
+            refreshSlider(SettingsPage.controls.target_class_offset_x, SettingsPage.controls.target_class_offset_x_val, tonumber(displayStyle.target_class_offset_x) or 10)
+        end
+        if SettingsPage.controls.target_class_offset_y ~= nil then
+            refreshSlider(SettingsPage.controls.target_class_offset_y, SettingsPage.controls.target_class_offset_y_val, tonumber(displayStyle.target_class_offset_y) or -36)
+        end
+        if SettingsPage.controls.target_pdef_offset_x ~= nil then
+            refreshSlider(SettingsPage.controls.target_pdef_offset_x, SettingsPage.controls.target_pdef_offset_x_val, tonumber(displayStyle.target_pdef_offset_x) or 110)
+        end
+        if SettingsPage.controls.target_pdef_offset_y ~= nil then
+            refreshSlider(SettingsPage.controls.target_pdef_offset_y, SettingsPage.controls.target_pdef_offset_y_val, tonumber(displayStyle.target_pdef_offset_y) or -36)
+        end
+        if SettingsPage.controls.target_mdef_offset_x ~= nil then
+            refreshSlider(SettingsPage.controls.target_mdef_offset_x, SettingsPage.controls.target_mdef_offset_x_val, tonumber(displayStyle.target_mdef_offset_x) or 190)
+        end
+        if SettingsPage.controls.target_mdef_offset_y ~= nil then
+            refreshSlider(SettingsPage.controls.target_mdef_offset_y, SettingsPage.controls.target_mdef_offset_y_val, tonumber(displayStyle.target_mdef_offset_y) or -36)
+        end
+        if SettingsPage.controls.target_gearscore_offset_x ~= nil then
+            refreshSlider(SettingsPage.controls.target_gearscore_offset_x, SettingsPage.controls.target_gearscore_offset_x_val, tonumber(displayStyle.target_gearscore_offset_x) or 10)
+        end
+        if SettingsPage.controls.target_gearscore_offset_y ~= nil then
+            refreshSlider(SettingsPage.controls.target_gearscore_offset_y, SettingsPage.controls.target_gearscore_offset_y_val, tonumber(displayStyle.target_gearscore_offset_y) or -54)
         end
 
         local guildColor = type(displayStyle.target_guild_color) == "table" and displayStyle.target_guild_color or { 255, 255, 255, 255 }
@@ -2243,6 +2279,9 @@ RefreshControls = function()
     end
     if SettingsPage.controls.ct_display_style ~= nil then
         SetComboBoxIndex1Based(SettingsPage.controls.ct_display_style, GetCooldownDisplayStyleIndex(selectedUnitCfg.display_style))
+    end
+    if SettingsPage.controls.ct_bar_order ~= nil then
+        SetComboBoxIndex1Based(SettingsPage.controls.ct_bar_order, GetCooldownBarOrderIndex(selectedUnitCfg.cooldown_bar_order))
     end
     if SettingsPage.controls.ct_track_kind ~= nil then
         SetComboBoxIndex1Based(SettingsPage.controls.ct_track_kind, GetCooldownTrackKindIndex(SettingsPage.cooldown_track_kind))
@@ -2796,6 +2835,9 @@ ApplyControlsToSettings = function()
         if SettingsPage.controls.target_gearscore_visible ~= nil then
             editStyle.target_gearscore_visible = SettingsPage.controls.target_gearscore_visible:GetChecked() and true or false
         end
+        if SettingsPage.controls.target_gearscore_gradient ~= nil then
+            editStyle.target_gearscore_gradient = SettingsPage.controls.target_gearscore_gradient:GetChecked() and true or false
+        end
         if SettingsPage.controls.target_pdef_visible ~= nil then
             editStyle.target_pdef_visible = SettingsPage.controls.target_pdef_visible:GetChecked() and true or false
         end
@@ -2838,6 +2880,30 @@ ApplyControlsToSettings = function()
         end
         if SettingsPage.controls.target_guild_offset_y ~= nil then
             editStyle.target_guild_offset_y = GetSliderValue(SettingsPage.controls.target_guild_offset_y)
+        end
+        if SettingsPage.controls.target_class_offset_x ~= nil then
+            editStyle.target_class_offset_x = GetSliderValue(SettingsPage.controls.target_class_offset_x)
+        end
+        if SettingsPage.controls.target_class_offset_y ~= nil then
+            editStyle.target_class_offset_y = GetSliderValue(SettingsPage.controls.target_class_offset_y)
+        end
+        if SettingsPage.controls.target_pdef_offset_x ~= nil then
+            editStyle.target_pdef_offset_x = GetSliderValue(SettingsPage.controls.target_pdef_offset_x)
+        end
+        if SettingsPage.controls.target_pdef_offset_y ~= nil then
+            editStyle.target_pdef_offset_y = GetSliderValue(SettingsPage.controls.target_pdef_offset_y)
+        end
+        if SettingsPage.controls.target_mdef_offset_x ~= nil then
+            editStyle.target_mdef_offset_x = GetSliderValue(SettingsPage.controls.target_mdef_offset_x)
+        end
+        if SettingsPage.controls.target_mdef_offset_y ~= nil then
+            editStyle.target_mdef_offset_y = GetSliderValue(SettingsPage.controls.target_mdef_offset_y)
+        end
+        if SettingsPage.controls.target_gearscore_offset_x ~= nil then
+            editStyle.target_gearscore_offset_x = GetSliderValue(SettingsPage.controls.target_gearscore_offset_x)
+        end
+        if SettingsPage.controls.target_gearscore_offset_y ~= nil then
+            editStyle.target_gearscore_offset_y = GetSliderValue(SettingsPage.controls.target_gearscore_offset_y)
         end
         if SettingsPage.controls.target_guild_r ~= nil and SettingsPage.controls.target_guild_g ~= nil and SettingsPage.controls.target_guild_b ~= nil then
             editStyle.target_guild_color = colorTable(
@@ -3088,6 +3154,10 @@ ApplyControlsToSettings = function()
     if SettingsPage.controls.ct_display_style ~= nil then
         local idx = GetComboBoxIndex1Based(SettingsPage.controls.ct_display_style, #COOLDOWN_DISPLAY_STYLE_LABELS)
         selectedUnitCfg.display_style = GetCooldownDisplayStyleFromIndex(idx)
+    end
+    if SettingsPage.controls.ct_bar_order ~= nil then
+        local idx = GetComboBoxIndex1Based(SettingsPage.controls.ct_bar_order, #COOLDOWN_BAR_ORDER_LABELS)
+        selectedUnitCfg.cooldown_bar_order = GetCooldownBarOrderFromIndex(idx)
     end
     if SettingsPage.controls.ct_pos_x ~= nil then
         local x = ParseEditNumber(SettingsPage.controls.ct_pos_x)
@@ -3629,6 +3699,14 @@ local function EnsureWindow()
         { SettingsPage.controls.mp_value_offset_y, SettingsPage.controls.mp_value_offset_y_val },
         { SettingsPage.controls.target_guild_offset_x, SettingsPage.controls.target_guild_offset_x_val },
         { SettingsPage.controls.target_guild_offset_y, SettingsPage.controls.target_guild_offset_y_val },
+        { SettingsPage.controls.target_class_offset_x, SettingsPage.controls.target_class_offset_x_val },
+        { SettingsPage.controls.target_class_offset_y, SettingsPage.controls.target_class_offset_y_val },
+        { SettingsPage.controls.target_pdef_offset_x, SettingsPage.controls.target_pdef_offset_x_val },
+        { SettingsPage.controls.target_pdef_offset_y, SettingsPage.controls.target_pdef_offset_y_val },
+        { SettingsPage.controls.target_mdef_offset_x, SettingsPage.controls.target_mdef_offset_x_val },
+        { SettingsPage.controls.target_mdef_offset_y, SettingsPage.controls.target_mdef_offset_y_val },
+        { SettingsPage.controls.target_gearscore_offset_x, SettingsPage.controls.target_gearscore_offset_x_val },
+        { SettingsPage.controls.target_gearscore_offset_y, SettingsPage.controls.target_gearscore_offset_y_val },
         { SettingsPage.controls.target_grade_star_offset_x, SettingsPage.controls.target_grade_star_offset_x_val },
         { SettingsPage.controls.target_grade_star_offset_y, SettingsPage.controls.target_grade_star_offset_y_val },
         { SettingsPage.controls.name_offset_x, SettingsPage.controls.name_offset_x_val },
@@ -3781,6 +3859,7 @@ local function EnsureWindow()
         SettingsPage.controls.target_guild_visible,
         SettingsPage.controls.target_class_visible,
         SettingsPage.controls.target_gearscore_visible,
+        SettingsPage.controls.target_gearscore_gradient,
         SettingsPage.controls.target_pdef_visible,
         SettingsPage.controls.target_mdef_visible,
         SettingsPage.controls.name_shadow,
@@ -3841,6 +3920,18 @@ local function EnsureWindow()
 
     if SettingsPage.controls.ct_display_style ~= nil and SettingsPage.controls.ct_display_style.SetHandler ~= nil then
         SettingsPage.controls.ct_display_style:SetHandler("OnSelChanged", function()
+            ApplyControlsToSettings()
+            if type(SettingsPage.on_apply) == "function" then
+                pcall(function()
+                    SettingsPage.on_apply()
+                end)
+            end
+            RefreshControls()
+        end)
+    end
+
+    if SettingsPage.controls.ct_bar_order ~= nil and SettingsPage.controls.ct_bar_order.SetHandler ~= nil then
+        SettingsPage.controls.ct_bar_order:SetHandler("OnSelChanged", function()
             ApplyControlsToSettings()
             if type(SettingsPage.on_apply) == "function" then
                 pcall(function()
@@ -4110,6 +4201,20 @@ local function EnsureWindow()
 
     if type(SettingsPage.controls.ct_buff_rows) == "table" then
         for _, row in ipairs(SettingsPage.controls.ct_buff_rows) do
+            if type(row) == "table" and row.cooldown_save ~= nil and row.cooldown_save.SetHandler ~= nil then
+                local currentRow = row
+                local btn = row.cooldown_save
+                row.cooldown_save:SetHandler("OnClick", function()
+                    if SettingsPage.settings == nil then
+                        return
+                    end
+                    local idx = tonumber(btn ~= nil and btn.__polar_buff_index or nil)
+                    local seconds = GetEditText(currentRow.cooldown_edit)
+                    if SettingsCooldown.SetTrackedBuffCooldown(SettingsPage, idx, seconds) then
+                        RefreshControls()
+                    end
+                end)
+            end
             if type(row) == "table" and row.remove ~= nil and row.remove.SetHandler ~= nil then
                 local btn = row.remove
                 row.remove:SetHandler("OnClick", function()

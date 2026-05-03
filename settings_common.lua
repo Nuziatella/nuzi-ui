@@ -16,6 +16,7 @@ local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
         label_color = { 255, 255, 255, 255 },
         display_mode = "both",
         display_style = "icons",
+        cooldown_bar_order = "uptime_first",
         bar_width = 180,
         bar_height = 14,
         bar_fill_color = { 207, 74, 22, 255 },
@@ -38,6 +39,7 @@ local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
         label_color = { 255, 255, 255, 255 },
         display_mode = "both",
         display_style = "icons",
+        cooldown_bar_order = "uptime_first",
         bar_width = 180,
         bar_height = 14,
         bar_fill_color = { 207, 74, 22, 255 },
@@ -61,6 +63,7 @@ local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
         label_color = { 255, 255, 255, 255 },
         display_mode = "both",
         display_style = "icons",
+        cooldown_bar_order = "uptime_first",
         bar_width = 180,
         bar_height = 14,
         bar_fill_color = { 207, 74, 22, 255 },
@@ -83,6 +86,7 @@ local COOLDOWN_TRACKER_UNIT_DEFAULTS = {
         label_color = { 255, 255, 255, 255 },
         display_mode = "both",
         display_style = "icons",
+        cooldown_bar_order = "uptime_first",
         bar_width = 180,
         bar_height = 14,
         bar_fill_color = { 207, 74, 22, 255 },
@@ -172,6 +176,14 @@ function SettingsCommon.NormalizeCooldownDisplayStyle(rawStyle)
     return "icons"
 end
 
+function SettingsCommon.NormalizeCooldownBarOrder(rawOrder)
+    local order = string.lower(tostring(rawOrder or "uptime_first"))
+    if order == "cooldown_first" or order == "cooldown" then
+        return "cooldown_first"
+    end
+    return "uptime_first"
+end
+
 function SettingsCommon.NormalizeCooldownTrackedEntry(raw)
     local id = nil
     local kind = "any"
@@ -239,6 +251,7 @@ function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)
             label_color = { 255, 255, 255, 255 },
             display_mode = "both",
             display_style = "icons",
+            cooldown_bar_order = "uptime_first",
             bar_width = 180,
             bar_height = 14,
             bar_fill_color = { 207, 74, 22, 255 },
@@ -254,6 +267,9 @@ function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)
         )
         s.cooldown_tracker.units[key].display_style = SettingsCommon.NormalizeCooldownDisplayStyle(
             s.cooldown_tracker.units[key].display_style
+        )
+        s.cooldown_tracker.units[key].cooldown_bar_order = SettingsCommon.NormalizeCooldownBarOrder(
+            s.cooldown_tracker.units[key].cooldown_bar_order
         )
     end
 end
