@@ -196,23 +196,29 @@ local function normalizeTrackedEntry(raw)
     if type(SettingsCommon) == "table" and type(SettingsCommon.NormalizeCooldownTrackedEntry) == "function" then
         return SettingsCommon.NormalizeCooldownTrackedEntry(raw)
     end
-    local id = nil
+    local rawId = nil
     local kind = "any"
     local cooldownMs = nil
     if type(raw) == "table" then
-        id = tonumber(raw.id or raw.buff_id or raw.buffId or raw.spellId or raw.spell_id)
+        rawId = raw.id or raw.buff_id or raw.buffId or raw.spellId or raw.spell_id
         kind = normalizeTrackKind(raw.kind)
         cooldownMs = tonumber(raw.cooldown_ms or raw.cooldownMs)
             or ((tonumber(raw.cooldown_s or raw.cooldown_seconds or raw.cooldown) or 0) * 1000)
     else
-        id = tonumber(raw)
+        rawId = raw
     end
-    if id == nil then
+    local id = tostring(rawId or "")
+    id = string.match(id, "^%s*(.-)%s*$") or id
+    local numericId = tonumber(id)
+    if id == "" or numericId == nil then
         return nil
     end
-    id = math.floor(id + 0.5)
-    if id <= 0 then
+    numericId = math.floor(numericId + 0.5)
+    if numericId <= 0 then
         return nil
+    end
+    if string.match(id, "^%d+$") == nil then
+        id = string.format("%.0f", numericId)
     end
     local entry = {
         id = id,
@@ -222,6 +228,13 @@ local function normalizeTrackedEntry(raw)
         entry.cooldown_ms = math.floor(cooldownMs + 0.5)
     end
     return entry
+end
+
+local function trackedEntryIdNumber(entry)
+    if type(entry) ~= "table" then
+        return nil
+    end
+    return tonumber(entry.id)
 end
 
 local function isAnchoredUnit(unitKey)
@@ -871,7 +884,7 @@ local function buildTrackedEntries(unitCfg)
     for _, raw in ipairs(unitCfg.tracked_buffs) do
         local entry = normalizeTrackedEntry(raw)
         if entry ~= nil then
-            entry.key = string.format("%s:%d", entry.kind, entry.id)
+            entry.key = tostring(entry.kind) .. ":" .. tostring(entry.id)
             if not seen[entry.key] then
                 seen[entry.key] = true
                 entries[#entries + 1] = entry
@@ -885,11 +898,14 @@ local function buildTrackedKindSets(trackedEntries)
     local buffIds = {}
     local debuffIds = {}
     for _, entry in ipairs(trackedEntries or {}) do
-        if entry.kind == "any" or entry.kind == "buff" then
-            buffIds[entry.id] = true
-        end
-        if entry.kind == "any" or entry.kind == "debuff" then
-            debuffIds[entry.id] = true
+        local id = trackedEntryIdNumber(entry)
+        if id ~= nil then
+            if entry.kind == "any" or entry.kind == "buff" then
+                buffIds[id] = true
+            end
+            if entry.kind == "any" or entry.kind == "debuff" then
+                debuffIds[id] = true
+            end
         end
     end
     return buffIds, debuffIds
@@ -955,15 +971,19 @@ local function resolveLiveEntry(found, trackedEntry)
     if type(found) ~= "table" or type(trackedEntry) ~= "table" then
         return nil
     end
-
-    if trackedEntry.kind == "buff" then
-        return found.buff ~= nil and found.buff[trackedEntry.id] or nil
-    elseif trackedEntry.kind == "debuff" then
-        return found.debuff ~= nil and found.debuff[trackedEntry.id] or nil
+    local id = trackedEntryIdNumber(trackedEntry)
+    if id == nil then
+        return nil
     end
 
-    local buffEntry = found.buff ~= nil and found.buff[trackedEntry.id] or nil
-    local debuffEntry = found.debuff ~= nil and found.debuff[trackedEntry.id] or nil
+    if trackedEntry.kind == "buff" then
+        return found.buff ~= nil and found.buff[id] or nil
+    elseif trackedEntry.kind == "debuff" then
+        return found.debuff ~= nil and found.debuff[id] or nil
+    end
+
+    local buffEntry = found.buff ~= nil and found.buff[id] or nil
+    local debuffEntry = found.debuff ~= nil and found.debuff[id] or nil
     if buffEntry ~= nil and debuffEntry ~= nil then
         local buffTime = tonumber(buffEntry.time_left_ms) or -1
         local debuffTime = tonumber(debuffEntry.time_left_ms) or -1

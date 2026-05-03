@@ -4136,11 +4136,10 @@ local function EnsureWindow()
             if txt == "" then
                 return
             end
-            local numericId = tonumber(txt)
-            if numericId == nil then
+            if tonumber(txt) == nil then
                 return
             end
-            txt = FormatBuffId(math.floor(numericId + 0.5))
+            txt = FormatBuffId(txt)
 
             local kindIdx = GetComboBoxIndex1Based(SettingsPage.controls.ct_track_kind, #COOLDOWN_TRACK_KIND_LABELS)
             SettingsPage.cooldown_track_kind = GetCooldownTrackKindFromIndex(kindIdx)

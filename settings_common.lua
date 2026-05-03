@@ -149,7 +149,13 @@ function SettingsCommon.FormatBuffId(buff_id)
     if type(buff_id) == "number" then
         return string.format("%.0f", buff_id)
     end
-    return tostring(buff_id)
+    local text = tostring(buff_id or "")
+    text = string.match(text, "^%s*(.-)%s*$") or text
+    local integer = string.match(text, "^(%d+)%.0+$")
+    if integer ~= nil then
+        return integer
+    end
+    return text
 end
 
 function SettingsCommon.NormalizeCooldownTrackKind(rawKind)
@@ -185,26 +191,31 @@ function SettingsCommon.NormalizeCooldownBarOrder(rawOrder)
 end
 
 function SettingsCommon.NormalizeCooldownTrackedEntry(raw)
-    local id = nil
+    local rawId = nil
     local kind = "any"
     local cooldownMs = nil
 
     if type(raw) == "table" then
-        id = tonumber(raw.id or raw.buff_id or raw.buffId or raw.spellId or raw.spell_id)
+        rawId = raw.id or raw.buff_id or raw.buffId or raw.spellId or raw.spell_id
         kind = SettingsCommon.NormalizeCooldownTrackKind(raw.kind)
         cooldownMs = tonumber(raw.cooldown_ms or raw.cooldownMs)
             or ((tonumber(raw.cooldown_s or raw.cooldown_seconds or raw.cooldown) or 0) * 1000)
     else
-        id = tonumber(raw)
+        rawId = raw
     end
 
-    if id == nil then
+    local id = SettingsCommon.FormatBuffId(rawId)
+    local numericId = tonumber(id)
+    if id == "" or numericId == nil then
         return nil
     end
 
-    id = math.floor(id + 0.5)
-    if id <= 0 then
+    numericId = math.floor(numericId + 0.5)
+    if numericId <= 0 then
         return nil
+    end
+    if string.match(id, "^%d+$") == nil then
+        id = string.format("%.0f", numericId)
     end
 
     local entry = {
@@ -215,6 +226,44 @@ function SettingsCommon.NormalizeCooldownTrackedEntry(raw)
         entry.cooldown_ms = math.floor(cooldownMs + 0.5)
     end
     return entry
+end
+
+function SettingsCommon.NormalizeCooldownTrackedList(list)
+    if type(list) ~= "table" then
+        return false
+    end
+
+    local normalized = {}
+    local changed = false
+    for _, raw in ipairs(list) do
+        local entry = SettingsCommon.NormalizeCooldownTrackedEntry(raw)
+        if entry ~= nil then
+            normalized[#normalized + 1] = entry
+            if type(raw) ~= "table"
+                or raw.id ~= entry.id
+                or raw.kind ~= entry.kind
+                or raw.cooldown_ms ~= entry.cooldown_ms then
+                changed = true
+            end
+        else
+            changed = true
+        end
+    end
+
+    if #normalized ~= #list then
+        changed = true
+    end
+    if not changed then
+        return false
+    end
+
+    for i = 1, #normalized do
+        list[i] = normalized[i]
+    end
+    for i = #normalized + 1, #list do
+        list[i] = nil
+    end
+    return true
 end
 
 function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)
@@ -262,6 +311,7 @@ function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)
         if type(s.cooldown_tracker.units[key].tracked_buffs) ~= "table" then
             s.cooldown_tracker.units[key].tracked_buffs = {}
         end
+        SettingsCommon.NormalizeCooldownTrackedList(s.cooldown_tracker.units[key].tracked_buffs)
         s.cooldown_tracker.units[key].display_mode = SettingsCommon.NormalizeCooldownDisplayMode(
             s.cooldown_tracker.units[key].display_mode
         )

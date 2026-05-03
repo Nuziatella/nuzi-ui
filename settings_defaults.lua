@@ -481,33 +481,42 @@ end
 
 function SettingsDefaults.EnsureCooldownTrackerDefaults(s)
     if type(s) ~= "table" then
-        return
+        return false
     end
 
+    local changed = false
     if type(s.cooldown_tracker) ~= "table" then
         s.cooldown_tracker = {}
+        changed = true
     end
     if type(s.cooldown_tracker.units) ~= "table" then
         s.cooldown_tracker.units = {}
+        changed = true
     end
 
     for k, v in pairs(SettingsDefaults.DEFAULT_SETTINGS.cooldown_tracker) do
         if s.cooldown_tracker[k] == nil then
             s.cooldown_tracker[k] = SettingsDefaults.CopyDefaultValue(v)
+            changed = true
         end
     end
 
     local function ensureUnit(key)
         if type(s.cooldown_tracker.units[key]) ~= "table" then
             s.cooldown_tracker.units[key] = {}
+            changed = true
         end
         for unitKey, unitValue in pairs(SettingsDefaults.DEFAULT_SETTINGS.cooldown_tracker.units[key]) do
             if s.cooldown_tracker.units[key][unitKey] == nil then
                 s.cooldown_tracker.units[key][unitKey] = SettingsDefaults.CopyDefaultValue(unitValue)
+                changed = true
             end
         end
         if type(s.cooldown_tracker.units[key].tracked_buffs) ~= "table" then
             s.cooldown_tracker.units[key].tracked_buffs = {}
+            changed = true
+        elseif SettingsCommon.NormalizeCooldownTrackedList(s.cooldown_tracker.units[key].tracked_buffs) then
+            changed = true
         end
     end
 
@@ -515,6 +524,7 @@ function SettingsDefaults.EnsureCooldownTrackerDefaults(s)
     ensureUnit("target")
     ensureUnit("watchtarget")
     ensureUnit("target_of_target")
+    return changed
 end
 
 local function NormalizeTrackerColor(raw)
@@ -620,7 +630,9 @@ function SettingsDefaults.TryMigrateCooldownTrackerFromCbt(s)
         end
     end
 
-    SettingsDefaults.EnsureCooldownTrackerDefaults(s)
+    if SettingsDefaults.EnsureCooldownTrackerDefaults(s) then
+        forceWrite = true
+    end
     migrateUnit("player", "player")
     migrateUnit("target", "target")
     migrateUnit("watchtarget", "watchtarget")
