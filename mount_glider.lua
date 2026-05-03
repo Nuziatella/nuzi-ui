@@ -28,6 +28,7 @@ local MountGlider = {
 local WINDOW_ID = "NuziUiMountGliderTracker"
 local TRACKER_GROUPS = { "mount", "glider" }
 local DEFAULT_ICON_SIZE = 36
+local MIN_ICON_SPACING = -8
 local DEFAULT_ICON_SPACING = 6
 local DEFAULT_ICONS_PER_ROW = 9
 local DEFAULT_TIMER_FONT_SIZE = 14
@@ -750,11 +751,11 @@ end
 
 local function getFrameLayout(cfg, clusters)
     local iconSize = clampInt(cfg.icon_size, 28, 96, DEFAULT_ICON_SIZE)
-    local spacing = clampInt(cfg.icon_spacing, 0, 20, DEFAULT_ICON_SPACING)
+    local spacing = clampInt(cfg.icon_spacing, MIN_ICON_SPACING, 20, DEFAULT_ICON_SPACING)
     local perRow = clampInt(cfg.icons_per_row, 1, 12, DEFAULT_ICONS_PER_ROW)
     local timerFontSize = clampInt(cfg.timer_font_size, 8, 24, DEFAULT_TIMER_FONT_SIZE)
-    local rowGap = math.max(4, math.floor(spacing + 4))
-    local clusterGap = math.max(spacing * 2, 10)
+    local rowGap = spacing > 0 and math.floor(spacing + 4) or 0
+    local clusterGap = spacing > 0 and math.max(spacing * 2, 10) or spacing
     local width = 0
     local height = 0
     local x = 0
@@ -1008,6 +1009,14 @@ local function getLiveForDevice(device)
     return best
 end
 
+local function getLiveForDeviceTrigger(ability, device)
+    local triggerId = tonumber(type(ability) == "table" and ability.trigger_spell_id or nil)
+    if triggerId ~= nil then
+        return MountGlider.buff_scan[math.floor(triggerId + 0.5)]
+    end
+    return getLiveForDevice(device)
+end
+
 local function findMountManaUnit()
     for _, unit in ipairs(MOUNT_MANA_UNITS) do
         local id = getUnitId(unit)
@@ -1242,9 +1251,12 @@ local function makeAbilityEntry(frame, cfg, device, ability, slotKey, nowMs, use
         return nil
     end
     slot.use_device_icon = useDeviceIcon and true or false
-    local live = getLiveForAbility(ability)
-    if live == nil and isDeviceTriggerAbility(ability) then
-        live = getLiveForDevice(device)
+    local live = nil
+    if isDeviceTriggerAbility(ability) then
+        live = getLiveForDeviceTrigger(ability, device)
+    end
+    if live == nil then
+        live = getLiveForAbility(ability)
     end
     if live ~= nil then
         local liveTimeLeft = tonumber(live.time_left_ms)

@@ -585,6 +585,14 @@ local function formatCooldownSeconds(value)
     return tostring(math.floor((ms / 1000) + 0.5))
 end
 
+local function formatSpellId(value)
+    local id = tonumber(value)
+    if id == nil or id <= 0 then
+        return ""
+    end
+    return tostring(math.floor(id + 0.5))
+end
+
 local function findLearnedDevice(cfg, deviceKey)
     if type(cfg) ~= "table" then
         return nil
@@ -660,7 +668,11 @@ local function refreshAbilityRows(context, group)
         setWidgetShown(row.cooldown_button, show)
         setWidgetShown(row.remove_button, show)
         if show then
-            setCheckboxText(context, row.checkbox, tostring(ability.label or ability.key or "Ability"))
+            local label = tostring(ability.label or ability.key or "Ability")
+            if ability.device_trigger == true and tonumber(ability.trigger_spell_id) ~= nil then
+                label = label .. " [" .. formatSpellId(ability.trigger_spell_id) .. "]"
+            end
+            setCheckboxText(context, row.checkbox, label)
             row.device_key = device.key
             row.ability_key = ability.key
             setReadableText(context, row.cooldown_edit, formatCooldownSeconds(ability.duration_ms))
@@ -823,7 +835,8 @@ local function addGliderSkill(context)
     local ok, message = MountGliderLearning.AddGliderSkill(
         getMountGliderSettings(context),
         getEditText(controls.mount_glider_glider_skill_name),
-        getEditText(controls.mount_glider_glider_skill_cooldown)
+        getEditText(controls.mount_glider_glider_skill_cooldown),
+        getEditText(controls.mount_glider_glider_skill_spell_id)
     )
     setReadableText(context, controls.mount_glider_learning_status, message)
     return ok
@@ -1202,10 +1215,13 @@ function Custom.BuildMountGliderSelector(context, parent, y)
     y = y + 32
 
     CreateLabel("polarUiMountGliderGliderSkillNameLabel", parent, "No-buff skill name", 0, y, 13, 120)
-    controls.mount_glider_glider_skill_name = CreateEdit("polarUiMountGliderGliderSkillName", parent, "", 120, y - 4, 170, 22)
-    CreateLabel("polarUiMountGliderGliderSkillCooldownLabel", parent, "CD sec", 302, y, 13, 52)
-    controls.mount_glider_glider_skill_cooldown = CreateEdit("polarUiMountGliderGliderSkillCooldown", parent, "", 352, y - 4, 48, 22)
-    createRepairButton(parent, "polarUiMountGliderGliderSkillAdd", "Add No-Buff", 410, y - 6, 108, function()
+    controls.mount_glider_glider_skill_name = CreateEdit("polarUiMountGliderGliderSkillName", parent, "", 120, y - 4, 180, 22)
+    CreateLabel("polarUiMountGliderGliderSkillCooldownLabel", parent, "CD sec", 312, y, 13, 52)
+    controls.mount_glider_glider_skill_cooldown = CreateEdit("polarUiMountGliderGliderSkillCooldown", parent, "", 362, y - 4, 48, 22)
+    y = y + 28
+    CreateLabel("polarUiMountGliderGliderSkillSpellIdLabel", parent, "Trigger spell ID", 0, y, 13, 120)
+    controls.mount_glider_glider_skill_spell_id = CreateEdit("polarUiMountGliderGliderSkillSpellId", parent, "", 120, y - 4, 100, 22)
+    createRepairButton(parent, "polarUiMountGliderGliderSkillAdd", "Add No-Buff", 236, y - 6, 116, function()
         addGliderSkill(context)
     end)
     y = y + 34

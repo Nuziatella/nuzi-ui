@@ -231,6 +231,42 @@ local function RoundPixel(value)
     return math.ceil(n - 0.5)
 end
 
+local function NormalizeScreenAnchor(x, y, z)
+    local nx = tonumber(x)
+    local ny = tonumber(y)
+    local nz = tonumber(z)
+    if nx == nil or ny == nil or nz == nil or nz < 0 then
+        return nil, nil, nil
+    end
+    return nx, ny, nz
+end
+
+local function GetUnitScreenAnchor(unit, preferNameTag)
+    if api == nil or api.Unit == nil then
+        return nil, nil, nil
+    end
+
+    local x = nil
+    local y = nil
+    local z = nil
+
+    if preferNameTag and api.Unit.GetUnitScreenNameTagOffset ~= nil then
+        pcall(function()
+            x, y, z = api.Unit:GetUnitScreenNameTagOffset(unit)
+        end)
+        return NormalizeScreenAnchor(x, y, z)
+    end
+
+    if api.Unit.GetUnitScreenPosition == nil then
+        return nil, nil, nil
+    end
+
+    pcall(function()
+        x, y, z = api.Unit:GetUnitScreenPosition(unit)
+    end)
+    return NormalizeScreenAnchor(x, y, z)
+end
+
 local function SafeUiNowMs()
     if api.Time == nil or api.Time.GetUiMsec == nil then
         return 0
@@ -1070,6 +1106,8 @@ local function UpdateDebuffWidgets(frame, cfg, effects, screenX, screenY)
     end
     local count = math.min(#effects, maxIcons, #frame.icons)
     local rowWidth, rowHeight = LayoutDebuffIcons(frame, cfg, count)
+    frame.__polar_debuff_row_width = rowWidth
+    frame.__polar_debuff_row_height = rowHeight
     PositionDebuffFrame(frame, cfg, rowWidth, rowHeight, screenX, screenY)
 
     for index, entry in ipairs(frame.icons) do
@@ -1100,6 +1138,39 @@ local function GetCfg(settings)
         return {}
     end
     return settings.nameplates
+end
+
+local function GetPlateLayoutMetrics(cfg)
+    if type(cfg) ~= "table" then
+        cfg = {}
+    end
+
+    local guildOnly = cfg.guild_only and true or false
+    local width = ClampNumber(cfg.width, 50, 400, 120)
+    local hpHeight = ClampNumber(cfg.hp_height, 5, 60, 28)
+    local mpHeight = ClampNumber(cfg.mp_height, 0, 40, 4)
+    local totalHeight = hpHeight + mpHeight
+
+    if guildOnly then
+        local guildFs = ClampNumber(cfg.guild_font_size, 6, 32, 11)
+        totalHeight = guildFs + 8
+    end
+
+    return width, hpHeight, mpHeight, totalHeight
+end
+
+local function PositionPlateFrame(frame, cfg, screenX, screenY)
+    if frame == nil then
+        return
+    end
+    if type(cfg) ~= "table" then
+        cfg = {}
+    end
+
+    local width, _, _, totalHeight = GetPlateLayoutMetrics(cfg)
+    local posX = RoundPixel(screenX + ClampNumber(cfg.x_offset, -500, 500, 0) - (width / 2))
+    local posY = RoundPixel(screenY - ClampNumber(cfg.y_offset, -200, 200, 22) - (totalHeight / 2))
+    SafeSetAnchorTopLeft(frame, posX, posY)
 end
 
 local function RefreshStaticState(state, id, unit, cfg)
@@ -1175,20 +1246,8 @@ local function UpdateDebuffsForUnit(unit, settings)
         return
     end
 
-    local offsetX = nil
-    local offsetY = nil
-    local offsetZ = nil
-    if api.Unit.GetUnitScreenNameTagOffset ~= nil then
-        pcall(function()
-            offsetX, offsetY, offsetZ = api.Unit:GetUnitScreenNameTagOffset(unit)
-        end)
-    end
-    if offsetX == nil or offsetY == nil or offsetZ == nil then
-        pcall(function()
-            offsetX, offsetY, offsetZ = api.Unit:GetUnitScreenPosition(unit)
-        end)
-    end
-    if offsetX == nil or offsetY == nil or offsetZ == nil or offsetZ < 0 then
+    local offsetX, offsetY = GetUnitScreenAnchor(unit, true)
+    if offsetX == nil or offsetY == nil then
         HideDebuffs(unit, state)
         return
     end
@@ -1210,7 +1269,7 @@ local function UpdateDebuffsForUnit(unit, settings)
         return
     end
 
-    local shown = UpdateDebuffWidgets(frame, debuffCfg, GetCachedDebuffEffects(state, unit), RoundPixel(offsetX), RoundPixel(offsetY))
+    local shown = UpdateDebuffWidgets(frame, debuffCfg, GetCachedDebuffEffects(state, unit), offsetX, offsetY)
     state.debuff_visible = shown and true or false
 end
 
@@ -1248,21 +1307,8 @@ local function UpdateOne(unit, settings)
         return
     end
 
-    local offsetX = nil
-    local offsetY = nil
-    local offsetZ = nil
-
-    if cfg.anchor_to_nametag and api.Unit.GetUnitScreenNameTagOffset ~= nil then
-        pcall(function()
-            offsetX, offsetY, offsetZ = api.Unit:GetUnitScreenNameTagOffset(unit)
-        end)
-    end
-
-    if offsetX == nil or offsetY == nil or offsetZ == nil then
-        offsetX, offsetY, offsetZ = api.Unit:GetUnitScreenPosition(unit)
-    end
-
-    if offsetX == nil or offsetY == nil or offsetZ == nil or offsetZ < 0 then
+    local offsetX, offsetY = GetUnitScreenAnchor(unit, cfg.anchor_to_nametag and true or false)
+    if offsetX == nil or offsetY == nil then
         HideUnit(unit, state)
         return
     end
@@ -1295,23 +1341,9 @@ local function UpdateOne(unit, settings)
         SafeSetBg(frame, bgEnabled, bgAlpha01)
     end
 
-    local width = ClampNumber(cfg.width, 50, 400, 120)
-    local hpHeight = ClampNumber(cfg.hp_height, 5, 60, 28)
-    local mpHeight = ClampNumber(cfg.mp_height, 0, 40, 4)
-    local totalHeight = hpHeight + mpHeight
+    local width, hpHeight, mpHeight, totalHeight = GetPlateLayoutMetrics(cfg)
 
-    if guildOnly then
-        local guildFs = ClampNumber(cfg.guild_font_size, 6, 32, 11)
-        totalHeight = guildFs + 8
-    end
-
-    offsetX = RoundPixel(offsetX) + ClampNumber(cfg.x_offset, -500, 500, 0)
-    offsetY = RoundPixel(offsetY) - ClampNumber(cfg.y_offset, -200, 200, 22)
-
-    local posX = offsetX - RoundPixel(width / 2)
-    local posY = offsetY - RoundPixel(totalHeight / 2)
-
-    SafeSetAnchorTopLeft(frame, posX, posY)
+    PositionPlateFrame(frame, cfg, offsetX, offsetY)
 
     ApplyGuildMode(frame, guildOnly, mpHeight > 0)
 
@@ -1388,6 +1420,50 @@ Nameplates.SetEnabled = function(enabled)
     if not Nameplates.enabled then
         HideAllFrames()
         HideAllDebuffs()
+    end
+end
+
+Nameplates.OnPositionUpdate = function(settings)
+    if settings == nil then
+        return
+    end
+    if Compat ~= nil and not Compat.NameplatesSupported() then
+        return
+    end
+
+    local cfg = GetCfg(settings)
+    local customEnabled = Nameplates.enabled and cfg.enabled
+    local debuffsEnabled = Nameplates.enabled and DebuffsEnabled(cfg)
+
+    if customEnabled then
+        for unit, frame in pairs(Nameplates.frames) do
+            local state = Nameplates.unit_state[unit]
+            if type(state) == "table" and state.visible then
+                local x, y = GetUnitScreenAnchor(unit, cfg.anchor_to_nametag and true or false)
+                if x ~= nil and y ~= nil then
+                    PositionPlateFrame(frame, cfg, x, y)
+                else
+                    HideUnit(unit, state)
+                end
+            end
+        end
+    end
+
+    if debuffsEnabled then
+        local debuffCfg = GetDebuffCfg(cfg)
+        for unit, frame in pairs(Nameplates.debuff_frames) do
+            local state = Nameplates.unit_state[unit]
+            if type(state) == "table" and state.debuff_visible then
+                local rowWidth = tonumber(frame.__polar_debuff_row_width)
+                local rowHeight = tonumber(frame.__polar_debuff_row_height)
+                local x, y = GetUnitScreenAnchor(unit, true)
+                if x ~= nil and y ~= nil and rowWidth ~= nil and rowHeight ~= nil then
+                    PositionDebuffFrame(frame, debuffCfg, rowWidth, rowHeight, x, y)
+                else
+                    HideDebuffs(unit, state)
+                end
+            end
+        end
     end
 end
 

@@ -856,10 +856,10 @@ SettingsSchema.PAGES = {
                     hint(
                         "mount_glider_share_hint",
                         "polarUiMountGliderShareHint",
-                        "Learned devices save to nuzi-ui/.data/mount_glider_devices.txt. No-buff glider cooldowns start from the glider name buff.",
+                        "Learned devices save to nuzi-ui/.data/mount_glider_devices.txt. No-buff glider cooldowns can start from a trigger spell ID or the glider name buff.",
                         { width = 520 }
                     ),
-                    custom("mount_glider_devices", { estimate_height = 780 })
+                    custom("mount_glider_devices", { estimate_height = 820 })
                 }
             },
             {
@@ -880,7 +880,7 @@ SettingsSchema.PAGES = {
                         "mount_glider_icon_spacing",
                         "polarUiMountGliderIconSpacing",
                         "Icon spacing",
-                        0,
+                        -8,
                         20,
                         1,
                         { depends_on = { control = "mount_glider_enabled", checked = true } }

@@ -103,7 +103,7 @@ function CooldownPage.Build(state, page, gap)
 
     createSlider(controls, "ct_icon_size", "polarUiCooldownIconSize", page, "Icon size", 15, y, 12, 80, 1)
     y = y + 24
-    createSlider(controls, "ct_icon_spacing", "polarUiCooldownIconSpacing", page, "Icon spacing", 15, y, 0, 20, 1)
+    createSlider(controls, "ct_icon_spacing", "polarUiCooldownIconSpacing", page, "Icon spacing", 15, y, -8, 20, 1)
     y = y + 24
     createSlider(controls, "ct_max_icons", "polarUiCooldownMaxIcons", page, "Max icons", 15, y, 1, 20, 1)
     y = y + gap + 10

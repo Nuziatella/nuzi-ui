@@ -479,11 +479,20 @@ local function captureManaAbility(spent, labelOverride)
     return true
 end
 
-local function captureDeviceTriggerGliderAbility(label, cooldownSeconds)
+local function captureDeviceTriggerGliderAbility(label, cooldownSeconds, triggerSpellId)
     label = trim(label)
     local seconds = tonumber(cooldownSeconds)
     if session == nil or label == "" or seconds == nil or seconds <= 0 then
         return false
+    end
+    local triggerText = trim(triggerSpellId)
+    local triggerId = nil
+    if triggerText ~= "" then
+        triggerId = tonumber(triggerText)
+        if triggerId == nil or triggerId <= 0 then
+            return false, "Enter a numeric trigger spell ID or leave it blank."
+        end
+        triggerId = math.floor(triggerId + 0.5)
     end
     seconds = math.floor(seconds + 0.5)
     local ability = {
@@ -496,8 +505,15 @@ local function captureDeviceTriggerGliderAbility(label, cooldownSeconds)
         learned = true,
         device_trigger = true
     }
+    if triggerId ~= nil then
+        ability.trigger_spell_id = triggerId
+    end
     mergeSessionAbility(ability)
-    updateStatus(summarizeAbilities(session.abilities) .. ". This cooldown starts when the glider name buff appears.")
+    if triggerId ~= nil then
+        updateStatus(summarizeAbilities(session.abilities) .. ". This cooldown starts from spell ID " .. formatId(triggerId) .. ".")
+    else
+        updateStatus(summarizeAbilities(session.abilities) .. ". This cooldown starts when the glider name buff appears.")
+    end
     return true
 end
 
@@ -513,6 +529,10 @@ abilitiesMatch = function(left, right)
     end
     if tonumber(left.mount_mana_spent) ~= nil
         and tonumber(left.mount_mana_spent) == tonumber(right.mount_mana_spent) then
+        return true
+    end
+    if tonumber(left.trigger_spell_id) ~= nil
+        and tonumber(left.trigger_spell_id) == tonumber(right.trigger_spell_id) then
         return true
     end
     if tonumber(left.spell_id) == nil
@@ -762,7 +782,7 @@ function Learning.AddMountSkill(settings, abilityName, manaCost)
     return true, session.status
 end
 
-function Learning.AddGliderSkill(settings, abilityName, cooldownSeconds)
+function Learning.AddGliderSkill(settings, abilityName, cooldownSeconds, triggerSpellId)
     abilityName = trim(abilityName)
     if abilityName == "" then
         return false, "Enter the glider skill name first."
@@ -783,10 +803,11 @@ function Learning.AddGliderSkill(settings, abilityName, cooldownSeconds)
             return false, message
         end
     end
-    if captureDeviceTriggerGliderAbility(abilityName, cooldownSeconds) then
+    local ok, message = captureDeviceTriggerGliderAbility(abilityName, cooldownSeconds, triggerSpellId)
+    if ok then
         return true, session.status
     end
-    return false, "Enter the glider skill name and cooldown."
+    return false, message or "Enter the glider skill name and cooldown."
 end
 
 function Learning.Finish(cfg)

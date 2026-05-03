@@ -55,6 +55,7 @@ local COOLDOWN_TIMER_COLOR = { 255, 72, 72, 255 }
 local DEFAULT_BAR_FILL_COLOR = { 207, 74, 22, 255 }
 local COOLDOWN_BAR_FILL_COLOR = { 220, 42, 42, 255 }
 local DEFAULT_BAR_BG_COLOR = { 18, 18, 18, 220 }
+local MIN_ICON_SPACING = -8
 
 local function safeCall(fn, ...)
     if type(fn) ~= "function" then
@@ -1654,7 +1655,8 @@ local function updateWindow(unitKey, unitCfg, entries)
     local count = math.min(#entries, clampInt(unitCfg.max_icons, 1, 16, 10))
     local displayStyle = normalizeDisplayStyle(unitCfg.display_style)
     local iconSize = clampInt(unitCfg.icon_size, 12, 80, 40)
-    local spacing = clampInt(unitCfg.icon_spacing, 0, 24, 5)
+    local spacing = clampInt(unitCfg.icon_spacing, MIN_ICON_SPACING, 24, 5)
+    local barSpacing = math.max(0, spacing)
     local showTimer = unitCfg.show_timer ~= false
     local showLabel = unitCfg.show_label and true or false
     local timerColor = normalizeColor01(unitCfg.timer_color)
@@ -1688,8 +1690,8 @@ local function updateWindow(unitKey, unitCfg, entries)
     local windowWidth
     local windowHeight
     if displayStyle == "bars" then
-        windowWidth = iconSize + spacing + barWidth
-        windowHeight = count > 0 and ((count * rowHeight) + ((count - 1) * spacing)) or rowHeight
+        windowWidth = iconSize + barSpacing + barWidth
+        windowHeight = count > 0 and ((count * rowHeight) + ((count - 1) * barSpacing)) or rowHeight
     else
         windowWidth = math.max(iconSize, (count > 0 and ((count * iconSize) + ((count - 1) * spacing)) or iconSize))
         windowHeight = iconSize + cooldownTextHeight + labelHeight
@@ -1739,9 +1741,9 @@ local function updateWindow(unitKey, unitCfg, entries)
             end
 
             if displayStyle == "bars" then
-                local rowY = (index - 1) * (rowHeight + spacing)
+                local rowY = (index - 1) * (rowHeight + barSpacing)
                 local iconY = math.max(0, math.floor((rowHeight - iconSize) / 2))
-                local textX = iconSize + spacing
+                local textX = iconSize + barSpacing
                 local barY = rowY + rowLabelHeight
                 local cooldownTimeLeft = getCooldownTimeLeftMs(entry)
                 local cooldownReady = isCooldownReady(entry)

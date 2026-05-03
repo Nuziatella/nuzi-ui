@@ -333,8 +333,16 @@ local function copyAbility(raw)
         icon_path = type(raw.icon_path) == "string" and raw.icon_path or nil,
         exact_spell_id = raw.exact_spell_id == true,
         learned = raw.learned == true,
-        device_trigger = raw.device_trigger == true or raw.manual_trigger == true
+        device_trigger = raw.device_trigger == true
+            or raw.manual_trigger == true
+            or tonumber(raw.trigger_spell_id) ~= nil
+            or tonumber(raw.trigger_buff_id) ~= nil
     }
+    if tonumber(raw.trigger_spell_id) ~= nil then
+        out.trigger_spell_id = math.floor(tonumber(raw.trigger_spell_id) + 0.5)
+    elseif tonumber(raw.trigger_buff_id) ~= nil then
+        out.trigger_spell_id = math.floor(tonumber(raw.trigger_buff_id) + 0.5)
+    end
     if tonumber(raw.spell_id) ~= nil then
         out.spell_id = math.floor(tonumber(raw.spell_id) + 0.5)
         out.exact_spell_id = true

@@ -50,6 +50,7 @@ local UI = {
     enabled = true,
     accum_ms = 0,
     plates_accum_ms = 0,
+    plates_position_accum_ms = 0,
     needs_full_apply = true,
     stock_refreshed = false,
     last_large_hpmp = nil,
@@ -4559,6 +4560,7 @@ UI.Init = function(settings)
     UI.enabled = settings.enabled and true or false
     UI.accum_ms = 0
     UI.plates_accum_ms = 0
+    UI.plates_position_accum_ms = 0
     UI.needs_full_apply = true
     UI.stock_refreshed = false
     UI.last_large_hpmp = nil
@@ -4848,15 +4850,30 @@ UI.OnUpdate = function(dt)
     end
 
     UI.plates_accum_ms = (tonumber(UI.plates_accum_ms) or 0) + dt
+    UI.plates_position_accum_ms = (tonumber(UI.plates_position_accum_ms) or 0) + dt
     local fastInterval = 33
+    local ranPlateUpdate = false
     if UI.plates_accum_ms >= fastInterval then
         UI.plates_accum_ms = 0
+        UI.plates_position_accum_ms = 0
+        ranPlateUpdate = true
         if Nameplates ~= nil and Nameplates.OnUpdate ~= nil then
             local ok, err = pcall(function()
                 Nameplates.OnUpdate(UI.settings)
             end)
             if not ok and api.Log ~= nil and api.Log.Err ~= nil then
                 api.Log:Err("[Nuzi UI] Nameplates.OnUpdate failed: " .. tostring(err))
+            end
+        end
+    end
+    if not ranPlateUpdate and UI.plates_position_accum_ms >= 16 then
+        UI.plates_position_accum_ms = 0
+        if Nameplates ~= nil and Nameplates.OnPositionUpdate ~= nil then
+            local ok, err = pcall(function()
+                Nameplates.OnPositionUpdate(UI.settings)
+            end)
+            if not ok and api.Log ~= nil and api.Log.Err ~= nil then
+                api.Log:Err("[Nuzi UI] Nameplates.OnPositionUpdate failed: " .. tostring(err))
             end
         end
     end
