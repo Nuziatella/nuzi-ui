@@ -47,6 +47,8 @@ for _, def in ipairs(SLOT_DEFS) do
     SLOT_BY_KEY[def.key] = def
 end
 
+local APPELLATION_TYPE_INDEX = 1
+
 local function safeCall(fn, ...)
     if type(fn) ~= "function" then
         return nil
@@ -535,6 +537,26 @@ local function readEquippedItem(def)
     return item
 end
 
+local function readCurrentAppellationType()
+    if api.Player == nil or api.Player.GetShowingAppellation == nil then
+        return nil
+    end
+    local info = safeCall(function()
+        return api.Player:GetShowingAppellation()
+    end)
+    if info == nil then
+        return 0
+    end
+    if type(info) ~= "table" then
+        return nil
+    end
+    local titleType = tonumber(info[APPELLATION_TYPE_INDEX])
+    if titleType == nil then
+        return nil
+    end
+    return math.floor(titleType + 0.5)
+end
+
 local function getBagCapacity()
     if api.Bag ~= nil and api.Bag.Capacity ~= nil then
         local value = tonumber(safeCall(function()
@@ -859,6 +881,27 @@ end
 local refreshBar
 local refreshEditor
 
+local function applyLoadoutTitle(loadout)
+    if type(loadout) ~= "table" or loadout.title_type == nil then
+        return false
+    end
+    if api.Player == nil or api.Player.ChangeAppellation == nil then
+        return false
+    end
+    local titleType = tonumber(loadout.title_type)
+    if titleType == nil then
+        return false
+    end
+    titleType = math.floor(titleType + 0.5)
+    local currentType = readCurrentAppellationType()
+    if currentType ~= nil and currentType == titleType then
+        return false
+    end
+    return safeCall(function()
+        return api.Player:ChangeAppellation(titleType)
+    end) and true or false
+end
+
 local function equipLoadout(loadout)
     if type(loadout) ~= "table" then
         return
@@ -868,6 +911,7 @@ local function equipLoadout(loadout)
     end
 
     showIssues(loadout, tostring(loadout.name or "Loadout"))
+    local titleChanged = applyLoadoutTitle(loadout)
 
     local usedSlots = {}
     local queue = {}
@@ -898,7 +942,11 @@ local function equipLoadout(loadout)
     GearLoadouts.pending_check_loadout_id = nil
 
     if #queue == 0 then
-        setStatus("No gear to equip for " .. tostring(loadout.name or "loadout") .. ".", false)
+        if titleChanged then
+            setStatus("Applied title for " .. tostring(loadout.name or "loadout") .. ".", false)
+        else
+            setStatus("No gear to equip for " .. tostring(loadout.name or "loadout") .. ".", false)
+        end
         return
     end
     setStatus("Equipping " .. tostring(loadout.name or "loadout") .. "...", false)
@@ -1089,6 +1137,10 @@ local function saveEquippedToLoadout()
         if item ~= nil then
             slots[def.key] = itemDescriptor(def, item)
         end
+    end
+    local titleType = readCurrentAppellationType()
+    if titleType ~= nil then
+        loadout.title_type = titleType
     end
     saveSettings(GearLoadouts.settings)
     setStatus("Saved equipped gear to " .. tostring(loadout.name or "loadout") .. ".", false)

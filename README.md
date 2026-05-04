@@ -129,7 +129,7 @@ You can:
 
 - create, name, save, and delete gear loadouts per character
 - drag bag gear onto character-style equipment slots in the editor
-- save the currently equipped gear into the selected loadout
+- save the currently equipped gear and title into the selected loadout
 - show loadout buttons as names or chosen item icons
 - warn on missing items or slot mismatches before a swap runs
 
