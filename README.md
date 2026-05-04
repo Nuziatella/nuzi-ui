@@ -11,6 +11,7 @@ Because the stock frames are fine right up until you actually want them to look 
 - adds an optional travel speed meter for vehicles, mounts, gliders, and on-foot movement
 - adds optional mount/glider movement-ability timers in their own settings page
 - adds optional per-character gear loadouts with a clickable swap bar and drag/drop editor
+- adds an optional daily quest list that shows selected incomplete dailies
 - supports optional custom nameplates with matching layout controls
 - adds tracked cooldown and effect windows for `player`, `target`, `watchtarget`, and `target of target`
 - includes target overlay extras, aura layout controls, and a movable launcher icon
@@ -30,7 +31,7 @@ Saved data lives in `nuzi-ui/.data` so your layout, cooldown tracking, and setti
 1. Open the `Nuzi UI` settings from the launcher icon.
 2. Pick which frame group you want to edit and adjust text, bars, auras, or plates.
 3. Enable only the overlays you actually want visible.
-4. If you want a player cast bar, travel speed meter, mount/glider timers, or gear loadouts, enable them on their pages and move them with `Shift + drag`.
+4. If you want a player cast bar, travel speed meter, mount/glider timers, gear loadouts, or daily quest list, enable them on their pages and move them with `Shift + drag`.
 5. If you use cooldown tracking, add effects by ID, search, or scan and place each tracker where it fits your UI.
 6. If frames look wrong after changing UI scale, open `UI Repair` and use Refresh, Reset Frames, or Center Frames.
 
@@ -132,6 +133,22 @@ You can:
 - show loadout buttons as names or chosen item icons
 - warn on missing items or slot mismatches before a swap runs
 
+### Dailies
+
+The dailies page adds a compact checklist for daily quest groups.
+
+You can:
+
+- choose which DailyAge quest groups this character wants to track
+- keep each character's tracked daily list saved separately
+- collapse the checklist to a header that shows the incomplete count
+- toggle a completed tracked dailies list from the `C` header button
+- color incomplete tracked dailies amber when they do not appear to be in your quest log
+- hide completed dailies automatically
+- hide the whole checklist when every selected daily is complete
+- show quest ids for debugging or route planning
+- resize, scale, move, and lock the checklist
+
 ### Settings And Backups
 
 The settings window also handles profile safety tools.
@@ -147,10 +164,14 @@ You can:
 
 ## Notes
 
-- The launcher icon, settings window, overlays, cooldown trackers, cast bar, travel speed meter, mount/glider strip, and loadout UI all save their positions.
+- The launcher icon, settings window, overlays, cooldown trackers, cast bar, travel speed meter, mount/glider strip, loadout UI, and daily quest list all save their positions.
 - Learned mount, glider, and magithropter definitions also save to `.data/mount_glider_devices.txt` so they can be shared without copying another player's UI layout.
 - Cooldown tracker windows for non-player units use nameplate-relative offsets instead of fixed screen coordinates.
 - Backup files live in `.data/backups`.
 - Moving addon windows follows the same `Shift + drag` behavior as the other Nuzi addons.
 
 3.0.0
+
+## Credits
+
+- Daily quest tracking is based on DailyAge by Michaelqt.

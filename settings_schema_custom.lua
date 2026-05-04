@@ -1,7 +1,9 @@
 local api = require("api")
 local SettingsWidgets = require("nuzi-ui/settings_widgets")
+local Runtime = require("nuzi-ui/runtime")
 local MountGliderCatalog = require("nuzi-ui/mount_glider_catalog")
 local MountGliderLearning = require("nuzi-ui/mount_glider_learning")
+local QuestWatchData = require("nuzi-ui/quest_watch_data")
 
 local Custom = {}
 
@@ -358,6 +360,89 @@ local function getMountGliderSettings(context)
         settings.mount_glider.selected_glider = ""
     end
     return settings.mount_glider
+end
+
+local function getQuestWatchSettings(context)
+    local state = getState(context)
+    local settings = type(state) == "table" and state.settings or nil
+    if type(settings) ~= "table" then
+        return nil
+    end
+    if type(settings.quest_watch) ~= "table" then
+        settings.quest_watch = {}
+    end
+    if type(settings.quest_watch.characters) ~= "table" then
+        settings.quest_watch.characters = {}
+    end
+    return settings.quest_watch
+end
+
+local function getQuestWatchProfile(context)
+    local cfg = getQuestWatchSettings(context)
+    if type(cfg) ~= "table" then
+        return nil
+    end
+    local characterName = ""
+    if Runtime ~= nil and Runtime.GetPlayerName ~= nil then
+        characterName = Runtime.GetPlayerName()
+    end
+    return QuestWatchData.EnsureCharacterProfile(cfg, characterName)
+end
+
+local function saveApplyQuestWatch(context)
+    if type(context) == "table" and type(context.apply_controls) == "function" then
+        pcall(function()
+            context.apply_controls()
+        end)
+    end
+    local state = getState(context)
+    if type(state) == "table" and type(state.on_apply) == "function" then
+        pcall(function()
+            state.on_apply()
+        end)
+    end
+    if type(state) == "table" and type(state.on_save) == "function" then
+        pcall(function()
+            state.on_save()
+        end)
+    end
+end
+
+local function getQuestTitle(group)
+    local title = ""
+    if type(group) == "table"
+        and type(group.ids) == "table"
+        and api ~= nil
+        and api.Quest ~= nil
+        and api.Quest.GetQuestContextMainTitle ~= nil then
+        local ok, value = pcall(function()
+            return api.Quest:GetQuestContextMainTitle(group.ids[1])
+        end)
+        if ok and value ~= nil then
+            title = tostring(value)
+        end
+    end
+    if type(title) ~= "string" or title == "" then
+        title = tostring(type(group) == "table" and group.label or "")
+    end
+    title = string.match(title, "^%s*(.-)%s*$") or title
+    if title == "" and type(group) == "table" and type(group.ids) == "table" then
+        title = "Quest " .. tostring(group.ids[1] or "")
+    end
+    return title
+end
+
+local function setQuestRowsChecked(context, checked)
+    local controls = getControls(context)
+    if type(controls.quest_watch_rows) ~= "table" then
+        return
+    end
+    for _, row in ipairs(controls.quest_watch_rows) do
+        if type(row) == "table" and row.checkbox ~= nil and row.checkbox.SetChecked ~= nil then
+            row.checkbox:SetChecked(checked and true or false)
+        end
+    end
+    saveApplyQuestWatch(context)
 end
 
 local function setWidgetShown(widget, shown)
@@ -1326,6 +1411,54 @@ function Custom.BuildGearLoadoutActions(context, parent, y)
     end)
     getControls(context).gear_loadouts_edit = editButton
     return y + 34
+end
+
+function Custom.BuildQuestWatchSelector(context, parent, y)
+    local controls = getControls(context)
+    local profile = getQuestWatchProfile(context)
+    if type(profile) ~= "table" then
+        return y
+    end
+
+    controls.quest_watch_rows = {}
+
+    createRepairButton(parent, "polarUiQuestWatchSelectAll", "Track All", 0, y, 120, function()
+        setQuestRowsChecked(context, true)
+    end)
+    createRepairButton(parent, "polarUiQuestWatchSelectNone", "Track None", 134, y, 120, function()
+        setQuestRowsChecked(context, false)
+    end)
+    controls.quest_watch_status = CreateHintLabel("polarUiQuestWatchStatus", parent, "Selections are saved for the current character.", 272, y + 4, 310)
+    y = y + 38
+
+    local currentCategory = ""
+    for index, group in ipairs(QuestWatchData.GetGroups()) do
+        local category = tostring(group.category or "Daily")
+        if category ~= currentCategory then
+            currentCategory = category
+            CreateLabel("polarUiQuestWatchCategory" .. tostring(index), parent, category, 0, y, 15, 560)
+            y = y + 24
+        end
+
+        local label = getQuestTitle(group)
+        if type(group.ids) == "table" and #group.ids > 1 then
+            label = label .. " (" .. tostring(#group.ids) .. " variants)"
+        end
+        local checkbox = CreateCheckbox("polarUiQuestWatchQuest" .. tostring(index), parent, label, 10, y)
+        if checkbox ~= nil and checkbox.SetChecked ~= nil then
+            checkbox:SetChecked(profile.tracked[group.key] ~= false)
+        end
+        if checkbox ~= nil and checkbox.__polar_label_widget ~= nil and checkbox.__polar_label_widget.SetExtent ~= nil then
+            checkbox.__polar_label_widget:SetExtent(560, 18)
+        end
+        controls.quest_watch_rows[#controls.quest_watch_rows + 1] = {
+            key = group.key,
+            checkbox = checkbox
+        }
+        y = y + 22
+    end
+
+    return y + 6
 end
 
 return Custom

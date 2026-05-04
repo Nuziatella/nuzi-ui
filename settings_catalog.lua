@@ -56,6 +56,12 @@ SettingsCatalog.PAGES = {
         summary = "Per-character gear loadout bar with a drag/drop equipment editor."
     },
     {
+        id = "dailies",
+        label = "Dailies",
+        title = "Daily Quests",
+        summary = "Per-character incomplete daily quest checklist backed by the client quest API."
+    },
+    {
         id = "auras",
         label = "Auras",
         title = "Auras",

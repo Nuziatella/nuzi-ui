@@ -801,7 +801,7 @@ SettingsSchema.PAGES = {
             {
                 id = "mount_glider_behavior",
                 title = "Mount/Glider Timers",
-                hint = "Select the mounts, gliders, and magithopters you own, then show a dedicated row of movement timers for each one.",
+                hint = "Select the mounts which options to enable.",
                 fields = {
                     checkbox("mount_glider_enabled", "polarUiMountGliderEnabled", "Enable mount/glider timers"),
                     hint(
@@ -850,8 +850,8 @@ SettingsSchema.PAGES = {
             },
             {
                 id = "mount_glider_devices",
-                title = "Devices",
-                hint = "Use the dropdowns to edit each learned mount, glider, or magithopter, then check the abilities that should appear on the timer bar.",
+                title = "Mounts/Gliders/Magithopters",
+                hint = "Use the buttons to add mounts/gliders/magithopters. Use the drop down menus to enable them.",
                 fields = {
                     hint(
                         "mount_glider_share_hint",
@@ -965,6 +965,93 @@ SettingsSchema.PAGES = {
                         1,
                         { depends_on = { control = "gear_loadouts_enabled", checked = true } }
                     )
+                }
+            }
+        }
+    },
+    dailies = {
+        sections = {
+            {
+                id = "dailies_behavior",
+                title = "Daily Quests",
+                hint = "Show a compact per-character checklist of selected daily quests.",
+                fields = {
+                    checkbox("quest_watch_enabled", "polarUiQuestWatchEnabled", "Enable daily quests checklist"),
+                    hint(
+                        "quest_watch_move_hint",
+                        "polarUiQuestWatchMoveHint",
+                        "Drag in game to move the checklist. C shows completed tracked dailies. Amber rows are missing from your quest log.",
+                        { width = 520, depends_on = { control = "quest_watch_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "quest_watch_lock_position",
+                        "polarUiQuestWatchLockPosition",
+                        "Lock checklist position",
+                        { depends_on = { control = "quest_watch_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "quest_watch_hide_when_done",
+                        "polarUiQuestWatchHideWhenDone",
+                        "Hide when all selected dailies are complete",
+                        { depends_on = { control = "quest_watch_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "quest_watch_show_ids",
+                        "polarUiQuestWatchShowIds",
+                        "Show quest ids",
+                        { depends_on = { control = "quest_watch_enabled", checked = true } }
+                    )
+                }
+            },
+            {
+                id = "dailies_layout",
+                title = "Layout",
+                hint = "Limit how much of the checklist is visible.",
+                fields = {
+                    slider(
+                        "quest_watch_width",
+                        "polarUiQuestWatchWidth",
+                        "Checklist width",
+                        240,
+                        520,
+                        1,
+                        { depends_on = { control = "quest_watch_enabled", checked = true } }
+                    ),
+                    slider(
+                        "quest_watch_scale",
+                        "polarUiQuestWatchScale",
+                        "Checklist scale (75-160)",
+                        75,
+                        160,
+                        1,
+                        { depends_on = { control = "quest_watch_enabled", checked = true } }
+                    ),
+                    slider(
+                        "quest_watch_max_visible",
+                        "polarUiQuestWatchMaxVisible",
+                        "Visible rows",
+                        4,
+                        24,
+                        1,
+                        { depends_on = { control = "quest_watch_enabled", checked = true } }
+                    ),
+                    slider(
+                        "quest_watch_update_interval",
+                        "polarUiQuestWatchUpdateInterval",
+                        "Refresh seconds",
+                        1,
+                        60,
+                        1,
+                        { depends_on = { control = "quest_watch_enabled", checked = true } }
+                    )
+                }
+            },
+            {
+                id = "dailies_quests",
+                title = "Tracked Dailies",
+                hint = "Choose the daily quests this character wants to finish.",
+                fields = {
+                    custom("quest_watch_selector", { estimate_height = 2860 })
                 }
             }
         }

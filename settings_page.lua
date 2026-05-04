@@ -11,6 +11,8 @@ local SettingsSchema = SafeRequire("nuzi-ui/settings_schema", "nuzi-ui.settings_
 local SettingsSchemaCustom = SafeRequire("nuzi-ui/settings_schema_custom", "nuzi-ui.settings_schema_custom")
 local CastBar = SafeRequire("nuzi-ui/castbar", "nuzi-ui.castbar")
 local GearLoadouts = SafeRequire("nuzi-ui/gear_loadouts", "nuzi-ui.gear_loadouts")
+local Runtime = SafeRequire("nuzi-ui/runtime", "nuzi-ui.runtime")
+local QuestWatchData = SafeRequire("nuzi-ui/quest_watch_data", "nuzi-ui.quest_watch_data")
 
 local SettingsPage = {
     settings = nil,
@@ -51,6 +53,23 @@ local SettingsPage = {
 }
 
 local detectedAddonDir = nil
+
+local function GetQuestWatchProfile(cfg)
+    if type(cfg) ~= "table" then
+        return nil
+    end
+    if QuestWatchData ~= nil and QuestWatchData.EnsureCharacterProfile ~= nil then
+        local characterName = ""
+        if Runtime ~= nil and Runtime.GetPlayerName ~= nil then
+            characterName = Runtime.GetPlayerName()
+        end
+        return QuestWatchData.EnsureCharacterProfile(cfg, characterName)
+    end
+    if type(cfg.tracked) ~= "table" then
+        cfg.tracked = {}
+    end
+    return cfg
+end
 
 local function NormalizePath(path)
     return string.gsub(tostring(path or ""), "\\", "/")
@@ -214,6 +233,7 @@ local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAG
     { id = "travel", label = "Travel", title = "Travel Speed", summary = "Movable speed meter for vehicles, mounts, gliders, and on-foot travel." },
     { id = "mount_glider", label = "Mount/Glider", title = "Mount/Glider", summary = "Specialized timers for mount and glider movement abilities." },
     { id = "loadouts", label = "Loadouts", title = "Gear Loadouts", summary = "Per-character gear loadout bar with a drag/drop equipment editor." },
+    { id = "dailies", label = "Dailies", title = "Daily Quests", summary = "Per-character incomplete daily quest checklist backed by the client quest API." },
     { id = "auras", label = "Auras", title = "Auras", summary = "Aura windows, icon layout, and buff or debuff anchor controls." },
     { id = "plates", label = "Nameplates", title = "Nameplates", summary = "Visibility rules, offsets, debuff icons, colors, and runtime nameplate behavior." },
     { id = "cooldown", label = "Cooldowns", title = "Cooldown Tracker", summary = "Tracked buff and debuff icons for player, target, watchtarget, and target of target." }
@@ -1032,7 +1052,7 @@ local SetWrappedText = SettingsWidgets.SetWrappedText
 local RefreshControls
 local ApplyControlsToSettings
 
-local SCHEMA_PAGE_IDS = { "general", "repair", "npc", "text", "bars", "castbar", "travel", "mount_glider", "loadouts", "auras", "plates" }
+local SCHEMA_PAGE_IDS = { "general", "repair", "npc", "text", "bars", "castbar", "travel", "mount_glider", "loadouts", "dailies", "auras", "plates" }
 local SCHEMA_PAGE_LEFT = 18
 local SCHEMA_PAGE_TOP = 18
 local SCHEMA_CARD_WIDTH = 650
@@ -1183,7 +1203,8 @@ local CUSTOM_SCHEMA_RENDERERS = {
     ui_repair_diagnostics = function(parent, y) return CallCustomSchemaRenderer("BuildRepairDiagnostics", parent, y) end,
     ui_repair_actions = function(parent, y) return CallCustomSchemaRenderer("BuildRepairActions", parent, y) end,
     gear_loadouts_editor_button = function(parent, y) return CallCustomSchemaRenderer("BuildGearLoadoutActions", parent, y) end,
-    mount_glider_devices = function(parent, y) return CallCustomSchemaRenderer("BuildMountGliderSelector", parent, y) end
+    mount_glider_devices = function(parent, y) return CallCustomSchemaRenderer("BuildMountGliderSelector", parent, y) end,
+    quest_watch_selector = function(parent, y) return CallCustomSchemaRenderer("BuildQuestWatchSelector", parent, y) end
 }
 
 local function BuildSchemaField(parent, y, field)
@@ -1656,6 +1677,59 @@ RefreshControls = function()
             SettingsPage.controls.gear_loadouts_button_width_val,
             tonumber(gearLoadouts.button_width) or 126
         )
+    end
+
+    local questWatch = type(s.quest_watch) == "table" and s.quest_watch or {}
+    if SettingsPage.controls.quest_watch_enabled ~= nil then
+        SettingsPage.controls.quest_watch_enabled:SetChecked(questWatch.enabled and true or false)
+    end
+    if SettingsPage.controls.quest_watch_lock_position ~= nil then
+        SettingsPage.controls.quest_watch_lock_position:SetChecked(questWatch.lock_position and true or false)
+    end
+    if SettingsPage.controls.quest_watch_hide_when_done ~= nil then
+        SettingsPage.controls.quest_watch_hide_when_done:SetChecked(questWatch.hide_when_done ~= false)
+    end
+    if SettingsPage.controls.quest_watch_show_ids ~= nil then
+        SettingsPage.controls.quest_watch_show_ids:SetChecked(questWatch.show_ids and true or false)
+    end
+    if SettingsPage.controls.quest_watch_width ~= nil then
+        refreshSlider(
+            SettingsPage.controls.quest_watch_width,
+            SettingsPage.controls.quest_watch_width_val,
+            tonumber(questWatch.width) or 330
+        )
+    end
+    if SettingsPage.controls.quest_watch_scale ~= nil then
+        local questScalePct = math.floor(((tonumber(questWatch.scale) or 1) * 100) + 0.5)
+        if questScalePct < 75 then
+            questScalePct = 75
+        elseif questScalePct > 160 then
+            questScalePct = 160
+        end
+        refreshSlider(SettingsPage.controls.quest_watch_scale, SettingsPage.controls.quest_watch_scale_val, questScalePct)
+    end
+    if SettingsPage.controls.quest_watch_max_visible ~= nil then
+        refreshSlider(
+            SettingsPage.controls.quest_watch_max_visible,
+            SettingsPage.controls.quest_watch_max_visible_val,
+            tonumber(questWatch.max_visible) or 12
+        )
+    end
+    if SettingsPage.controls.quest_watch_update_interval ~= nil then
+        refreshSlider(
+            SettingsPage.controls.quest_watch_update_interval,
+            SettingsPage.controls.quest_watch_update_interval_val,
+            math.floor(((tonumber(questWatch.update_interval_ms) or 10000) / 1000) + 0.5)
+        )
+    end
+    if type(SettingsPage.controls.quest_watch_rows) == "table" then
+        local questWatchProfile = GetQuestWatchProfile(questWatch)
+        local tracked = type(questWatchProfile) == "table" and type(questWatchProfile.tracked) == "table" and questWatchProfile.tracked or {}
+        for _, row in ipairs(SettingsPage.controls.quest_watch_rows) do
+            if type(row) == "table" and row.checkbox ~= nil and row.checkbox.SetChecked ~= nil then
+                row.checkbox:SetChecked(tracked[tostring(row.key or "")] ~= false)
+            end
+        end
     end
 
     local npcStyle = nil
@@ -2547,6 +2621,45 @@ ApplyControlsToSettings = function()
     end
     if SettingsPage.controls.gear_loadouts_button_width ~= nil then
         s.gear_loadouts.button_width = GetSliderValue(SettingsPage.controls.gear_loadouts_button_width)
+    end
+
+    if type(s.quest_watch) ~= "table" then
+        s.quest_watch = {}
+    end
+    local questWatchProfile = GetQuestWatchProfile(s.quest_watch)
+    if SettingsPage.controls.quest_watch_enabled ~= nil then
+        s.quest_watch.enabled = SettingsPage.controls.quest_watch_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.quest_watch_lock_position ~= nil then
+        s.quest_watch.lock_position = SettingsPage.controls.quest_watch_lock_position:GetChecked() and true or false
+    end
+    if SettingsPage.controls.quest_watch_hide_when_done ~= nil then
+        s.quest_watch.hide_when_done = SettingsPage.controls.quest_watch_hide_when_done:GetChecked() and true or false
+    end
+    if SettingsPage.controls.quest_watch_show_ids ~= nil then
+        s.quest_watch.show_ids = SettingsPage.controls.quest_watch_show_ids:GetChecked() and true or false
+    end
+    if SettingsPage.controls.quest_watch_width ~= nil then
+        s.quest_watch.width = GetSliderValue(SettingsPage.controls.quest_watch_width)
+    end
+    if SettingsPage.controls.quest_watch_scale ~= nil then
+        s.quest_watch.scale = GetSliderValue(SettingsPage.controls.quest_watch_scale) / 100
+    end
+    if SettingsPage.controls.quest_watch_max_visible ~= nil then
+        s.quest_watch.max_visible = GetSliderValue(SettingsPage.controls.quest_watch_max_visible)
+    end
+    if SettingsPage.controls.quest_watch_update_interval ~= nil then
+        s.quest_watch.update_interval_ms = GetSliderValue(SettingsPage.controls.quest_watch_update_interval) * 1000
+    end
+    if type(questWatchProfile) == "table" and type(SettingsPage.controls.quest_watch_rows) == "table" then
+        if type(questWatchProfile.tracked) ~= "table" then
+            questWatchProfile.tracked = {}
+        end
+        for _, row in ipairs(SettingsPage.controls.quest_watch_rows) do
+            if type(row) == "table" and row.checkbox ~= nil and row.checkbox.GetChecked ~= nil then
+                questWatchProfile.tracked[tostring(row.key or "")] = row.checkbox:GetChecked() and true or false
+            end
+        end
     end
 
     EnsureStyleFrames(s)
@@ -3662,6 +3775,10 @@ local function EnsureWindow()
         { SettingsPage.controls.mount_glider_timer_font_size, SettingsPage.controls.mount_glider_timer_font_size_val },
         { SettingsPage.controls.gear_loadouts_button_size, SettingsPage.controls.gear_loadouts_button_size_val },
         { SettingsPage.controls.gear_loadouts_button_width, SettingsPage.controls.gear_loadouts_button_width_val },
+        { SettingsPage.controls.quest_watch_width, SettingsPage.controls.quest_watch_width_val },
+        { SettingsPage.controls.quest_watch_scale, SettingsPage.controls.quest_watch_scale_val },
+        { SettingsPage.controls.quest_watch_max_visible, SettingsPage.controls.quest_watch_max_visible_val },
+        { SettingsPage.controls.quest_watch_update_interval, SettingsPage.controls.quest_watch_update_interval_val },
         { SettingsPage.controls.frame_alpha, SettingsPage.controls.frame_alpha_val },
         { SettingsPage.controls.overlay_alpha, SettingsPage.controls.overlay_alpha_val },
         { SettingsPage.controls.frame_width, SettingsPage.controls.frame_width_val },
@@ -3853,6 +3970,10 @@ local function EnsureWindow()
         SettingsPage.controls.gear_loadouts_lock_bar,
         SettingsPage.controls.gear_loadouts_lock_editor,
         SettingsPage.controls.gear_loadouts_show_icons,
+        SettingsPage.controls.quest_watch_enabled,
+        SettingsPage.controls.quest_watch_lock_position,
+        SettingsPage.controls.quest_watch_hide_when_done,
+        SettingsPage.controls.quest_watch_show_ids,
         SettingsPage.controls.bar_colors_enabled,
         SettingsPage.controls.hostile_target_hp_enabled,
         SettingsPage.controls.overlay_shadow,
@@ -4304,6 +4425,24 @@ local function EnsureWindow()
                 end
                 sliderChanged()
             end)
+        end
+    end
+
+    if type(SettingsPage.controls.quest_watch_rows) == "table" then
+        for _, row in ipairs(SettingsPage.controls.quest_watch_rows) do
+            if type(row) == "table" and row.checkbox ~= nil and row.checkbox.SetHandler ~= nil then
+                row.checkbox:SetHandler("OnClick", function()
+                    if SettingsPage._refreshing_controls then
+                        return
+                    end
+                    sliderChanged()
+                    if type(SettingsPage.on_save) == "function" then
+                        pcall(function()
+                            SettingsPage.on_save()
+                        end)
+                    end
+                end)
+            end
         end
     end
 

@@ -193,6 +193,21 @@ SettingsDefaults.DEFAULT_SETTINGS = {
         button_width = 126,
         characters = {}
     },
+    quest_watch = {
+        enabled = false,
+        pos_x = 620,
+        pos_y = 160,
+        width = 330,
+        scale = 1,
+        lock_position = false,
+        hide_when_done = true,
+        show_ids = false,
+        collapsed = false,
+        completed_view = false,
+        max_visible = 12,
+        update_interval_ms = 10000,
+        characters = {}
+    },
     nameplates = {
         enabled = false,
         guild_only = false,

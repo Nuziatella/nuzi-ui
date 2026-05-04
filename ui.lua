@@ -11,6 +11,7 @@ local CastBar = SafeRequire("nuzi-ui/castbar", "nuzi-ui.castbar")
 local TravelSpeed = SafeRequire("nuzi-ui/travel_speed", "nuzi-ui.travel_speed")
 local MountGlider = SafeRequire("nuzi-ui/mount_glider", "nuzi-ui.mount_glider")
 local GearLoadouts = SafeRequire("nuzi-ui/gear_loadouts", "nuzi-ui.gear_loadouts")
+local QuestWatch = SafeRequire("nuzi-ui/quest_watch", "nuzi-ui.quest_watch")
 local SettingsStore = SafeRequire("nuzi-ui/settings_store", "nuzi-ui.settings_store")
 
 local function AnchorTopLeft(wnd, x, y)
@@ -4544,6 +4545,11 @@ UI.ApplySettings = function(settings)
             GearLoadouts.ApplySettings(settings)
         end)
     end
+    if QuestWatch ~= nil and QuestWatch.ApplySettings ~= nil then
+        pcall(function()
+            QuestWatch.ApplySettings(settings)
+        end)
+    end
 
     local wantEnabled = settings.enabled and true or false
     local enabledChanged = (UI.enabled and true or false) ~= wantEnabled
@@ -4597,6 +4603,11 @@ UI.Init = function(settings)
             GearLoadouts.Init(settings)
         end)
     end
+    if QuestWatch ~= nil and QuestWatch.Init ~= nil then
+        pcall(function()
+            QuestWatch.Init(settings)
+        end)
+    end
     UI.SetEnabled(UI.enabled)
 end
 
@@ -4629,6 +4640,11 @@ UI.UnLoad = function()
     if GearLoadouts ~= nil and GearLoadouts.Unload ~= nil then
         pcall(function()
             GearLoadouts.Unload()
+        end)
+    end
+    if QuestWatch ~= nil and QuestWatch.Unload ~= nil then
+        pcall(function()
+            QuestWatch.Unload()
         end)
     end
     if AlignmentModule ~= nil and AlignmentModule.Reset ~= nil then
@@ -4715,6 +4731,11 @@ UI.SetEnabled = function(enabled)
     if GearLoadouts ~= nil and GearLoadouts.SetEnabled ~= nil then
         pcall(function()
             GearLoadouts.SetEnabled(UI.enabled)
+        end)
+    end
+    if QuestWatch ~= nil and QuestWatch.SetEnabled ~= nil then
+        pcall(function()
+            QuestWatch.SetEnabled(UI.enabled)
         end)
     end
 
@@ -4920,6 +4941,15 @@ UI.OnUpdate = function(dt)
         end)
         if not ok and api.Log ~= nil and api.Log.Err ~= nil then
             api.Log:Err("[Nuzi UI] GearLoadouts.OnUpdate failed: " .. tostring(err))
+        end
+    end
+
+    if QuestWatch ~= nil and QuestWatch.OnUpdate ~= nil then
+        local ok, err = pcall(function()
+            QuestWatch.OnUpdate(dt, UI.settings)
+        end)
+        if not ok and api.Log ~= nil and api.Log.Err ~= nil then
+            api.Log:Err("[Nuzi UI] QuestWatch.OnUpdate failed: " .. tostring(err))
         end
     end
 
