@@ -24,7 +24,9 @@ Because the stock frames are fine right up until you actually want them to look 
 2. Make sure the addon is enabled in game.
 3. Click the launcher icon to show or hide the settings window.
 
-Saved data lives in `nuzi-ui/.data` so your layout, cooldown tracking, and settings survive updates.
+Saved data lives in `nuzi-ui/.data`. Release packages ship empty `.data` and `.data/backups` folders so first-run settings saves work.
+
+Use Addon Manager's normal Update action to preserve settings. Reinstalling, uninstalling, or installing from a local zip replaces or removes the addon folder and will wipe `nuzi-ui/.data`.
 
 ## Quick Start
 
