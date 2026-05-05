@@ -447,22 +447,21 @@ local function SetWidgetForcedHidden(widget, hidden)
 
     hidden = hidden and true or false
     if hidden then
-        if widget.__polar_forced_hidden then
-            return
+        if not widget.__polar_forced_hidden then
+            widget.__polar_forced_hidden = true
+            pcall(function()
+                if widget.IsVisible ~= nil then
+                    widget.__polar_prev_visible = widget:IsVisible() and true or false
+                elseif widget.GetVisible ~= nil then
+                    widget.__polar_prev_visible = widget:GetVisible() and true or false
+                end
+            end)
+            pcall(function()
+                if widget.GetAlpha ~= nil then
+                    widget.__polar_prev_alpha = widget:GetAlpha()
+                end
+            end)
         end
-        widget.__polar_forced_hidden = true
-        pcall(function()
-            if widget.IsVisible ~= nil then
-                widget.__polar_prev_visible = widget:IsVisible() and true or false
-            elseif widget.GetVisible ~= nil then
-                widget.__polar_prev_visible = widget:GetVisible() and true or false
-            end
-        end)
-        pcall(function()
-            if widget.GetAlpha ~= nil then
-                widget.__polar_prev_alpha = widget:GetAlpha()
-            end
-        end)
         pcall(function()
             if widget.SetAlpha ~= nil then
                 widget:SetAlpha(0)
@@ -2364,7 +2363,10 @@ local function ApplyStockFrameDecorations(frame, settings)
 
     local hideLevelArtifacts = type(settings) == "table" and settings.hide_ancestral_icon_level == true
     local isTargetFrame = UI ~= nil and UI.target ~= nil and frame == UI.target.wnd
-    local hideBossBackground = type(settings) == "table" and settings.hide_boss_frame_background == true and isTargetFrame
+    local isTargetFamilyFrame = isTargetFrame or
+        (UI ~= nil and UI.watchtarget ~= nil and frame == UI.watchtarget.wnd) or
+        (UI ~= nil and UI.target_of_target ~= nil and frame == UI.target_of_target.wnd)
+    local hideBossBackground = type(settings) == "table" and settings.hide_boss_frame_background == true and isTargetFamilyFrame
     local hideTargetGradeStar = type(settings) == "table" and settings.hide_target_grade_star == true and isTargetFrame
 
     RefreshClassIconFrame(frame, settings)
@@ -2382,18 +2384,21 @@ local function ApplyStockFrameDecorations(frame, settings)
         InvokeFrameMethod(frame, "UpdateLevel")
     end
 
+    local style = nil
+    local gradeStarOffsetX = 0
+    local gradeStarOffsetY = 0
+    local moveGradeStar = false
+
     if isTargetFrame then
-        local style = ResolveFrameStyleTable(frame)
-        local gradeStarOffsetX = tonumber(type(style) == "table" and style.target_grade_star_offset_x or nil) or 0
-        local gradeStarOffsetY = tonumber(type(style) == "table" and style.target_grade_star_offset_y or nil) or 0
-        local moveGradeStar = gradeStarOffsetX ~= 0 or gradeStarOffsetY ~= 0
+        style = ResolveFrameStyleTable(frame)
+        gradeStarOffsetX = tonumber(type(style) == "table" and style.target_grade_star_offset_x or nil) or 0
+        gradeStarOffsetY = tonumber(type(style) == "table" and style.target_grade_star_offset_y or nil) or 0
+        moveGradeStar = gradeStarOffsetX ~= 0 or gradeStarOffsetY ~= 0
 
         pcall(function()
             if not moveGradeStar and frame.__polar_grade_star_moved then
                 frame.__polar_grade_star_moved = nil
-                if frame.SetGradeBg ~= nil then
-                    frame:SetGradeBg()
-                end
+                InvokeFrameMethod(frame, "SetGradeBg")
                 if frame.UpdateNameStyle ~= nil then
                     frame:UpdateNameStyle()
                 end
@@ -2401,7 +2406,9 @@ local function ApplyStockFrameDecorations(frame, settings)
         end)
 
         SetWidgetForcedHidden(frame.gradeStar, hideTargetGradeStar)
+    end
 
+    if isTargetFamilyFrame then
         local seen = {}
         local function applyBackground(widget)
             widget = ResolveWidgetCandidate(widget)
@@ -2427,6 +2434,9 @@ local function ApplyStockFrameDecorations(frame, settings)
                 end
             end
         end)
+    end
+
+    if isTargetFrame then
         ApplyTargetFallbackBackgroundStyle(frame, style, hideBossBackground)
         RefreshTargetReputationButton(frame)
 
@@ -3260,6 +3270,7 @@ local function SetFrameStyleHook(frame, settings)
         wrap("UpdateHpBarTexture_FirstHitByMe")
         wrap("ChangeHpBarTexture_forPc")
         wrap("ChangeHpBarTexture_forNpc")
+        wrap("SetGradeBg")
         wrap("UpdateFrameStyle_ForUniType")
         wrap("ApplyFrameStyle")
     end)
@@ -3300,6 +3311,7 @@ local function ClearFrameStyleHook(frame)
         restore("UpdateHpBarTexture_FirstHitByMe")
         restore("ChangeHpBarTexture_forPc")
         restore("ChangeHpBarTexture_forNpc")
+        restore("SetGradeBg")
         restore("UpdateFrameStyle_ForUniType")
         restore("ApplyFrameStyle")
     end)
