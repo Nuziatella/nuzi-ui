@@ -1,5 +1,8 @@
 local api = require("api")
 local Core = api._NuziCore or require("nuzi-core/core")
+if Core ~= nil and type(Core.InstallApiGuards) == "function" then
+    Core.InstallApiGuards(api)
+end
 
 local Commands = Core.Commands
 local Events = Core.Events
@@ -42,7 +45,7 @@ local SettingsStore = modules.settings_store
 local NuziUiAddon = {
     name = "Nuzi UI",
     author = "Nuzi",
-    version = "4.1.22",
+    version = "4.1.29",
     desc = "Interface overhaul"
 }
 

@@ -1855,6 +1855,9 @@ RefreshControls = function()
         if SettingsPage.controls.plates_show_guild ~= nil then
             SettingsPage.controls.plates_show_guild:SetChecked(s.nameplates.show_guild ~= false)
         end
+        if SettingsPage.controls.plates_show_family ~= nil then
+            SettingsPage.controls.plates_show_family:SetChecked(s.nameplates.show_family ~= false)
+        end
         local runtimeText = Compat ~= nil and Compat.GetStatusText() or "Runtime OK"
         SetReadableControlText(SettingsPage.controls.plates_runtime_status, runtimeText)
         if SettingsPage.controls.plates_alpha ~= nil then
@@ -2280,6 +2283,9 @@ RefreshControls = function()
         end
         if SettingsPage.controls.mp_value_visible ~= nil then
             SettingsPage.controls.mp_value_visible:SetChecked(displayStyle.mp_value_visible ~= false)
+        end
+        if SettingsPage.controls.value_fmt_current ~= nil then
+            SettingsPage.controls.value_fmt_current:SetChecked(fmt == "current")
         end
         if SettingsPage.controls.value_fmt_curmax ~= nil then
             SettingsPage.controls.value_fmt_curmax:SetChecked(fmt == "curmax" or fmt == "curmax_percent")
@@ -2749,6 +2755,9 @@ ApplyControlsToSettings = function()
     end
     if SettingsPage.controls.plates_show_guild ~= nil then
         s.nameplates.show_guild = SettingsPage.controls.plates_show_guild:GetChecked() and true or false
+    end
+    if SettingsPage.controls.plates_show_family ~= nil then
+        s.nameplates.show_family = SettingsPage.controls.plates_show_family:GetChecked() and true or false
     end
     if SettingsPage.controls.plates_alpha ~= nil then
         s.nameplates.alpha_pct = GetSliderValue(SettingsPage.controls.plates_alpha)
@@ -3347,7 +3356,11 @@ ApplyControlsToSettings = function()
         selectedUnitCfg.cache_timeout_s = GetSliderValue(SettingsPage.controls.ct_cache_timeout)
     end
 
-    if applyBarsStyle and SettingsPage.controls.value_fmt_curmax ~= nil and SettingsPage.controls.value_fmt_percent ~= nil then
+    if applyBarsStyle
+        and SettingsPage.controls.value_fmt_current ~= nil
+        and SettingsPage.controls.value_fmt_curmax ~= nil
+        and SettingsPage.controls.value_fmt_percent ~= nil then
+        local wantCurrent = SettingsPage.controls.value_fmt_current:GetChecked() and true or false
         local wantCurMax = SettingsPage.controls.value_fmt_curmax:GetChecked() and true or false
         local wantPercent = SettingsPage.controls.value_fmt_percent:GetChecked() and true or false
         if wantCurMax and wantPercent then
@@ -3356,6 +3369,8 @@ ApplyControlsToSettings = function()
             editStyle.value_format = "percent"
         elseif wantCurMax then
             editStyle.value_format = "curmax"
+        elseif wantCurrent then
+            editStyle.value_format = "current"
         else
             editStyle.value_format = "stock"
         end
@@ -3987,6 +4002,10 @@ local function EnsureWindow()
         SettingsPage.controls.value_shadow,
         SettingsPage.controls.hp_value_visible,
         SettingsPage.controls.mp_value_visible,
+        SettingsPage.controls.value_fmt_current,
+        SettingsPage.controls.value_fmt_curmax,
+        SettingsPage.controls.value_fmt_percent,
+        SettingsPage.controls.short_numbers,
         SettingsPage.controls.move_buffs,
         SettingsPage.controls.plates_enabled,
         SettingsPage.controls.plates_guild_only,
@@ -3996,6 +4015,7 @@ local function EnsureWindow()
         SettingsPage.controls.plates_show_watchtarget,
         SettingsPage.controls.plates_show_mount,
         SettingsPage.controls.plates_show_guild,
+        SettingsPage.controls.plates_show_family,
         SettingsPage.controls.plates_anchor_tag,
         SettingsPage.controls.plates_bg_enabled,
         SettingsPage.controls.plates_debuffs_enabled,
@@ -4427,6 +4447,32 @@ local function EnsureWindow()
             end)
         end
     end
+
+    local function bindValueFormatCheckbox(ctrl, mode)
+        if ctrl == nil or ctrl.SetHandler == nil then
+            return
+        end
+        ctrl:SetHandler("OnClick", function()
+            if SettingsPage._refreshing_controls then
+                return
+            end
+            if mode == "current" and ctrl:GetChecked() then
+                if SettingsPage.controls.value_fmt_curmax ~= nil then
+                    SettingsPage.controls.value_fmt_curmax:SetChecked(false)
+                end
+                if SettingsPage.controls.value_fmt_percent ~= nil then
+                    SettingsPage.controls.value_fmt_percent:SetChecked(false)
+                end
+            elseif mode ~= "current" and ctrl:GetChecked() and SettingsPage.controls.value_fmt_current ~= nil then
+                SettingsPage.controls.value_fmt_current:SetChecked(false)
+            end
+            sliderChanged()
+        end)
+    end
+
+    bindValueFormatCheckbox(SettingsPage.controls.value_fmt_current, "current")
+    bindValueFormatCheckbox(SettingsPage.controls.value_fmt_curmax, "curmax")
+    bindValueFormatCheckbox(SettingsPage.controls.value_fmt_percent, "percent")
 
     if type(SettingsPage.controls.quest_watch_rows) == "table" then
         for _, row in ipairs(SettingsPage.controls.quest_watch_rows) do

@@ -408,6 +408,7 @@ SettingsSchema.PAGES = {
                 title = "HP/MP Value Text",
                 hint = "Choose how health and mana values are formatted for display.",
                 fields = {
+                    checkbox("value_fmt_current", "polarUiValueFmtCurrent", "Format HP/MP as current only"),
                     checkbox("value_fmt_curmax", "polarUiValueFmtCurMax", "Format HP/MP as cur/max"),
                     checkbox("value_fmt_percent", "polarUiValueFmtPercent", "Format HP/MP as percent"),
                     checkbox("short_numbers", "polarUiShortNumbers", "Short numbers (12.3k/4.5m)")
@@ -1106,7 +1107,8 @@ SettingsSchema.PAGES = {
                     checkbox("plates_show_raid_party", "polarUiPlatesShowRaid", "Show raid/party (team1..team50)"),
                     checkbox("plates_show_watchtarget", "polarUiPlatesShowWatch", "Show watchtarget"),
                     checkbox("plates_show_mount", "polarUiPlatesShowMount", "Show mount/pet (playerpet1)"),
-                    checkbox("plates_show_guild", "polarUiPlatesShowGuild", "Show guild/family"),
+                    checkbox("plates_show_guild", "polarUiPlatesShowGuild", "Show guild"),
+                    checkbox("plates_show_family", "polarUiPlatesShowFamily", "Show family"),
                     label(
                         "plates_runtime_note",
                         "polarUiPlatesRuntimeNote",
@@ -1136,7 +1138,7 @@ SettingsSchema.PAGES = {
             {
                 id = "plates_text",
                 title = "Text",
-                hint = "Adjust the font size used for names and guild/family text on overhead plates.",
+                hint = "Adjust the font size used for names, guild, and family text on overhead plates.",
                 fields = {
                     slider("plates_name_fs", "polarUiPlatesNameFontSize", "Name font size", 6, 32, 1),
                     slider("plates_guild_fs", "polarUiPlatesGuildFontSize", "Guild font size", 6, 32, 1)

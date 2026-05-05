@@ -11,7 +11,6 @@ local Nameplates = {
     debuff_frames = {},
     unit_keys = {},
     unit_state = {},
-    target_unitframe = nil,
     tick = 0,
     discovery_index = 1
 }
@@ -86,14 +85,17 @@ local function TrimText(value)
     return string.match(text, "^%s*(.-)%s*$") or text
 end
 
-local function FormatGuildFamilyText(guild, family)
+local function FormatGuildText(guild)
     guild = TrimText(guild)
-    family = TrimText(family)
-    if guild ~= "" and family ~= "" then
-        return string.format("<%s> (%s)", guild, family)
-    elseif guild ~= "" then
+    if guild ~= "" then
         return string.format("<%s>", guild)
-    elseif family ~= "" then
+    end
+    return ""
+end
+
+local function FormatFamilyText(family)
+    family = TrimText(family)
+    if family ~= "" then
         return string.format("(%s)", family)
     end
     return ""
@@ -589,11 +591,20 @@ local function ApplyLayout(frame, cfg)
 
     if guildOnly then
         local guildFs = ClampNumber(cfg.guild_font_size, 6, 32, 11)
-        totalHeight = guildFs + 8
+        local infoLines = 0
+        if cfg.show_guild ~= false then
+            infoLines = infoLines + 1
+        end
+        if cfg.show_family ~= false then
+            infoLines = infoLines + 1
+        end
+        totalHeight = guildFs * math.max(1, infoLines) + 8
     end
 
     local layoutKey = table.concat({
         guildOnly and "1" or "0",
+        cfg.show_guild ~= false and "1" or "0",
+        cfg.show_family ~= false and "1" or "0",
         tostring(width),
         tostring(hpHeight),
         tostring(mpHeight),
@@ -616,6 +627,12 @@ local function ApplyLayout(frame, cfg)
             pcall(function()
                 local size = ClampNumber(cfg.guild_font_size, 6, 32, 11)
                 frame.guildLabel.style:SetFontSize(size)
+            end)
+        end
+        if frame.familyLabel ~= nil and frame.familyLabel.style ~= nil then
+            pcall(function()
+                local size = ClampNumber(cfg.guild_font_size, 6, 32, 11)
+                frame.familyLabel.style:SetFontSize(size)
             end)
         end
         return
@@ -657,6 +674,12 @@ local function ApplyLayout(frame, cfg)
             frame.guildLabel.style:SetFontSize(size)
         end)
     end
+    if frame.familyLabel ~= nil and frame.familyLabel.style ~= nil then
+        pcall(function()
+            local size = ClampNumber(cfg.guild_font_size, 6, 32, 11)
+            frame.familyLabel.style:SetFontSize(size)
+        end)
+    end
 
     if frame.bg ~= nil then
         pcall(function()
@@ -671,15 +694,23 @@ local function ApplyLayout(frame, cfg)
     end
 end
 
-local function ApplyGuildMode(frame, guildOnly, showMpBar)
-    if frame == nil or frame.__polar_guild_only == guildOnly then
+local function ApplyGuildMode(frame, cfg, showMpBar)
+    local guildOnly = type(cfg) == "table" and cfg.guild_only and true or false
+    local showGuild = type(cfg) ~= "table" or cfg.show_guild ~= false
+    local showFamily = type(cfg) ~= "table" or cfg.show_family ~= false
+    local modeKey = table.concat({
+        guildOnly and "1" or "0",
+        showGuild and "1" or "0",
+        showFamily and "1" or "0"
+    }, ":")
+    if frame == nil or frame.__polar_guild_mode_key == modeKey then
         if not guildOnly then
             SafeShow(frame.hpBar, true)
             SafeShow(frame.mpBar, showMpBar and true or false)
         end
         return
     end
-    frame.__polar_guild_only = guildOnly
+    frame.__polar_guild_mode_key = modeKey
 
     if guildOnly then
         SafeShow(frame.hpBar, false)
@@ -688,12 +719,28 @@ local function ApplyGuildMode(frame, guildOnly, showMpBar)
         SafeSetBg(frame, false, 0)
         SafeShow(frame.eventWindow, false)
         pcall(function()
-            if frame.guildLabel ~= nil then
+            local previous = frame
+            local previousPoint = "TOPLEFT"
+            local offsetX = 3
+            local offsetY = -3
+            if showGuild and frame.guildLabel ~= nil then
                 if frame.guildLabel.RemoveAllAnchors ~= nil then
                     frame.guildLabel:RemoveAllAnchors()
                 end
                 if frame.guildLabel.AddAnchor ~= nil then
-                    frame.guildLabel:AddAnchor("TOPLEFT", frame, 3, -3)
+                    frame.guildLabel:AddAnchor("TOPLEFT", frame, offsetX, offsetY)
+                end
+                previous = frame.guildLabel
+                previousPoint = "BOTTOMLEFT"
+                offsetX = 0
+                offsetY = 0
+            end
+            if showFamily and frame.familyLabel ~= nil then
+                if frame.familyLabel.RemoveAllAnchors ~= nil then
+                    frame.familyLabel:RemoveAllAnchors()
+                end
+                if frame.familyLabel.AddAnchor ~= nil then
+                    frame.familyLabel:AddAnchor("TOPLEFT", previous, previousPoint, offsetX, offsetY)
                 end
             end
         end)
@@ -705,12 +752,22 @@ local function ApplyGuildMode(frame, guildOnly, showMpBar)
     SafeShow(frame.mpBar, showMpBar and true or false)
     SafeShow(frame.eventWindow, false)
     pcall(function()
-        if frame.guildLabel ~= nil and frame.nameLabel ~= nil then
+        local previous = frame.nameLabel
+        if showGuild and frame.guildLabel ~= nil and frame.nameLabel ~= nil then
             if frame.guildLabel.RemoveAllAnchors ~= nil then
                 frame.guildLabel:RemoveAllAnchors()
             end
             if frame.guildLabel.AddAnchor ~= nil then
                 frame.guildLabel:AddAnchor("TOPLEFT", frame.nameLabel, "BOTTOMLEFT", 0, 0)
+            end
+            previous = frame.guildLabel
+        end
+        if showFamily and frame.familyLabel ~= nil and previous ~= nil then
+            if frame.familyLabel.RemoveAllAnchors ~= nil then
+                frame.familyLabel:RemoveAllAnchors()
+            end
+            if frame.familyLabel.AddAnchor ~= nil then
+                frame.familyLabel:AddAnchor("TOPLEFT", previous, "BOTTOMLEFT", 0, 0)
             end
         end
     end)
@@ -813,6 +870,28 @@ local function EnsureFrame(unit)
         guildLabel:SetText("")
     end)
     frame.guildLabel = guildLabel
+
+    local familyLabel = api.Interface:CreateWidget("label", frameId .. ".family", frame)
+    pcall(function()
+        familyLabel:Show(true)
+        if familyLabel.Clickable ~= nil then
+            familyLabel:Clickable(false)
+        end
+        if familyLabel.SetLimitWidth ~= nil then
+            familyLabel:SetLimitWidth(true)
+        end
+        if familyLabel.SetExtent ~= nil then
+            familyLabel:SetExtent(220, FONT_SIZE and FONT_SIZE.SMALL or 11)
+        end
+        if familyLabel.style ~= nil then
+            familyLabel.style:SetAlign(ALIGN.LEFT)
+            familyLabel.style:SetFontSize(FONT_SIZE and FONT_SIZE.SMALL or 11)
+            familyLabel.style:SetColor(1, 1, 1, 1)
+        end
+        familyLabel:AddAnchor("TOPLEFT", guildLabel, "BOTTOMLEFT", 0, 0)
+        familyLabel:SetText("")
+    end)
+    frame.familyLabel = familyLabel
 
     local eventWindow = api.Interface:CreateWidget("emptywidget", frameId .. ".event", frame)
     pcall(function()
@@ -1153,7 +1232,14 @@ local function GetPlateLayoutMetrics(cfg)
 
     if guildOnly then
         local guildFs = ClampNumber(cfg.guild_font_size, 6, 32, 11)
-        totalHeight = guildFs + 8
+        local infoLines = 0
+        if cfg.show_guild ~= false then
+            infoLines = infoLines + 1
+        end
+        if cfg.show_family ~= false then
+            infoLines = infoLines + 1
+        end
+        totalHeight = guildFs * math.max(1, infoLines) + 8
     end
 
     return width, hpHeight, mpHeight, totalHeight
@@ -1191,7 +1277,7 @@ local function RefreshStaticState(state, id, unit, cfg)
         state.name = tostring(Runtime.GetUnitNameById(id) or "")
     end
 
-    local needInfo = cfg.guild_only or cfg.show_guild
+    local needInfo = cfg.guild_only or cfg.show_guild ~= false or cfg.show_family ~= false
     local shouldProbeInfo = needInfo or state.name == ""
     if not shouldProbeInfo then
         return
@@ -1345,13 +1431,13 @@ local function UpdateOne(unit, settings)
 
     PositionPlateFrame(frame, cfg, offsetX, offsetY)
 
-    ApplyGuildMode(frame, guildOnly, mpHeight > 0)
+    ApplyGuildMode(frame, cfg, mpHeight > 0)
 
     RefreshStaticState(state, id, unit, cfg)
     SafeSetText(frame.nameLabel, state.name or "")
 
-    local guildText = FormatGuildFamilyText(state.guild, state.family)
-    if cfg.show_guild and state.is_character and guildText ~= "" then
+    local guildText = FormatGuildText(state.guild)
+    if cfg.show_guild ~= false and state.is_character and guildText ~= "" then
         ApplyGuildTextColor(frame.guildLabel, cfg, state.guild)
         SafeShow(frame.guildLabel, true)
         SafeSetText(frame.guildLabel, guildText)
@@ -1359,6 +1445,17 @@ local function UpdateOne(unit, settings)
         ApplyGuildTextColor(frame.guildLabel, cfg, nil)
         SafeSetText(frame.guildLabel, "")
         SafeShow(frame.guildLabel, false)
+    end
+
+    local familyText = FormatFamilyText(state.family)
+    if cfg.show_family ~= false and state.is_character and familyText ~= "" then
+        SafeSetTextColor(frame.familyLabel, 1, 1, 1, 1)
+        SafeShow(frame.familyLabel, true)
+        SafeSetText(frame.familyLabel, familyText)
+    else
+        SafeSetTextColor(frame.familyLabel, 1, 1, 1, 1)
+        SafeSetText(frame.familyLabel, "")
+        SafeShow(frame.familyLabel, false)
     end
 
     if not guildOnly then
@@ -1405,10 +1502,6 @@ Nameplates.Init = function(settings)
         Compat.Probe(false)
     end
     EnsureUnitKeys()
-
-    if Runtime ~= nil and UIC ~= nil then
-        Nameplates.target_unitframe = Runtime.GetStockContent(UIC.TARGET_UNITFRAME)
-    end
 end
 
 Nameplates.ApplySettings = function(settings)
@@ -1560,7 +1653,6 @@ Nameplates.Unload = function()
     Nameplates.frames = {}
     Nameplates.debuff_frames = {}
     Nameplates.settings = nil
-    Nameplates.target_unitframe = nil
     Nameplates.unit_keys = {}
     Nameplates.unit_state = {}
     Nameplates.tick = 0

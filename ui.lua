@@ -259,6 +259,61 @@ local function ResolveFrameRuntimeUnit(frame)
     return NormalizeRuntimeUnitToken(frame.__polar_unit)
 end
 
+local function IsTargetRuntimeUnit(unit)
+    return unit == "target" or unit == "watchtarget" or unit == "targettarget"
+end
+
+local function HasLiveRuntimeUnit(unit)
+    unit = NormalizeRuntimeUnitToken(unit)
+    if unit == nil then
+        return false
+    end
+    if unit == "player" then
+        return true
+    end
+    if not IsTargetRuntimeUnit(unit) then
+        return true
+    end
+    if Runtime == nil or Runtime.GetUnitId == nil then
+        return false
+    end
+    return NormalizeUnitId(Runtime.GetUnitId(unit)) ~= nil
+end
+
+local function HasLiveSecondaryFrameUnit(frame)
+    local unit = ResolveFrameRuntimeUnit(frame)
+    if unit == nil then
+        return true
+    end
+    return HasLiveRuntimeUnit(unit)
+end
+
+local UNIT_BOUND_STOCK_FRAME_METHODS = {
+    UpdateAll = true,
+    UpdateHpMp = true,
+    SetHp = true,
+    SetMp = true,
+    SetLevel = true,
+    UpdateNameStyle = true,
+    UpdateName = true,
+    UpdateLevel = true,
+    ShowHeirFrame = true,
+    ChangeTarget = true,
+    UpdateHpBarTexture_FirstHitByMe = true,
+    ChangeHpBarTexture_forPc = true,
+    ChangeHpBarTexture_forNpc = true,
+    SetGradeBg = true,
+    UpdateFrameStyle_ForUniType = true,
+    ApplyFrameStyle = true
+}
+
+local function ShouldRunStockFrameMethod(frame, methodName)
+    if UNIT_BOUND_STOCK_FRAME_METHODS[methodName] ~= true then
+        return true
+    end
+    return HasLiveSecondaryFrameUnit(frame)
+end
+
 local function SyncSecondaryFrameBinding(frame, runtimeUnit)
     if frame == nil then
         return
@@ -533,8 +588,11 @@ local function AnchorClassIconFrame(frame, icon)
     end)
 end
 
-local function EnsureClassIconFrame(frame, unit)
+local function EnsureClassIconFrame(frame, unit, settings)
     if frame == nil or ResolveClassIconFrame(frame) ~= nil or type(CreateAbilityIcon) ~= "function" then
+        return
+    end
+    if type(settings) == "table" and settings.show_class_icons == false then
         return
     end
 
@@ -557,15 +615,19 @@ local function RefreshClassIconFrame(frame, settings)
     end
 
     local hideClassIcon = type(settings) == "table" and settings.show_class_icons == false
-    SetWidgetForcedHidden(icon, hideClassIcon)
-    if hideClassIcon then
+    local unitReady = HasLiveSecondaryFrameUnit(frame)
+    SetWidgetForcedHidden(icon, hideClassIcon or not unitReady)
+    if hideClassIcon or not unitReady then
         return
     end
 
     local unitKey = ResolveFrameRuntimeUnit(frame)
+    local unitId = Runtime ~= nil and Runtime.GetUnitId ~= nil and Runtime.GetUnitId(unitKey) or nil
+    local unitAbilityKey = tostring(unitKey or "") .. ":" .. tostring(NormalizeUnitId(unitId) or "")
     pcall(function()
-        if icon.SetAbility ~= nil and unitKey ~= nil then
+        if icon.SetAbility ~= nil and unitKey ~= nil and icon.__polar_unit_ability_key ~= unitAbilityKey then
             icon:SetAbility(unitKey)
+            icon.__polar_unit_ability_key = unitAbilityKey
         end
     end)
 
@@ -597,11 +659,11 @@ local function ResetClassIconFrame(frame)
     end
 end
 
-local function EnsureClassIconFrames()
-    EnsureClassIconFrame(UI.player.wnd, "player")
-    EnsureClassIconFrame(UI.target.wnd, "target")
-    EnsureClassIconFrame(UI.watchtarget.wnd, "watchtarget")
-    EnsureClassIconFrame(UI.target_of_target.wnd, "targettarget")
+local function EnsureClassIconFrames(settings)
+    EnsureClassIconFrame(UI.player.wnd, "player", settings)
+    EnsureClassIconFrame(UI.target.wnd, "target", settings)
+    EnsureClassIconFrame(UI.watchtarget.wnd, "watchtarget", settings)
+    EnsureClassIconFrame(UI.target_of_target.wnd, "targettarget", settings)
 end
 
 local function ResetClassIconFrames()
@@ -659,6 +721,9 @@ end
 
 local function InvokeFrameMethod(frame, methodName, ...)
     if frame == nil or type(methodName) ~= "string" then
+        return false
+    end
+    if not ShouldRunStockFrameMethod(frame, methodName) then
         return false
     end
 
@@ -985,6 +1050,9 @@ local function ApplyUnitFramePosition(wnd, settings, key, defaultX, defaultY)
     if wnd == nil or type(settings) ~= "table" then
         return
     end
+    if not HasLiveSecondaryFrameUnit(wnd) then
+        return
+    end
 
     local pos = GetOrCreatePosTable(settings, key)
     if pos == nil then
@@ -1253,6 +1321,13 @@ local function GetStockContent(contentId)
         return Runtime.GetStockContent(contentId)
     end
     return nil
+end
+
+local function GetLiveStockContent(contentId, unit)
+    if not HasLiveRuntimeUnit(unit) then
+        return nil
+    end
+    return GetStockContent(contentId)
 end
 
 local function SetStockDistanceLabelVisible(visible)
@@ -2198,7 +2273,7 @@ local function ApplyTextLayout(frame, style)
     elseif frame.__polar_name_moved then
         frame.__polar_name_moved = nil
         pcall(function()
-            if frame.UpdateNameStyle ~= nil then
+            if frame.UpdateNameStyle ~= nil and ShouldRunStockFrameMethod(frame, "UpdateNameStyle") then
                 frame:UpdateNameStyle()
             end
         end)
@@ -2234,7 +2309,7 @@ local function ApplyTextLayout(frame, style)
     elseif frame.__polar_level_moved then
         frame.__polar_level_moved = nil
         pcall(function()
-            if frame.UpdateLevel ~= nil then
+            if frame.UpdateLevel ~= nil and ShouldRunStockFrameMethod(frame, "UpdateLevel") then
                 frame:UpdateLevel()
             end
         end)
@@ -2360,6 +2435,9 @@ local function ApplyStockFrameDecorations(frame, settings)
     if frame == nil then
         return
     end
+    if not HasLiveSecondaryFrameUnit(frame) then
+        return
+    end
 
     local hideLevelArtifacts = type(settings) == "table" and settings.hide_ancestral_icon_level == true
     local isTargetFrame = UI ~= nil and UI.target ~= nil and frame == UI.target.wnd
@@ -2399,7 +2477,7 @@ local function ApplyStockFrameDecorations(frame, settings)
             if not moveGradeStar and frame.__polar_grade_star_moved then
                 frame.__polar_grade_star_moved = nil
                 InvokeFrameMethod(frame, "SetGradeBg")
-                if frame.UpdateNameStyle ~= nil then
+                if frame.UpdateNameStyle ~= nil and ShouldRunStockFrameMethod(frame, "UpdateNameStyle") then
                     frame:UpdateNameStyle()
                 end
             end
@@ -2756,8 +2834,14 @@ local function BuildFormattedValueText(cur, max, style, forceCurMax)
         short = style.short_numbers and true or false
     end
 
-    local wantCurMax = forceCurMax or fmt == "curmax" or fmt == "curmax_percent" or short
+    local wantCurrent = fmt == "current"
+    local wantCurMax = (not wantCurrent) and (forceCurMax or fmt == "curmax" or fmt == "curmax_percent" or short)
     local wantPercent = (fmt == "percent" or fmt == "curmax_percent")
+
+    local currentText = nil
+    if wantCurrent then
+        currentText = short and FormatShortNumber(cur) or FormatIntegerValue(cur)
+    end
 
     local curMaxText = nil
     if wantCurMax then
@@ -2774,6 +2858,9 @@ local function BuildFormattedValueText(cur, max, style, forceCurMax)
 
     if curMaxText ~= nil and pctText ~= nil then
         return curMaxText .. " (" .. pctText .. ")"
+    end
+    if currentText ~= nil then
+        return currentText
     end
     if curMaxText ~= nil then
         return curMaxText
@@ -2969,6 +3056,9 @@ end
 
 local function ApplyFrameLayout(frame, settings)
     if frame == nil or type(settings) ~= "table" then
+        return
+    end
+    if not HasLiveSecondaryFrameUnit(frame) then
         return
     end
 
@@ -3244,7 +3334,7 @@ local function SetFrameStyleHook(frame, settings)
         frame[methodName] = function(self, ...)
             local out = nil
             local orig = self[origKey]
-            if type(orig) == "function" then
+            if type(orig) == "function" and ShouldRunStockFrameMethod(self, methodName) then
                 out = orig(self, ...)
             end
             if type(self.__polar_frame_style_cfg) == "table" and not self.__polar_frame_style_applying then
@@ -3341,6 +3431,9 @@ end
 
 RefreshFrameBarPresentation = function(frame, style)
     if frame == nil then
+        return
+    end
+    if not HasLiveSecondaryFrameUnit(frame) then
         return
     end
     local styleTable = style
@@ -3747,6 +3840,10 @@ local function ApplyAuraLayout(frame, aura)
     local perRow = tonumber(aura.buffs_per_row) or 10
     local sortVertical = aura.sort_vertical and true or false
     local reverseGrowth = aura.reverse_growth and true or false
+    local runtimeUnit = ResolveFrameRuntimeUnit(frame)
+    if perRow < 1 then
+        perRow = 1
+    end
 
     local function ApplyOverrideFields(window)
         if window == nil then
@@ -3756,21 +3853,34 @@ local function ApplyAuraLayout(frame, aura)
         if type(o) ~= "table" then
             return
         end
-        if window.iconSize ~= nil then
-            window.iconSize = o.iconSize
+        window.iconSize = tonumber(o.iconSize) or iconSize
+        window.iconXGap = tonumber(o.iconXGap) or xGap
+        window.iconYGap = tonumber(o.iconYGap) or yGap
+        window.buffCountOnSingleLine = tonumber(o.buffCountOnSingleLine) or perRow
+        window.iconSortVertical = o.iconSortVertical and true or false
+    end
+
+    local function GetLayoutArgs(window)
+        local o = window ~= nil and window.__polar_aura_override or nil
+        if type(o) ~= "table" then
+            return perRow, iconSize, xGap, yGap, sortVertical
         end
-        if window.iconXGap ~= nil then
-            window.iconXGap = o.iconXGap
+        return tonumber(o.buffCountOnSingleLine) or perRow,
+            tonumber(o.iconSize) or iconSize,
+            tonumber(o.iconXGap) or xGap,
+            tonumber(o.iconYGap) or yGap,
+            o.iconSortVertical and true or false
+    end
+
+    local function ResolveBuffUpdateTarget(window, requestedTarget)
+        local target = NormalizeRuntimeUnitToken(requestedTarget)
+        if target == nil and window ~= nil then
+            target = NormalizeRuntimeUnitToken(window.__polar_aura_runtime_unit)
         end
-        if window.iconYGap ~= nil then
-            window.iconYGap = o.iconYGap
+        if target == nil or not HasLiveRuntimeUnit(target) then
+            return nil
         end
-        if window.buffCountOnSingleLine ~= nil then
-            window.buffCountOnSingleLine = o.buffCountOnSingleLine
-        end
-        if window.iconSortVertical ~= nil then
-            window.iconSortVertical = o.iconSortVertical
-        end
+        return target
     end
 
     local function ForceLayoutButtons(window)
@@ -3858,6 +3968,7 @@ local function ApplyAuraLayout(frame, aura)
         window.__polar_aura_override.buffCountOnSingleLine = perRow
         window.__polar_aura_override.iconSortVertical = sortVertical
         window.__polar_aura_override.reverseGrowth = reverseGrowth
+        window.__polar_aura_runtime_unit = runtimeUnit
 
         if window.__polar_aura_hooked then
             return
@@ -3867,11 +3978,18 @@ local function ApplyAuraLayout(frame, aura)
         pcall(function()
             if type(window.SetLayout) == "function" then
                 window.__polar_orig_SetLayout = window.SetLayout
-                window.SetLayout = function(self, ...)
-                    ApplyOverrideFields(self)
+                window.SetLayout = function(self)
+                    local layoutPerRow, layoutIconSize, layoutXGap, layoutYGap, layoutSortVertical = GetLayoutArgs(self)
                     local out = nil
                     if type(self.__polar_orig_SetLayout) == "function" then
-                        out = self:__polar_orig_SetLayout(...)
+                        out = self.__polar_orig_SetLayout(
+                            self,
+                            layoutPerRow,
+                            layoutIconSize,
+                            layoutXGap,
+                            layoutYGap,
+                            layoutSortVertical
+                        )
                     end
                     ApplyOverrideFields(self)
                     ForceLayoutButtons(self)
@@ -3883,11 +4001,12 @@ local function ApplyAuraLayout(frame, aura)
         pcall(function()
             if type(window.BuffUpdate) == "function" then
                 window.__polar_orig_BuffUpdate = window.BuffUpdate
-                window.BuffUpdate = function(self, ...)
+                window.BuffUpdate = function(self, target)
                     ApplyOverrideFields(self)
                     local out = nil
-                    if type(self.__polar_orig_BuffUpdate) == "function" then
-                        out = self:__polar_orig_BuffUpdate(...)
+                    local updateTarget = ResolveBuffUpdateTarget(self, target)
+                    if updateTarget ~= nil and type(self.__polar_orig_BuffUpdate) == "function" then
+                        out = self.__polar_orig_BuffUpdate(self, updateTarget)
                     end
                     ApplyOverrideFields(self)
                     ForceLayoutButtons(self)
@@ -3904,39 +4023,21 @@ local function ApplyAuraLayout(frame, aura)
 
         SetWindowAuraOverride(window)
 
-        local function setFields()
-            if window.iconSize ~= nil then
-                window.iconSize = iconSize
-            end
-            if window.iconXGap ~= nil then
-                window.iconXGap = xGap
-            end
-            if window.iconYGap ~= nil then
-                window.iconYGap = yGap
-            end
-            if window.buffCountOnSingleLine ~= nil then
-                window.buffCountOnSingleLine = perRow
-            end
-            if window.iconSortVertical ~= nil then
-                window.iconSortVertical = sortVertical
-            end
-        end
-
         pcall(function()
-            setFields()
             if window.SetVisibleBuffCount ~= nil and window.visibleBuffCount ~= nil then
                 window:SetVisibleBuffCount(window.visibleBuffCount)
             end
             if window.SetLayout ~= nil then
-                window:SetLayout()
+                window:SetLayout(perRow, iconSize, xGap, yGap, sortVertical)
             end
 
-            setFields()
-            if window.BuffUpdate ~= nil then
-                window:BuffUpdate()
+            ApplyOverrideFields(window)
+            local updateTarget = ResolveBuffUpdateTarget(window, runtimeUnit)
+            if updateTarget ~= nil and window.BuffUpdate ~= nil then
+                window:BuffUpdate(updateTarget)
             end
 
-            setFields()
+            ApplyOverrideFields(window)
             ForceLayoutButtons(window)
         end)
     end
@@ -4200,6 +4301,9 @@ ApplyStockFrameStyle = function(frame, style)
     if frame == nil or type(style) ~= "table" then
         return
     end
+    if not HasLiveSecondaryFrameUnit(frame) then
+        return
+    end
 
     pcall(function()
         if frame.name ~= nil and frame.name.style ~= nil then
@@ -4294,9 +4398,9 @@ local function EnsureUi(settings)
     EnsureAlignmentGrid(settings)
 
     UI.player.wnd = GetStockContent(UIC.PLAYER_UNITFRAME)
-    UI.target.wnd = GetStockContent(UIC.TARGET_UNITFRAME)
-    UI.watchtarget.wnd = GetStockContent(UIC.WATCH_TARGET_FRAME)
-    UI.target_of_target.wnd = GetStockContent(UIC.TARGET_OF_TARGET_FRAME)
+    UI.target.wnd = GetLiveStockContent(UIC.TARGET_UNITFRAME, "target")
+    UI.watchtarget.wnd = GetLiveStockContent(UIC.WATCH_TARGET_FRAME, "watchtarget")
+    UI.target_of_target.wnd = GetLiveStockContent(UIC.TARGET_OF_TARGET_FRAME, "targettarget")
 
     if UI.player.wnd ~= nil then
         UI.player.wnd.__polar_unit = "player"
@@ -4349,7 +4453,7 @@ local function EnsureUi(settings)
         return
     end
 
-    EnsureClassIconFrames()
+    EnsureClassIconFrames(settings)
 
     HookUnitFrameDrag(UI.player.wnd, settings, "player")
     HookUnitFrameDrag(UI.target.wnd, settings, "target")
@@ -4869,17 +4973,9 @@ UI.OnUpdate = function(dt)
     EnsureAlignmentGrid(UI.settings)
     SyncAllUnitFrameDragState(UI.settings)
     if UI.needs_full_apply
-        or UI.player.wnd == nil
-        or UI.target.wnd == nil
-        or UI.watchtarget.wnd == nil
-        or UI.target_of_target.wnd == nil then
+        or UI.player.wnd == nil then
         EnsureUi(UI.settings)
-        UI.needs_full_apply = (
-            UI.player.wnd == nil
-            or UI.target.wnd == nil
-            or UI.watchtarget.wnd == nil
-            or UI.target_of_target.wnd == nil
-        )
+        UI.needs_full_apply = UI.player.wnd == nil
     end
 
     UI.plates_accum_ms = (tonumber(UI.plates_accum_ms) or 0) + dt
@@ -4972,6 +5068,14 @@ UI.OnUpdate = function(dt)
     end
 
     UI.accum_ms = 0
+
+    if UI.enabled
+        and ((UI.target.wnd == nil and HasLiveRuntimeUnit("target"))
+            or (UI.watchtarget.wnd == nil and HasLiveRuntimeUnit("watchtarget"))
+            or (UI.target_of_target.wnd == nil and HasLiveRuntimeUnit("targettarget"))) then
+        EnsureUi(UI.settings)
+        UI.needs_full_apply = UI.player.wnd == nil
+    end
 
     if UI.enabled then
         SyncSecondaryFrameBinding(UI.watchtarget.wnd, "watchtarget")

@@ -218,6 +218,7 @@ SettingsDefaults.DEFAULT_SETTINGS = {
         show_target = true,
         show_player = false,
         show_guild = true,
+        show_family = true,
         alpha_pct = 100,
         width = 100,
         hp_height = 28,
@@ -704,6 +705,9 @@ function SettingsDefaults.EnsureSettingsDefaultsAndMigrations(s)
 
     local forceWrite = false
     local defaults = SettingsDefaults.DEFAULT_SETTINGS
+    local legacyNameplatesHideGuildFamily = type(s.nameplates) == "table"
+        and s.nameplates.show_guild == false
+        and s.nameplates.show_family == nil
     local legacyRootKeys = {
         "font_size_name",
         "show_mana"
@@ -711,6 +715,11 @@ function SettingsDefaults.EnsureSettingsDefaultsAndMigrations(s)
 
     for k, v in pairs(defaults) do
         EnsureTableDefault(s, k, v)
+    end
+
+    if legacyNameplatesHideGuildFamily then
+        s.nameplates.show_family = false
+        forceWrite = true
     end
 
     if type(s.cast_bar) == "table"

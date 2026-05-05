@@ -135,6 +135,25 @@ local function GetNormalizedTargetId(ctx, api)
     return tostring(targetId)
 end
 
+local function ResolveClassName(ctx, info)
+    if type(info) ~= "table" or type(info.class) ~= "table" then
+        return ""
+    end
+    if F_UNIT == nil or type(F_UNIT.GetPlayerJobName) ~= "function" then
+        return ""
+    end
+
+    local class = info.class
+    local skillset1 = class["1"]
+    local skillset2 = class["2"]
+    local skillset3 = class["3"]
+    if skillset1 == nil or skillset2 == nil or skillset3 == nil then
+        return ""
+    end
+
+    return ctx.TrimText(F_UNIT.GetPlayerJobName(skillset1, skillset2, skillset3))
+end
+
 function TargetExtras.Ensure(ctx, settings, baseStyle)
     local UI = ctx.UI
     local api = ctx.api
@@ -367,13 +386,10 @@ function TargetExtras.Update(ctx, settings)
         gs = targetInfoById.gearScore or targetInfoById.gearscore or targetInfoById.gear_score or targetInfoById.gs
     end
 
-    local className = ""
-    pcall(function()
-        if api.Ability and api.Ability.GetUnitClassName then
-            className = api.Ability:GetUnitClassName("target") or ""
-        end
-    end)
-    className = ctx.TrimText(className)
+    local className = ResolveClassName(ctx, targetUnitInfo)
+    if className == "" then
+        className = ResolveClassName(ctx, targetInfoById)
+    end
 
     pcall(function()
         if UI.target.wnd ~= nil and UI.target.wnd.UpdateTooltip ~= nil then
