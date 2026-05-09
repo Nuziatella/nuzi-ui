@@ -87,12 +87,12 @@ local function showWidget(widget, visible)
     end)
 end
 
-local function setWindowInteractive(widget, enabled)
+local function setWidgetClickable(widget, enabled)
     if widget == nil then
         return
     end
     enabled = enabled and true or false
-    if widget.__nuzi_loadouts_interactive == enabled then
+    if widget.__nuzi_loadouts_clickable == enabled then
         return
     end
     if widget.Clickable ~= nil then
@@ -105,12 +105,23 @@ local function setWindowInteractive(widget, enabled)
             widget:EnablePick(enabled)
         end)
     end
+    widget.__nuzi_loadouts_clickable = enabled
+end
+
+local function setWidgetDragEnabled(widget, enabled)
+    if widget == nil then
+        return
+    end
+    enabled = enabled and true or false
+    if widget.__nuzi_loadouts_drag_enabled == enabled then
+        return
+    end
     if widget.EnableDrag ~= nil then
         safeCall(function()
             widget:EnableDrag(enabled)
         end)
     end
-    widget.__nuzi_loadouts_interactive = enabled
+    widget.__nuzi_loadouts_drag_enabled = enabled
 end
 
 local function freeWidget(widget)
@@ -157,6 +168,52 @@ local function applyButtonSkin(button, skin)
     end)
 end
 
+local function attachButtonHover(button)
+    if button == nil or button.__nuzi_loadouts_hover_ready then
+        return
+    end
+    button.__nuzi_loadouts_hover_ready = true
+
+    local hover = nil
+    if button.CreateColorDrawable ~= nil then
+        hover = safeCall(function()
+            return button:CreateColorDrawable(0.95, 0.70, 0.28, 0.18, "overlay")
+        end)
+        if hover ~= nil then
+            safeCall(function()
+                hover:AddAnchor("TOPLEFT", button, 0, 0)
+                hover:AddAnchor("BOTTOMRIGHT", button, 0, 0)
+                hover:Show(false)
+            end)
+            button.__nuzi_loadouts_hover = hover
+        end
+    end
+
+    local function setHover(active)
+        if button.__nuzi_loadouts_hover ~= nil then
+            showWidget(button.__nuzi_loadouts_hover, active)
+        elseif button.style ~= nil and button.style.SetColor ~= nil then
+            safeCall(function()
+                if active then
+                    button.style:SetColor(1, 0.92, 0.58, 1)
+                else
+                    button.style:SetColor(0.94, 0.86, 0.70, 1)
+                end
+            end)
+        end
+    end
+
+    setHover(false)
+    if button.SetHandler ~= nil then
+        button:SetHandler("OnEnter", function()
+            setHover(true)
+        end)
+        button:SetHandler("OnLeave", function()
+            setHover(false)
+        end)
+    end
+end
+
 local function createWindow(id)
     if api.Interface == nil or api.Interface.CreateEmptyWindow == nil then
         return nil
@@ -176,7 +233,8 @@ local function createWindow(id)
                 window:SetUILayer("game")
             end
         end)
-        setWindowInteractive(window, false)
+        setWidgetClickable(window, true)
+        setWidgetDragEnabled(window, false)
     end
     return window
 end
@@ -263,9 +321,14 @@ local function createButton(parent, id, text, x, y, width, height)
             button:AddAnchor("TOPLEFT", parent, x or 0, y or 0)
             button:SetExtent(width or 80, height or 24)
             button:SetText(tostring(text or ""))
+            if button.Enable ~= nil then
+                button:Enable(true)
+            end
             button:Show(true)
         end)
         applyButtonSkin(button, BUTTON_BASIC ~= nil and BUTTON_BASIC.DEFAULT or nil)
+        setWidgetClickable(button, true)
+        attachButtonHover(button)
     end
     return button
 end
@@ -282,6 +345,14 @@ local function createIconButton(parent, id)
             return parent:CreateChildWidget("button", id, 0, true)
         end)
         applyButtonSkin(button, BUTTON_BASIC ~= nil and BUTTON_BASIC.DEFAULT or nil)
+    end
+    if button ~= nil then
+        safeCall(function()
+            if button.Enable ~= nil then
+                button:Enable(true)
+            end
+        end)
+        setWidgetClickable(button, true)
     end
     return button
 end
@@ -997,13 +1068,19 @@ local function syncMoveInteraction(window, cfg, lockKey)
     end
     local interactive = window.__nuzi_loadouts_dragging
         or (type(cfg) == "table" and not cfg[lockKey] and (not shouldRequireShiftDrag() or isShiftDown()))
-    setWindowInteractive(window, interactive)
+    setWidgetClickable(window, true)
+    setWidgetDragEnabled(window, interactive)
 end
 
 local function attachMoveHandlers(window, cfgKeyX, cfgKeyY, lockKey)
     if window == nil then
         return
     end
+    safeCall(function()
+        if window.RegisterForDrag ~= nil then
+            window:RegisterForDrag("LeftButton")
+        end
+    end)
     if window.SetHandler ~= nil then
         window:SetHandler("OnDragStart", function()
             local cfg = ensureSettings(GearLoadouts.settings)
@@ -1568,8 +1645,8 @@ local function applyVisibility()
     showWidget(GearLoadouts.bar, visible)
     if not visible then
         showWidget(GearLoadouts.editor, false)
-        setWindowInteractive(GearLoadouts.bar, false)
-        setWindowInteractive(GearLoadouts.editor, false)
+        setWidgetDragEnabled(GearLoadouts.bar, false)
+        setWidgetDragEnabled(GearLoadouts.editor, false)
     end
 end
 
@@ -1592,6 +1669,7 @@ function GearLoadouts.ToggleEditor(settings)
             return GearLoadouts.editor:IsVisible()
         end) and true or false)
     end
+    syncMoveInteraction(GearLoadouts.editor, ensureSettings(GearLoadouts.settings), "lock_editor")
     showWidget(GearLoadouts.editor, visible)
     if visible then
         refreshEditor()
