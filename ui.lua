@@ -2326,40 +2326,37 @@ local function RefreshTargetReputationButton(frame)
         return
     end
 
-    local canVote = false
-    if X2Hero ~= nil and type(X2Hero.CanAddReputation) == "function" then
-        local ok, value = pcall(function()
-            return X2Hero:CanAddReputation()
+    if button.__polar_reputation_visible == false and not button.__polar_reputation_stock_refresh_done
+        and frame.ChangedTarget ~= nil and ShouldRunStockFrameMethod(frame, "ChangedTarget") then
+        button.__polar_reputation_stock_refresh_done = true
+        pcall(function()
+            frame:ChangedTarget()
         end)
-        if not ok then
-            ok, value = pcall(function()
-                return X2Hero.CanAddReputation()
-            end)
-        end
-        canVote = ok and value and true or false
     end
 
+    local stockVisible = false
     pcall(function()
-        if button.SetAlpha ~= nil then
-            button:SetAlpha(canVote and 1 or 0)
-        end
-        local visible = nil
         if button.IsVisible ~= nil then
-            visible = button:IsVisible() and true or false
-        end
-        if button.Show ~= nil and (visible ~= canVote or button.__polar_reputation_visible ~= canVote) then
-            button:Show(canVote)
-            button.__polar_reputation_visible = canVote
+            stockVisible = button:IsVisible() and true or false
+        elseif button.GetVisible ~= nil then
+            stockVisible = button:GetVisible() and true or false
         end
     end)
 
-    if not canVote then
+    if not stockVisible then
         button.__polar_reputation_anchor_target = nil
         button.__polar_reputation_anchor_key = nil
+        button.__polar_reputation_visible = false
         return
     end
 
+    button.__polar_reputation_visible = true
+    button.__polar_reputation_stock_refresh_done = false
+
     pcall(function()
+        if button.SetAlpha ~= nil then
+            button:SetAlpha(1)
+        end
         if button.Enable ~= nil then
             button:Enable(true)
         end
@@ -2389,7 +2386,7 @@ local function RefreshTargetReputationButton(frame)
     end)
 
     local style = ResolveFrameStyleTable ~= nil and ResolveFrameStyleTable(frame) or nil
-    local offsetX = tonumber(type(style) == "table" and style.target_reputation_offset_x or nil) or -2
+    local offsetX = tonumber(type(style) == "table" and style.target_reputation_offset_x or nil) or 0
     local offsetY = tonumber(type(style) == "table" and style.target_reputation_offset_y or nil) or -7
     local anchorTarget = frame.hpBar or frame
     local anchorKey = tostring(anchorTarget) .. ":" .. tostring(offsetX) .. ":" .. tostring(offsetY)
@@ -2404,7 +2401,7 @@ local function RefreshTargetReputationButton(frame)
         end
         if button.AddAnchor ~= nil and frame.hpBar ~= nil then
             local ok = pcall(function()
-                button:AddAnchor("TOPRIGHT", frame.hpBar, "TOPRIGHT", offsetX, offsetY)
+                button:AddAnchor("TOPRIGHT", frame.hpBar, "TOPLEFT", offsetX, offsetY)
             end)
             anchored = ok and true or anchored
             if not ok then

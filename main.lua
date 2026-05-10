@@ -45,7 +45,7 @@ local SettingsStore = modules.settings_store
 local NuziUiAddon = {
     name = "Nuzi UI",
     author = "Nuzi",
-    version = "4.1.35",
+    version = "4.1.37",
     desc = "Interface overhaul"
 }
 
@@ -295,7 +295,6 @@ local function onLoad()
 
     events:OnSafe("UPDATE", "UPDATE", onUpdate)
     events:OnSafe("CHAT_MESSAGE", "CHAT_MESSAGE", onChatMessage)
-    events:OptionalOnSafe("COMMUNITY_CHAT_MESSAGE", "COMMUNITY_CHAT_MESSAGE", onChatMessage)
     events:OnSafe("UI_RELOADED", "UI_RELOADED", onUiReloaded)
 
     logger:Info("Loaded. !nui toggles overlays; !nui settings opens the settings window. !pui still works.")

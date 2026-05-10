@@ -176,7 +176,7 @@ You can:
 - Backup files live in `.data/backups`.
 - Moving addon windows follows the same `Shift + drag` behavior as the other Nuzi addons.
 
-4.1.35
+4.1.37
 
 ## Credits
 

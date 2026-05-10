@@ -14,8 +14,7 @@ local CastBar = {
         cast_duration = 0,
         elapsed_ms = 0,
         casting_useable = false,
-        ending = false,
-        ignore_info_ms = 0
+        ending = false
     }
 }
 
@@ -702,20 +701,6 @@ local function resetState()
     CastBar.state.ending = false
 end
 
-local function getCastingInfo()
-    if type(X2Unit) ~= "table" or type(X2Unit.UnitCastingInfo) ~= "function" then
-        return nil
-    end
-    local info = nil
-    safeCall(function()
-        info = X2Unit:UnitCastingInfo("player")
-    end)
-    if type(info) ~= "table" then
-        return nil
-    end
-    return info
-end
-
 local function applyBackdrop(frame, borderThickness)
     if frame == nil then
         return
@@ -1178,7 +1163,6 @@ end
 local function beginCast(frame, spellName, castTime, castingUseable)
     CastBar.state.is_casting = true
     CastBar.state.ending = false
-    CastBar.state.ignore_info_ms = 0
     CastBar.state.elapsed_ms = 0
     updateCastingDisplay(frame, spellName, 0, castTime, castingUseable)
     setProbeText(frame, "Cast source: event")
@@ -1190,7 +1174,6 @@ end
 local function stopCast(frame, succeeded)
     CastBar.state.is_casting = false
     CastBar.state.ending = false
-    CastBar.state.ignore_info_ms = succeeded and 400 or 200
     CastBar.state.elapsed_ms = 0
 
     if frame == nil then
@@ -1732,7 +1715,6 @@ local function releaseFrame()
     clearCursor()
     CastBar.frame = nil
     CastBar.preview_visible = false
-    CastBar.state.ignore_info_ms = 0
     resetState()
 end
 
@@ -1829,9 +1811,6 @@ function CastBar.OnUpdate(dt, settings)
     syncInteractionState(frame)
 
     dt = tonumber(dt) or 0
-    if CastBar.state.ignore_info_ms > 0 then
-        CastBar.state.ignore_info_ms = math.max(0, CastBar.state.ignore_info_ms - dt)
-    end
 
     local active = getActiveConfig()
     if not active then
@@ -1843,28 +1822,6 @@ function CastBar.OnUpdate(dt, settings)
         if cfg ~= nil then
             updateDragPosition(frame, cfg)
         end
-    end
-
-    if CastBar.state.ignore_info_ms > 0 and CastBar.state.is_casting then
-        return
-    end
-
-    local info = getCastingInfo()
-    local totalMs = tonumber(type(info) == "table" and info.castingTime or nil)
-    local currentMs = tonumber(type(info) == "table" and info.currCastingTime or nil)
-
-    if totalMs ~= nil and currentMs ~= nil then
-        local spellName = tostring(info.spellName or CastBar.state.spell_name or "")
-        local castingUseable = CastBar.state.casting_useable
-        if info.castingUseable ~= nil then
-            castingUseable = info.castingUseable and true or false
-        end
-        if not CastBar.state.is_casting then
-            beginCast(frame, spellName, totalMs, castingUseable)
-        end
-        updateCastingDisplay(frame, spellName, currentMs, totalMs, castingUseable)
-        setProbeText(frame, "Cast source: UnitCastingInfo")
-        return
     end
 
     if CastBar.state.is_casting then
