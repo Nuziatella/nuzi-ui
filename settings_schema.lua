@@ -913,7 +913,7 @@ SettingsSchema.PAGES = {
             {
                 id = "loadouts_behavior",
                 title = "Gear Loadouts",
-                hint = "Show a per-character loadout bar and editor for saving gear sets.",
+                hint = "Show a per-character loadout bar and editor for saving gear sets. Auto triggers are configured in the editor and wait until combat ends.",
                 fields = {
                     checkbox("gear_loadouts_enabled", "polarUiGearLoadoutsEnabled", "Enable gear loadouts"),
                     hint(

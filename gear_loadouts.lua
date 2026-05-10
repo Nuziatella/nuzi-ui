@@ -14,9 +14,17 @@ local GearLoadouts = {
     current_character_key = nil,
     equip_queue = {},
     equip_delay_ms = 0,
+    equip_target_loadout_id = nil,
     pending_check_ms = nil,
     pending_check_loadout_id = nil,
-    refreshing_dropdown = false
+    refreshing_dropdown = false,
+    refreshing_auto_controls = false,
+    auto_accum_ms = 0,
+    auto_active_loadout_id = nil,
+    auto_pending_loadout_id = nil,
+    auto_zone_name = "",
+    auto_zone_ms = 0,
+    auto_buff_name_cache = {}
 }
 
 local SLOT_DEFS = {
@@ -48,6 +56,26 @@ for _, def in ipairs(SLOT_DEFS) do
 end
 
 local APPELLATION_TYPE_INDEX = 1
+
+local AUTO_TRIGGER_MANUAL = "manual"
+local AUTO_TRIGGER_SWIMMING = "swimming"
+local AUTO_TRIGGER_CAPTAIN = "captain"
+local AUTO_TRIGGER_BUFF_ACTIVE = "buff_active"
+local AUTO_UPDATE_INTERVAL_MS = 150
+local ROUGH_SEA_ID = 7743
+local DASH_ID = 2675
+local STEALTH_ID = 8225
+local AUTO_SWIMMING_BLOCKED_ZONES = { "growlgate", "freedich" }
+
+local AUTO_TRIGGER_OPTIONS = {
+    { value = AUTO_TRIGGER_MANUAL, label = "Manual" },
+    { value = AUTO_TRIGGER_SWIMMING, label = "Swimming" },
+    { value = AUTO_TRIGGER_CAPTAIN, label = "Captain" },
+    { value = AUTO_TRIGGER_BUFF_ACTIVE, label = "Buff Active" }
+}
+
+local AUTO_DEFAULT_HINT = "Addon auto-swaps wait until combat ends."
+local AUTO_SWIMMING_HINT = "Swimming does not auto-trigger in Freedich or Growlgate."
 
 local function safeCall(fn, ...)
     if type(fn) ~= "function" then
@@ -377,6 +405,24 @@ local function createEdit(parent, id, x, y, width, height, guide)
     return edit
 end
 
+local function createComboBox(parent, items, x, y, width, height)
+    local combo = nil
+    if api.Interface ~= nil and api.Interface.CreateComboBox ~= nil then
+        combo = safeCall(function()
+            return api.Interface:CreateComboBox(parent)
+        end)
+    end
+    if combo ~= nil then
+        safeCall(function()
+            combo:SetExtent(width or 160, height or 26)
+            combo:AddAnchor("TOPLEFT", parent, x or 0, y or 0)
+            combo.dropdownItem = items or {}
+            combo:Show(true)
+        end)
+    end
+    return combo
+end
+
 local function getEditText(edit)
     if edit == nil or edit.GetText == nil then
         return ""
@@ -533,6 +579,52 @@ local function getSelectedLoadout(settings)
         profile.selected_id = loadout.id
     end
     return loadout, index, profile
+end
+
+local function getAutoTriggerValue(loadout)
+    if type(loadout) ~= "table" then
+        return AUTO_TRIGGER_MANUAL
+    end
+    local value = tostring(loadout.auto_trigger or AUTO_TRIGGER_MANUAL)
+    for _, option in ipairs(AUTO_TRIGGER_OPTIONS) do
+        if option.value == value then
+            return value
+        end
+    end
+    return AUTO_TRIGGER_MANUAL
+end
+
+local function getAutoTriggerLabel(value)
+    for _, option in ipairs(AUTO_TRIGGER_OPTIONS) do
+        if option.value == value then
+            return option.label
+        end
+    end
+    return AUTO_TRIGGER_OPTIONS[1].label
+end
+
+local function getAutoTriggerIndex(value)
+    for index, option in ipairs(AUTO_TRIGGER_OPTIONS) do
+        if option.value == value then
+            return index
+        end
+    end
+    return 1
+end
+
+local function getAutoTriggerLabels()
+    local labels = {}
+    for _, option in ipairs(AUTO_TRIGGER_OPTIONS) do
+        labels[#labels + 1] = option.label
+    end
+    return labels
+end
+
+local function getAutoTriggerHint(value)
+    if value == AUTO_TRIGGER_SWIMMING then
+        return AUTO_SWIMMING_HINT
+    end
+    return AUTO_DEFAULT_HINT
 end
 
 local function makeLoadoutId(profile)
@@ -952,6 +1044,64 @@ end
 local refreshBar
 local refreshEditor
 
+local function refreshAutoControls()
+    local editor = GearLoadouts.editor
+    if editor == nil then
+        return
+    end
+    local loadout = getSelectedLoadout(GearLoadouts.settings)
+    local trigger = getAutoTriggerValue(loadout)
+    GearLoadouts.refreshing_auto_controls = true
+    if editor.auto_dropdown ~= nil then
+        editor.auto_dropdown.dropdownItem = getAutoTriggerLabels()
+        if editor.auto_dropdown.Select ~= nil then
+            safeCall(function()
+                editor.auto_dropdown:Select(getAutoTriggerIndex(trigger))
+            end)
+        end
+    end
+    setEditText(editor.auto_value_edit, loadout ~= nil and loadout.auto_trigger_value or "")
+    setText(editor.auto_hint, getAutoTriggerHint(trigger))
+    GearLoadouts.refreshing_auto_controls = false
+end
+
+local function saveAutoTrigger(index)
+    if GearLoadouts.refreshing_auto_controls then
+        return
+    end
+    local loadout = getSelectedLoadout(GearLoadouts.settings)
+    if loadout == nil then
+        return
+    end
+    local option = AUTO_TRIGGER_OPTIONS[tonumber(index) or 1] or AUTO_TRIGGER_OPTIONS[1]
+    loadout.auto_trigger = option.value
+    GearLoadouts.auto_active_loadout_id = nil
+    GearLoadouts.auto_pending_loadout_id = nil
+    saveSettings(GearLoadouts.settings)
+    if GearLoadouts.editor ~= nil then
+        setText(GearLoadouts.editor.auto_hint, getAutoTriggerHint(option.value))
+    end
+    if option.value == AUTO_TRIGGER_SWIMMING then
+        setStatus(AUTO_SWIMMING_HINT, false)
+    else
+        setStatus("Auto trigger set to " .. option.label .. ".", false)
+    end
+end
+
+local function saveAutoTriggerValue()
+    if GearLoadouts.refreshing_auto_controls then
+        return
+    end
+    local loadout = getSelectedLoadout(GearLoadouts.settings)
+    if loadout == nil or GearLoadouts.editor == nil then
+        return
+    end
+    loadout.auto_trigger_value = trim(getEditText(GearLoadouts.editor.auto_value_edit))
+    GearLoadouts.auto_active_loadout_id = nil
+    GearLoadouts.auto_pending_loadout_id = nil
+    saveSettings(GearLoadouts.settings)
+end
+
 local function applyLoadoutTitle(loadout)
     if type(loadout) ~= "table" or loadout.title_type == nil then
         return false
@@ -1009,10 +1159,12 @@ local function equipLoadout(loadout)
 
     GearLoadouts.equip_queue = queue
     GearLoadouts.equip_delay_ms = 250
+    GearLoadouts.equip_target_loadout_id = loadout.id
     GearLoadouts.pending_check_ms = nil
     GearLoadouts.pending_check_loadout_id = nil
 
     if #queue == 0 then
+        GearLoadouts.equip_target_loadout_id = nil
         if titleChanged then
             setStatus("Applied title for " .. tostring(loadout.name or "loadout") .. ".", false)
         else
@@ -1042,11 +1194,286 @@ local function processEquipQueue(dt)
     end
 
     if #GearLoadouts.equip_queue == 0 then
-        local loadout = getSelectedLoadout(GearLoadouts.settings)
         GearLoadouts.pending_check_ms = 700
-        GearLoadouts.pending_check_loadout_id = loadout ~= nil and loadout.id or nil
+        GearLoadouts.pending_check_loadout_id = GearLoadouts.equip_target_loadout_id
+        GearLoadouts.equip_target_loadout_id = nil
         setStatus("Equip requests sent.", false)
     end
+end
+
+local function readPlayerAuras()
+    local buffs = {}
+    local debuffs = {}
+    if api.Unit == nil then
+        return buffs, debuffs
+    end
+    if api.Unit.UnitBuffCount ~= nil and api.Unit.UnitBuff ~= nil then
+        local count = tonumber(safeCall(function()
+            return api.Unit:UnitBuffCount("player")
+        end)) or 0
+        for index = 1, count do
+            local buff = safeCall(function()
+                return api.Unit:UnitBuff("player", index)
+            end)
+            if type(buff) == "table" then
+                buffs[#buffs + 1] = buff
+            end
+        end
+    end
+    if api.Unit.UnitDeBuffCount ~= nil and api.Unit.UnitDeBuff ~= nil then
+        local count = tonumber(safeCall(function()
+            return api.Unit:UnitDeBuffCount("player")
+        end)) or 0
+        for index = 1, count do
+            local debuff = safeCall(function()
+                return api.Unit:UnitDeBuff("player", index)
+            end)
+            if type(debuff) == "table" then
+                debuffs[#debuffs + 1] = debuff
+            end
+        end
+    end
+    return buffs, debuffs
+end
+
+local function getAuraId(aura)
+    if type(aura) ~= "table" then
+        return nil
+    end
+    return tonumber(aura.buff_id or aura.buffId or aura.id or aura.spellId or aura.spell_id)
+end
+
+local function getAuraTooltipName(id)
+    id = tonumber(id)
+    if id == nil then
+        return ""
+    end
+    if GearLoadouts.auto_buff_name_cache[id] ~= nil then
+        return GearLoadouts.auto_buff_name_cache[id] or ""
+    end
+    if api.Ability == nil or api.Ability.GetBuffTooltip == nil then
+        return ""
+    end
+    local tooltip = safeCall(function()
+        return api.Ability:GetBuffTooltip(id, 1)
+    end)
+    local name = ""
+    if type(tooltip) == "table" then
+        for _, key in ipairs({ "name", "buffName", "buff_name", "title", "skillName", "skill_name" }) do
+            name = trim(tooltip[key])
+            if name ~= "" then
+                break
+            end
+        end
+    elseif type(tooltip) == "string" then
+        name = trim(tooltip)
+    end
+    name = string.lower(name)
+    GearLoadouts.auto_buff_name_cache[id] = name ~= "" and name or false
+    return name
+end
+
+local function getAuraName(aura)
+    if type(aura) ~= "table" then
+        return ""
+    end
+    for _, key in ipairs({ "name", "buff_name", "buffName", "skill_name", "skillName", "title" }) do
+        local value = trim(aura[key])
+        if value ~= "" then
+            return string.lower(value)
+        end
+    end
+    return getAuraTooltipName(getAuraId(aura))
+end
+
+local function auraMatches(aura, query)
+    local text = string.lower(trim(query))
+    if text == "" then
+        return false
+    end
+    local queryId = tonumber(text)
+    local auraId = getAuraId(aura)
+    if queryId ~= nil and auraId ~= nil and queryId == auraId then
+        return true
+    end
+    local auraName = getAuraName(aura)
+    return auraName ~= "" and string.find(auraName, text, 1, true) ~= nil
+end
+
+local function anyAuraMatches(buffs, debuffs, query)
+    for _, aura in ipairs(buffs or {}) do
+        if auraMatches(aura, query) then
+            return true
+        end
+    end
+    for _, aura in ipairs(debuffs or {}) do
+        if auraMatches(aura, query) then
+            return true
+        end
+    end
+    return false
+end
+
+local function refreshCurrentZoneName()
+    GearLoadouts.auto_zone_ms = (tonumber(GearLoadouts.auto_zone_ms) or 0) + AUTO_UPDATE_INTERVAL_MS
+    if GearLoadouts.auto_zone_ms < 1000 and trim(GearLoadouts.auto_zone_name) ~= "" then
+        return GearLoadouts.auto_zone_name
+    end
+    GearLoadouts.auto_zone_ms = 0
+    local zoneName = ""
+    if api.Unit ~= nil and api.Unit.GetCurrentZoneGroup ~= nil and api.Zone ~= nil and api.Zone.GetZoneStateInfoByZoneId ~= nil then
+        local currentZoneGroup = safeCall(function()
+            return api.Unit:GetCurrentZoneGroup()
+        end)
+        local candidates = {}
+        if type(currentZoneGroup) == "number" then
+            candidates[#candidates + 1] = currentZoneGroup
+        elseif type(currentZoneGroup) == "table" then
+            for _, value in ipairs(currentZoneGroup) do
+                local zoneId = tonumber(value)
+                if zoneId ~= nil and zoneId > 0 then
+                    candidates[#candidates + 1] = zoneId
+                end
+            end
+        end
+        for _, zoneId in ipairs(candidates) do
+            local zoneInfo = safeCall(function()
+                return api.Zone:GetZoneStateInfoByZoneId(zoneId)
+            end)
+            if type(zoneInfo) == "table" and trim(zoneInfo.zoneName) ~= "" then
+                zoneName = trim(zoneInfo.zoneName)
+                if zoneInfo.isCurrentZone == true then
+                    break
+                end
+            end
+        end
+    end
+    GearLoadouts.auto_zone_name = zoneName
+    return zoneName
+end
+
+local function isSwimmingZoneBlocked()
+    local zoneName = string.lower(refreshCurrentZoneName())
+    if zoneName == "" then
+        return false
+    end
+    for _, blocked in ipairs(AUTO_SWIMMING_BLOCKED_ZONES) do
+        if string.find(zoneName, blocked, 1, true) ~= nil then
+            return true
+        end
+    end
+    return false
+end
+
+local function isSwimmingTriggerActive(buffs, debuffs)
+    if isSwimmingZoneBlocked() then
+        return false
+    end
+    local hasMove = false
+    local hasRoughSea = false
+    for _, aura in ipairs(buffs or {}) do
+        local id = getAuraId(aura)
+        local name = getAuraName(aura)
+        if id == DASH_ID or id == STEALTH_ID
+            or string.find(name, "dash", 1, true) ~= nil
+            or string.find(name, "stealth", 1, true) ~= nil then
+            hasMove = true
+        end
+        if id == ROUGH_SEA_ID or string.find(name, "rough sea winds", 1, true) ~= nil then
+            hasRoughSea = true
+        end
+    end
+    if not hasRoughSea then
+        for _, aura in ipairs(debuffs or {}) do
+            local id = getAuraId(aura)
+            local name = getAuraName(aura)
+            if id == ROUGH_SEA_ID or string.find(name, "rough sea winds", 1, true) ~= nil then
+                hasRoughSea = true
+                break
+            end
+        end
+    end
+    return hasMove and hasRoughSea
+end
+
+local function isLoadoutAutoTriggered(loadout, buffs, debuffs)
+    local trigger = getAutoTriggerValue(loadout)
+    if trigger == AUTO_TRIGGER_SWIMMING then
+        return isSwimmingTriggerActive(buffs, debuffs)
+    elseif trigger == AUTO_TRIGGER_CAPTAIN then
+        return anyAuraMatches(buffs, debuffs, "captain")
+    elseif trigger == AUTO_TRIGGER_BUFF_ACTIVE then
+        return anyAuraMatches(buffs, debuffs, loadout.auto_trigger_value)
+    end
+    return false
+end
+
+local function isPlayerInCombat()
+    if api.Unit == nil or api.Unit.UnitCombatState == nil then
+        return false
+    end
+    local state = safeCall(function()
+        return api.Unit:UnitCombatState("player")
+    end)
+    if state == true then
+        return true
+    end
+    if type(state) == "number" then
+        return state ~= 0
+    end
+    if type(state) == "string" then
+        local value = string.lower(trim(state))
+        return value ~= "" and value ~= "0" and value ~= "false"
+    end
+    return false
+end
+
+local function processAutoTriggers(dt)
+    GearLoadouts.auto_accum_ms = (tonumber(GearLoadouts.auto_accum_ms) or 0) + (tonumber(dt) or 0)
+    if GearLoadouts.auto_accum_ms < AUTO_UPDATE_INTERVAL_MS then
+        return
+    end
+    GearLoadouts.auto_accum_ms = 0
+    if #GearLoadouts.equip_queue > 0 or GearLoadouts.pending_check_ms ~= nil then
+        return
+    end
+
+    local profile = getProfile(GearLoadouts.settings)
+    if type(profile) ~= "table" or type(profile.loadouts) ~= "table" then
+        return
+    end
+    local buffs, debuffs = readPlayerAuras()
+    local activeLoadout = nil
+    for _, loadout in ipairs(profile.loadouts) do
+        if isLoadoutAutoTriggered(loadout, buffs, debuffs) then
+            activeLoadout = loadout
+            break
+        end
+    end
+
+    if activeLoadout == nil then
+        GearLoadouts.auto_active_loadout_id = nil
+        GearLoadouts.auto_pending_loadout_id = nil
+        return
+    end
+
+    local activeId = tostring(activeLoadout.id or "")
+    if activeId == "" or GearLoadouts.auto_active_loadout_id == activeId then
+        return
+    end
+
+    if isPlayerInCombat() then
+        if GearLoadouts.auto_pending_loadout_id ~= activeId then
+            GearLoadouts.auto_pending_loadout_id = activeId
+            setStatus("Auto trigger waiting for combat to end: " .. tostring(activeLoadout.name or "loadout") .. ".", true)
+        end
+        return
+    end
+
+    GearLoadouts.auto_active_loadout_id = activeId
+    GearLoadouts.auto_pending_loadout_id = nil
+    setStatus("Auto trigger: " .. getAutoTriggerLabel(getAutoTriggerValue(activeLoadout)) .. ".", false)
+    equipLoadout(activeLoadout)
 end
 
 local function isShiftDown()
@@ -1233,6 +1660,8 @@ local function deleteSelectedLoadout()
     local name = tostring(loadout.name or "Loadout")
     table.remove(profile.loadouts, index)
     profile.selected_id = profile.loadouts[math.min(index, #profile.loadouts)] ~= nil and profile.loadouts[math.min(index, #profile.loadouts)].id or nil
+    GearLoadouts.auto_active_loadout_id = nil
+    GearLoadouts.auto_pending_loadout_id = nil
     saveSettings(GearLoadouts.settings)
     setStatus("Deleted " .. name .. ".", false)
     refreshEditor()
@@ -1388,7 +1817,7 @@ local function createEditor(settings)
     GearLoadouts.editor = window
     addPanelBackground(window, 0.92)
     safeCall(function()
-        window:SetExtent(520, 560)
+        window:SetExtent(520, 640)
     end)
     anchorTopLeft(window, cfg.editor_pos_x, cfg.editor_pos_y)
     attachMoveHandlers(window, "editor_pos_x", "editor_pos_y", "lock_editor")
@@ -1459,6 +1888,23 @@ local function createEditor(settings)
         deleteBtn:SetHandler("OnClick", deleteSelectedLoadout)
     end
 
+    createLabel(window, "nuziGearAutoLabel", "Auto", 16, 118, 42, 20, 12)
+    window.auto_dropdown = createComboBox(window, getAutoTriggerLabels(), 58, 114, 136, 26)
+    if window.auto_dropdown ~= nil then
+        function window.auto_dropdown:SelectedProc()
+            saveAutoTrigger(self:GetSelectedIndex())
+        end
+    end
+    createLabel(window, "nuziGearAutoValueLabel", "Buff/ID", 206, 118, 54, 20, 12)
+    window.auto_value_edit = createEdit(window, "nuziGearAutoValue", 264, 114, 116, 26, "name or ID")
+    if window.auto_value_edit ~= nil and window.auto_value_edit.SetHandler ~= nil then
+        window.auto_value_edit:SetHandler("OnTextChanged", saveAutoTriggerValue)
+    end
+    window.auto_hint = createLabel(window, "nuziGearAutoHint", AUTO_DEFAULT_HINT, 16, 144, 488, 18, 11)
+    if window.auto_hint ~= nil then
+        setLabelColor(window.auto_hint, 0.92, 0.62, 0.28, 1)
+    end
+
     local slotPanel = safeCall(function()
         return window:CreateChildWidget("emptywidget", "nuziGearSlotPanel", 0, true)
     end)
@@ -1467,7 +1913,7 @@ local function createEditor(settings)
     end
     window.slot_panel = slotPanel
     safeCall(function()
-        slotPanel:AddAnchor("TOPLEFT", window, 61, 122)
+        slotPanel:AddAnchor("TOPLEFT", window, 61, 166)
         slotPanel:SetExtent(398, 430)
         slotPanel:Show(true)
     end)
@@ -1497,7 +1943,7 @@ local function createEditor(settings)
         GearLoadouts.slot_widgets[def.key] = createSlot(slotPanel, def, index)
     end
 
-    window.status = createLabel(window, "nuziGearStatus", "", 16, 528, 488, 20, 12)
+    window.status = createLabel(window, "nuziGearStatus", "", 16, 608, 488, 20, 12)
     setStatus("", false)
     showWidget(window, false)
 end
@@ -1507,6 +1953,7 @@ refreshEditor = function()
         return
     end
     refreshLoadoutDropdown()
+    refreshAutoControls()
     local loadout = getSelectedLoadout(GearLoadouts.settings)
     local slots = getLoadoutSlots(loadout)
     for _, def in ipairs(SLOT_DEFS) do
@@ -1707,6 +2154,13 @@ function GearLoadouts.Init(settings)
     GearLoadouts.enabled = true
     GearLoadouts.equip_queue = {}
     GearLoadouts.equip_delay_ms = 0
+    GearLoadouts.equip_target_loadout_id = nil
+    GearLoadouts.auto_accum_ms = 0
+    GearLoadouts.auto_active_loadout_id = nil
+    GearLoadouts.auto_pending_loadout_id = nil
+    GearLoadouts.auto_zone_name = ""
+    GearLoadouts.auto_zone_ms = 0
+    GearLoadouts.auto_buff_name_cache = {}
     ensureSettings(settings)
     createBar(settings)
     applyVisibility()
@@ -1744,6 +2198,7 @@ function GearLoadouts.OnUpdate(dt, settings)
     syncMoveInteraction(GearLoadouts.bar, cfg, "lock_bar")
     syncMoveInteraction(GearLoadouts.editor, cfg, "lock_editor")
     processEquipQueue(dt)
+    processAutoTriggers(dt)
     if GearLoadouts.pending_check_ms ~= nil then
         GearLoadouts.pending_check_ms = GearLoadouts.pending_check_ms - (tonumber(dt) or 0)
         if GearLoadouts.pending_check_ms <= 0 then
@@ -1773,8 +2228,15 @@ function GearLoadouts.Unload()
     GearLoadouts.editor = nil
     GearLoadouts.settings = nil
     GearLoadouts.equip_queue = {}
+    GearLoadouts.equip_target_loadout_id = nil
     GearLoadouts.pending_check_ms = nil
     GearLoadouts.pending_check_loadout_id = nil
+    GearLoadouts.auto_accum_ms = 0
+    GearLoadouts.auto_active_loadout_id = nil
+    GearLoadouts.auto_pending_loadout_id = nil
+    GearLoadouts.auto_zone_name = ""
+    GearLoadouts.auto_zone_ms = 0
+    GearLoadouts.auto_buff_name_cache = {}
 end
 
 return GearLoadouts

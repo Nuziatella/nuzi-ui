@@ -12,7 +12,11 @@ local CooldownTracker = {
     duration_cache = {},
     cooldown_state = {},
     target_cache = {},
-    target_cache_unit_id = nil
+    target_cache_unit_id = nil,
+    text_alert = {
+        window = nil,
+        label = nil
+    }
 }
 
 local UNIT_ORDER = {
@@ -1586,6 +1590,168 @@ local function attachDragTarget(window, target, unitKey)
     syncWindowInteractionState(window, unitKey)
 end
 
+local function hideTextAlert()
+    local alert = CooldownTracker.text_alert
+    if type(alert) == "table" then
+        showWidget(alert.window, false)
+    end
+end
+
+local function ensureTextAlertWindow()
+    if type(CooldownTracker.text_alert) ~= "table" then
+        CooldownTracker.text_alert = {}
+    end
+    if CooldownTracker.text_alert.window ~= nil then
+        return CooldownTracker.text_alert
+    end
+
+    local window = createWindow("NuziUiCooldownTextAlert")
+    if window == nil then
+        return nil
+    end
+
+    local label = createLabel(window, "NuziUiCooldownTextAlertLabel", 18, (ALIGN ~= nil and ALIGN.LEFT) or nil)
+    if label ~= nil then
+        safeCall(function()
+            label:AddAnchor("TOPLEFT", window, 0, 0)
+            label:SetExtent(500, 40)
+        end)
+    end
+
+    safeCall(function()
+        window:SetExtent(500, 40)
+        if window.RegisterForDrag ~= nil then
+            window:RegisterForDrag("LeftButton")
+        end
+    end)
+
+    if window.SetHandler ~= nil then
+        window:SetHandler("OnDragStart", function()
+            local root = type(CooldownTracker.settings) == "table" and CooldownTracker.settings.cooldown_tracker or nil
+            if type(root) ~= "table" or root.text_alert_lock_position == true then
+                return
+            end
+            if type(CooldownTracker.settings) == "table" and CooldownTracker.settings.drag_requires_shift == true and not isShiftDown() then
+                return
+            end
+            window.__nuzi_dragging = true
+            setWidgetInteractive(window, true)
+            if type(window.StartMoving) == "function" then
+                window:StartMoving()
+            end
+        end)
+        window:SetHandler("OnDragStop", function()
+            if type(window.StopMovingOrSizing) == "function" then
+                window:StopMovingOrSizing()
+            end
+            window.__nuzi_dragging = false
+            local x, y = readWindowScreenOffset(window)
+            local root = type(CooldownTracker.settings) == "table" and CooldownTracker.settings.cooldown_tracker or nil
+            if type(root) == "table" and x ~= nil and y ~= nil then
+                root.text_alert_pos_x = x
+                root.text_alert_pos_y = y
+                saveSettings(CooldownTracker.settings)
+                safeCall(function()
+                    if window.RemoveAllAnchors ~= nil then
+                        window:RemoveAllAnchors()
+                    end
+                    anchorTopLeft(window, x, y, true)
+                end)
+            end
+            setWidgetInteractive(window, type(root) == "table" and root.text_alert_lock_position ~= true)
+        end)
+    end
+
+    CooldownTracker.text_alert.window = window
+    CooldownTracker.text_alert.label = label
+    showWidget(window, false)
+    return CooldownTracker.text_alert
+end
+
+local function textAlertAuraMatches(query, aura)
+    local text = string.lower(tostring(query or ""))
+    text = string.match(text, "^%s*(.-)%s*$") or text
+    if text == "" then
+        return false
+    end
+
+    local queryId = tonumber(text)
+    local auraId = safeGetAuraId(aura)
+    if queryId ~= nil and auraId ~= nil and math.floor(queryId + 0.5) == auraId then
+        return true
+    end
+
+    local auraName = string.lower(resolveAuraName(aura, auraId))
+    return auraName ~= "" and string.find(auraName, text, 1, true) ~= nil
+end
+
+local function isTextAlertAuraPresent(query)
+    local buffCount = safeUnitBuffCount("player")
+    for index = 1, buffCount do
+        if textAlertAuraMatches(query, safeUnitBuff("player", index)) then
+            return true
+        end
+    end
+
+    local debuffCount = safeUnitDeBuffCount("player")
+    for index = 1, debuffCount do
+        if textAlertAuraMatches(query, safeUnitDeBuff("player", index)) then
+            return true
+        end
+    end
+    return false
+end
+
+local function updateTextAlert(root)
+    if type(root) ~= "table" or not CooldownTracker.enabled or root.text_alert_enabled ~= true then
+        hideTextAlert()
+        return
+    end
+
+    local query = tostring(root.text_alert_query or "")
+    query = string.match(query, "^%s*(.-)%s*$") or query
+    if query == "" then
+        hideTextAlert()
+        return
+    end
+
+    local present = isTextAlertAuraPresent(query)
+    local mode = normalizeDisplayMode(root.text_alert_mode)
+    local shouldShow = (mode == "active" and present)
+        or (mode == "missing" and not present)
+        or (mode == "both")
+    if not shouldShow then
+        hideTextAlert()
+        return
+    end
+
+    local alert = ensureTextAlertWindow()
+    if type(alert) ~= "table" or alert.window == nil then
+        return
+    end
+
+    local text = tostring(root.text_alert_text or "")
+    if string.match(text, "^%s*$") ~= nil then
+        text = mode == "active" and "Buff Active" or "Buff Missing"
+    end
+
+    setLabelText(alert.label, text)
+    setLabelFontSize(alert.label, clampInt(root.text_alert_font_size, 8, 48, 18))
+    setLabelColor(alert.label, type(root.text_alert_color) == "table" and root.text_alert_color or { 255, 220, 64, 255 })
+    safeCall(function()
+        alert.window:SetExtent(500, math.max(30, clampInt(root.text_alert_font_size, 8, 48, 18) + 14))
+        if alert.label ~= nil then
+            alert.label:SetExtent(500, math.max(30, clampInt(root.text_alert_font_size, 8, 48, 18) + 14))
+        end
+        if alert.window.RemoveAllAnchors ~= nil then
+            alert.window:RemoveAllAnchors()
+        end
+        anchorTopLeft(alert.window, tonumber(root.text_alert_pos_x) or 700, tonumber(root.text_alert_pos_y) or 430, true)
+    end)
+    setWidgetInteractive(alert.window, root.text_alert_lock_position ~= true)
+    showWidget(alert.window, true)
+end
+
 local function ensureUnitWindow(unitKey)
     local state = CooldownTracker.windows[unitKey]
     if type(state) == "table" and state.window ~= nil then
@@ -2023,6 +2189,7 @@ function CooldownTracker.Init(settings)
     CooldownTracker.settings = settings
     CooldownTracker.accum_ms = 0
     clearTargetCache()
+    hideTextAlert()
     hideAllWindows()
 end
 
@@ -2031,6 +2198,7 @@ function CooldownTracker.ApplySettings(settings)
     CooldownTracker.cooldown_state = {}
     if type(settings) ~= "table" or type(settings.cooldown_tracker) ~= "table" then
         hideAllWindows()
+        hideTextAlert()
         syncAllWindowInteractionStates()
         return
     end
@@ -2051,6 +2219,7 @@ function CooldownTracker.ApplySettings(settings)
             end
         end
     end
+    updateTextAlert(settings.cooldown_tracker)
     syncAllWindowInteractionStates()
 end
 
@@ -2058,6 +2227,7 @@ function CooldownTracker.SetEnabled(enabled)
     CooldownTracker.enabled = enabled and true or false
     if not CooldownTracker.enabled then
         hideAllWindows()
+        hideTextAlert()
     end
     syncAllWindowInteractionStates()
 end
@@ -2074,6 +2244,7 @@ function CooldownTracker.OnUpdate(dt, settings)
     local trackerSettings = CooldownTracker.settings.cooldown_tracker
     if type(trackerSettings) ~= "table" then
         hideAllWindows()
+        hideTextAlert()
         syncAllWindowInteractionStates()
         return
     end
@@ -2087,11 +2258,13 @@ function CooldownTracker.OnUpdate(dt, settings)
     if CooldownTracker.accum_ms < 0 then
         CooldownTracker.accum_ms = 0
     end
+    updateTextAlert(trackerSettings)
     updateAllUnits(getUiMsec())
 end
 
 function CooldownTracker.Unload()
     clearTargetCache()
+    hideTextAlert()
     for _, state in pairs(CooldownTracker.windows) do
         if type(state) == "table" then
             showWidget(state.window, false)
@@ -2105,6 +2278,19 @@ function CooldownTracker.Unload()
         end
     end
     CooldownTracker.windows = {}
+    if type(CooldownTracker.text_alert) == "table" and CooldownTracker.text_alert.window ~= nil then
+        safeCall(function()
+            if CooldownTracker.text_alert.window.Destroy ~= nil then
+                CooldownTracker.text_alert.window:Destroy()
+            elseif api.Interface ~= nil and api.Interface.Free ~= nil then
+                api.Interface:Free(CooldownTracker.text_alert.window)
+            end
+        end)
+    end
+    CooldownTracker.text_alert = {
+        window = nil,
+        label = nil
+    }
     CooldownTracker.buff_meta_cache = {}
     CooldownTracker.duration_cache = {}
     CooldownTracker.cooldown_state = {}

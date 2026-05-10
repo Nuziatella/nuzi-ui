@@ -42,9 +42,9 @@ function Runtime.GetUnitName(unit)
     if unit == nil then
         return ""
     end
-    if api ~= nil and api.Unit ~= nil and api.Unit.GetUnitName ~= nil then
+    if api ~= nil and api.Unit ~= nil and api.Unit.UnitName ~= nil then
         local ok, value = pcall(function()
-            return api.Unit:GetUnitName(unit)
+            return api.Unit:UnitName(unit)
         end)
         value = trim(value)
         if ok and value ~= "" then

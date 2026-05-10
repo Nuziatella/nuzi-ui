@@ -64,6 +64,38 @@ function CooldownPage.Build(state, page, gap)
     )
     y = y + gap + 10
 
+    CreateLabel("polarUiCooldownTextAlertTitle", page, "Text Alert", 15, y, 18)
+    y = y + 30
+
+    controls.ct_text_alert_enabled = CreateCheckbox("polarUiCooldownTextAlertEnabled", page, "Enable buff text alert", 15, y)
+    y = y + gap
+
+    CreateLabel("polarUiCooldownTextAlertModeLabel", page, "Show", 15, y, 15)
+    controls.ct_text_alert_mode = CreateComboBox(page, SettingsCooldown.DISPLAY_MODE_LABELS, 70, y - 4, 160, 24)
+    CreateLabel("polarUiCooldownTextAlertQueryLabel", page, "Buff name/ID", 250, y, 15)
+    controls.ct_text_alert_query = CreateEdit("polarUiCooldownTextAlertQuery", page, "", 355, y - 4, 220, 22)
+    y = y + 34
+
+    CreateLabel("polarUiCooldownTextAlertTextLabel", page, "Text", 15, y, 15)
+    controls.ct_text_alert_text = CreateEdit("polarUiCooldownTextAlertText", page, "", 70, y - 4, 220, 22)
+    CreateLabel("polarUiCooldownTextAlertXLabel", page, "X", 310, y, 15)
+    controls.ct_text_alert_pos_x = CreateEdit("polarUiCooldownTextAlertX", page, "700", 330, y - 4, 70, 22)
+    setDigit(controls.ct_text_alert_pos_x)
+    CreateLabel("polarUiCooldownTextAlertYLabel", page, "Y", 420, y, 15)
+    controls.ct_text_alert_pos_y = CreateEdit("polarUiCooldownTextAlertY", page, "430", 440, y - 4, 70, 22)
+    setDigit(controls.ct_text_alert_pos_y)
+    y = y + 34
+
+    controls.ct_text_alert_lock_position = CreateCheckbox("polarUiCooldownTextAlertLock", page, "Lock text alert position", 15, y)
+    y = y + gap
+
+    createSlider(controls, "ct_text_alert_fs", "polarUiCooldownTextAlertFontSize", page, "Text alert size", 15, y, 8, 48, 1)
+    y = y + 24
+
+    CreateLabel("polarUiCooldownTextAlertColorTitle", page, "Text alert color (RGB)", 15, y, 15)
+    y = createColorSliders(controls, "ct_text_alert", "polarUiCooldownTextAlert", page, y + 22)
+    y = y + gap + 10
+
     CreateLabel("polarUiCooldownUnitLabel", page, "Unit", 15, y, 15)
     controls.ct_unit = CreateComboBox(page, SettingsCooldown.UNIT_LABELS, 110, y - 4, 220, 24)
     CreateLabel("polarUiCooldownDisplayModeLabel", page, "Show", 350, y, 15)

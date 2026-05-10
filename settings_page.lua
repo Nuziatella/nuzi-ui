@@ -2351,6 +2351,40 @@ RefreshControls = function()
             tracker ~= nil and (tonumber(tracker.update_interval_ms) or 50) or 50
         )
     end
+    if SettingsPage.controls.ct_text_alert_enabled ~= nil then
+        SettingsPage.controls.ct_text_alert_enabled:SetChecked(tracker ~= nil and tracker.text_alert_enabled == true)
+    end
+    if SettingsPage.controls.ct_text_alert_mode ~= nil then
+        SetComboBoxIndex1Based(SettingsPage.controls.ct_text_alert_mode, GetCooldownDisplayModeIndex(tracker ~= nil and tracker.text_alert_mode or "missing"))
+    end
+    if SettingsPage.controls.ct_text_alert_query ~= nil and SettingsPage.controls.ct_text_alert_query.SetText ~= nil then
+        SettingsPage.controls.ct_text_alert_query:SetText(tostring(tracker ~= nil and tracker.text_alert_query or ""))
+    end
+    if SettingsPage.controls.ct_text_alert_text ~= nil and SettingsPage.controls.ct_text_alert_text.SetText ~= nil then
+        SettingsPage.controls.ct_text_alert_text:SetText(tostring(tracker ~= nil and tracker.text_alert_text or "Kittenish Missing"))
+    end
+    if SettingsPage.controls.ct_text_alert_pos_x ~= nil and SettingsPage.controls.ct_text_alert_pos_x.SetText ~= nil then
+        SettingsPage.controls.ct_text_alert_pos_x:SetText(tostring(ClampInt(tracker ~= nil and tracker.text_alert_pos_x or 700, -5000, 5000, 700)))
+    end
+    if SettingsPage.controls.ct_text_alert_pos_y ~= nil and SettingsPage.controls.ct_text_alert_pos_y.SetText ~= nil then
+        SettingsPage.controls.ct_text_alert_pos_y:SetText(tostring(ClampInt(tracker ~= nil and tracker.text_alert_pos_y or 430, -5000, 5000, 430)))
+    end
+    if SettingsPage.controls.ct_text_alert_lock_position ~= nil then
+        SettingsPage.controls.ct_text_alert_lock_position:SetChecked(tracker ~= nil and tracker.text_alert_lock_position == true)
+    end
+    if SettingsPage.controls.ct_text_alert_fs ~= nil then
+        refreshSlider(SettingsPage.controls.ct_text_alert_fs, SettingsPage.controls.ct_text_alert_fs_val, tracker ~= nil and tonumber(tracker.text_alert_font_size) or 18)
+    end
+    local textAlertColor = type(tracker) == "table" and type(tracker.text_alert_color) == "table" and tracker.text_alert_color or { 255, 220, 64, 255 }
+    if SettingsPage.controls.ct_text_alert_r ~= nil then
+        refreshSlider(SettingsPage.controls.ct_text_alert_r, SettingsPage.controls.ct_text_alert_r_val, tonumber(textAlertColor[1]) or 255)
+    end
+    if SettingsPage.controls.ct_text_alert_g ~= nil then
+        refreshSlider(SettingsPage.controls.ct_text_alert_g, SettingsPage.controls.ct_text_alert_g_val, tonumber(textAlertColor[2]) or 220)
+    end
+    if SettingsPage.controls.ct_text_alert_b ~= nil then
+        refreshSlider(SettingsPage.controls.ct_text_alert_b, SettingsPage.controls.ct_text_alert_b_val, tonumber(textAlertColor[3]) or 64)
+    end
     if SettingsPage.controls.ct_unit ~= nil then
         SetComboBoxIndex1Based(SettingsPage.controls.ct_unit, GetCooldownUnitIndexFromKey(selectedUnitKey))
     end
@@ -3255,6 +3289,45 @@ ApplyControlsToSettings = function()
     if SettingsPage.controls.ct_update_interval ~= nil then
         tracker.update_interval_ms = GetSliderValue(SettingsPage.controls.ct_update_interval)
     end
+    if SettingsPage.controls.ct_text_alert_enabled ~= nil then
+        tracker.text_alert_enabled = SettingsPage.controls.ct_text_alert_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.ct_text_alert_mode ~= nil then
+        local idx = GetComboBoxIndex1Based(SettingsPage.controls.ct_text_alert_mode, #COOLDOWN_DISPLAY_MODE_LABELS)
+        tracker.text_alert_mode = GetCooldownDisplayModeFromIndex(idx)
+    end
+    if SettingsPage.controls.ct_text_alert_query ~= nil then
+        tracker.text_alert_query = GetEditText(SettingsPage.controls.ct_text_alert_query)
+    end
+    if SettingsPage.controls.ct_text_alert_text ~= nil then
+        tracker.text_alert_text = GetEditText(SettingsPage.controls.ct_text_alert_text)
+    end
+    if SettingsPage.controls.ct_text_alert_pos_x ~= nil then
+        local x = ParseEditNumber(SettingsPage.controls.ct_text_alert_pos_x)
+        if x ~= nil then
+            tracker.text_alert_pos_x = ClampInt(x, -5000, 5000, 700)
+        end
+    end
+    if SettingsPage.controls.ct_text_alert_pos_y ~= nil then
+        local y = ParseEditNumber(SettingsPage.controls.ct_text_alert_pos_y)
+        if y ~= nil then
+            tracker.text_alert_pos_y = ClampInt(y, -5000, 5000, 430)
+        end
+    end
+    if SettingsPage.controls.ct_text_alert_lock_position ~= nil then
+        tracker.text_alert_lock_position = SettingsPage.controls.ct_text_alert_lock_position:GetChecked() and true or false
+    end
+    if SettingsPage.controls.ct_text_alert_fs ~= nil then
+        tracker.text_alert_font_size = GetSliderValue(SettingsPage.controls.ct_text_alert_fs)
+    end
+    if SettingsPage.controls.ct_text_alert_r ~= nil and SettingsPage.controls.ct_text_alert_g ~= nil and SettingsPage.controls.ct_text_alert_b ~= nil then
+        tracker.text_alert_color = colorTable(
+            GetSliderValue(SettingsPage.controls.ct_text_alert_r),
+            GetSliderValue(SettingsPage.controls.ct_text_alert_g),
+            GetSliderValue(SettingsPage.controls.ct_text_alert_b),
+            255
+        )
+    end
 
     local selectedUnitKey = tostring(SettingsPage.cooldown_unit_key or "player")
     local selectedUnitCfg = tracker.units[selectedUnitKey]
@@ -4029,6 +4102,8 @@ local function EnsureWindow()
         SettingsPage.controls.plates_debuffs_show_dot,
         SettingsPage.controls.plates_debuffs_show_misc,
         SettingsPage.controls.ct_enabled,
+        SettingsPage.controls.ct_text_alert_enabled,
+        SettingsPage.controls.ct_text_alert_lock_position,
         SettingsPage.controls.ct_unit_enabled,
         SettingsPage.controls.ct_lock_position,
         SettingsPage.controls.ct_show_timer,
@@ -4049,6 +4124,18 @@ local function EnsureWindow()
 
     if SettingsPage.controls.ct_display_mode ~= nil and SettingsPage.controls.ct_display_mode.SetHandler ~= nil then
         SettingsPage.controls.ct_display_mode:SetHandler("OnSelChanged", function()
+            ApplyControlsToSettings()
+            if type(SettingsPage.on_apply) == "function" then
+                pcall(function()
+                    SettingsPage.on_apply()
+                end)
+            end
+            RefreshControls()
+        end)
+    end
+
+    if SettingsPage.controls.ct_text_alert_mode ~= nil and SettingsPage.controls.ct_text_alert_mode.SetHandler ~= nil then
+        SettingsPage.controls.ct_text_alert_mode:SetHandler("OnSelChanged", function()
             ApplyControlsToSettings()
             if type(SettingsPage.on_apply) == "function" then
                 pcall(function()

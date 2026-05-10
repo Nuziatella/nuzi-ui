@@ -278,8 +278,23 @@ function SettingsCommon.EnsureCooldownTrackerTables(s, unitKeys)
         update_interval_ms = 50,
         migrated_from_cbt = false,
         anchor_layout_version = 2,
+        text_alert_enabled = false,
+        text_alert_mode = "missing",
+        text_alert_query = "",
+        text_alert_text = "Kittenish Missing",
+        text_alert_pos_x = 700,
+        text_alert_pos_y = 430,
+        text_alert_lock_position = false,
+        text_alert_font_size = 18,
+        text_alert_color = { 255, 220, 64, 255 },
         units = {}
     })
+    s.cooldown_tracker.text_alert_mode = SettingsCommon.NormalizeCooldownDisplayMode(
+        s.cooldown_tracker.text_alert_mode
+    )
+    if type(s.cooldown_tracker.text_alert_color) ~= "table" then
+        s.cooldown_tracker.text_alert_color = { 255, 220, 64, 255 }
+    end
     if type(s.cooldown_tracker.units) ~= "table" then
         s.cooldown_tracker.units = {}
     end

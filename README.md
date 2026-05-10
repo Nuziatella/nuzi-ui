@@ -75,6 +75,7 @@ You can:
 - show buff uptime and configured cooldown as separate timers, with switchable bar order
 - show active effects, missing effects, or both
 - switch each tracker between compact icons and icon-plus-bar rows
+- show a standalone text alert when a player buff is active or missing
 - attach non-player trackers near their nameplate and move them with offsets
 
 Mount and glider ability buttons use internal client cooldown APIs that are not exposed to addons, so they are handled by the dedicated `Mount/Glider` page instead of this generic tracker.
@@ -133,7 +134,10 @@ You can:
 - drag bag gear onto character-style equipment slots in the editor
 - save the currently equipped gear and title into the selected loadout
 - show loadout buttons as names or chosen item icons
+- set a loadout to auto-trigger from Swimming, Captain, or a configured active buff
+- keep Swimming auto-triggers suppressed in Growlgate and Freedich
 - warn on missing items or slot mismatches before a swap runs
+- wait until combat ends before running addon-triggered equip swaps
 
 ### Dailies
 
@@ -172,7 +176,7 @@ You can:
 - Backup files live in `.data/backups`.
 - Moving addon windows follows the same `Shift + drag` behavior as the other Nuzi addons.
 
-4.1.31
+4.1.35
 
 ## Credits
 
