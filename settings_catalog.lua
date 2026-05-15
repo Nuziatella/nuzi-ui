@@ -38,6 +38,12 @@ SettingsCatalog.PAGES = {
         summary = "Movable player cast bar with customizable colors, text, and textures."
     },
     {
+        id = "crowd_control",
+        label = "Crowd Control",
+        title = "Crowd Control",
+        summary = "Player crowd-control alert with priority icons, timers, labels, and category filters."
+    },
+    {
         id = "travel",
         label = "Travel",
         title = "Travel Speed",

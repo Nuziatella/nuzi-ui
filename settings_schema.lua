@@ -98,6 +98,15 @@ local DEBUFF_ANCHOR_ITEMS = {
     "Right"
 }
 
+local CC_CATEGORY_DETAILS = {
+    hard = "Covers: Stun, Poison Stun, Sleep, Deep Sleep, Fear, Petrification, Petrified, Deep Freeze, Freeze Up, Freeze of Evil Spirit, Freeze, Bubble Trap, Wave Meteor Strike Hit, Strong Telekinesis, Telekinesis, Meteor Impact, Horrorshow, Petrified Taunt, Hammer Smash, Ice Wall, Explosive Ice, Unconscious, Ice Shock, Alexander's Powerful Freeze, Howl of Terror, Shock, Paralyzed, Control.",
+    silence = "Covers: Silence, Silenced, Eternal Silence, Disarmed, Mana Force.",
+    root = "Covers: Snare, Impaled, Tripped, Tripped (Strong), Alliance Soldier's Pull, Red Dragon's Wind Gust, Pulled, Karim's Shackle, Shockstep Effect, Agrax's Snare, Steel Trap, Earthen Grip, Phantasm's Wail, Ecktom's Shackle, Trap!, Hell Spear, Lava Trap Explosion, Wraith Rooted.",
+    slow = "Covers: Slow, Ice Shard, Bestial Leap, Dizziness, Poor Landing, Dazed.",
+    misc = "Covers: Splashdown Bubble, Alkaran's Curse, Ice, Lost Tribe's Shockwave.",
+    dot = "Covers: Bleed, Burn, Burning, Conflagration, Electric Shock, Poison, Poision, Toxic Shot, Enervate, Enervated."
+}
+
 SettingsSchema.PAGES = {
     general = {
         sections = {
@@ -699,6 +708,150 @@ SettingsSchema.PAGES = {
                         1,
                         { depends_on = { control = "castbar_enabled", checked = true } }
                     )
+                }
+            }
+        }
+    },
+    crowd_control = {
+        sections = {
+            {
+                id = "cc_behavior",
+                title = "Player Crowd Control",
+                hint = "Show the highest-priority crowd-control debuff on you, with smaller secondary effects above it.",
+                fields = {
+                    checkbox("cc_enabled", "polarUiCrowdControlEnabled", "Enable crowd control alert"),
+                    hint(
+                        "cc_move_hint",
+                        "polarUiCrowdControlMoveHint",
+                        "Drag in game to move the alert. If Shift movement is enabled in General, hold Shift while dragging.",
+                        { width = 520, depends_on = { control = "cc_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "cc_lock_position",
+                        "polarUiCrowdControlLockPosition",
+                        "Lock alert position",
+                        { depends_on = { control = "cc_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "cc_show_when_empty",
+                        "polarUiCrowdControlShowWhenEmpty",
+                        "Show when clear for placement",
+                        { depends_on = { control = "cc_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "cc_show_secondary",
+                        "polarUiCrowdControlShowSecondary",
+                        "Show secondary CC icons",
+                        { depends_on = { control = "cc_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "cc_show_label",
+                        "polarUiCrowdControlShowLabel",
+                        "Show effect name",
+                        { depends_on = { control = "cc_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "cc_show_timer",
+                        "polarUiCrowdControlShowTimer",
+                        "Show timers",
+                        { depends_on = { control = "cc_enabled", checked = true } }
+                    ),
+                    checkbox(
+                        "cc_show_category",
+                        "polarUiCrowdControlShowCategory",
+                        "Show CC category",
+                        { depends_on = { control = "cc_enabled", checked = true } }
+                    )
+                }
+            },
+            {
+                id = "cc_layout",
+                title = "Layout",
+                hint = "Tune icon scale, spacing, background, and refresh rate.",
+                fields = {
+                    slider("cc_icon_size", "polarUiCrowdControlIconSize", "Main icon size", 42, 160, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_secondary_icon_size", "polarUiCrowdControlSecondaryIconSize", "Secondary icon size", 16, 80, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_max_icons", "polarUiCrowdControlMaxIcons", "Max visible effects", 1, 8, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_icon_gap", "polarUiCrowdControlIconGap", "Icon gap", 0, 16, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_panel_alpha", "polarUiCrowdControlPanelAlpha", "Background alpha", 0, 100, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_update_interval", "polarUiCrowdControlUpdateInterval", "Refresh ms", 20, 250, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_urgent_threshold", "polarUiCrowdControlUrgentThreshold", "Urgent timer under ms", 0, 10000, 100, { depends_on = { control = "cc_enabled", checked = true } })
+                }
+            },
+            {
+                id = "cc_edge_flash",
+                title = "Screen Edge Flash",
+                hint = "Pulse screen edges when a new important crowd-control effect appears.",
+                fields = {
+                    checkbox("cc_edge_flash_enabled", "polarUiCrowdControlEdgeFlashEnabled", "Enable edge flash", { depends_on = { control = "cc_enabled", checked = true } }),
+                    checkbox("cc_edge_flash_category_color", "polarUiCrowdControlEdgeFlashCategoryColor", "Use category color", { depends_on = { control = "cc_edge_flash_enabled", checked = true } }),
+                    slider("cc_edge_flash_duration", "polarUiCrowdControlEdgeFlashDuration", "Flash duration ms", 120, 1500, 10, { depends_on = { control = "cc_edge_flash_enabled", checked = true } }),
+                    slider("cc_edge_flash_intensity", "polarUiCrowdControlEdgeFlashIntensity", "Flash intensity", 0, 100, 1, { depends_on = { control = "cc_edge_flash_enabled", checked = true } }),
+                    slider("cc_edge_flash_thickness", "polarUiCrowdControlEdgeFlashThickness", "Edge thickness", 16, 260, 1, { depends_on = { control = "cc_edge_flash_enabled", checked = true } }),
+                    slider("cc_edge_flash_cooldown", "polarUiCrowdControlEdgeFlashCooldown", "Flash cooldown ms", 0, 5000, 50, { depends_on = { control = "cc_edge_flash_enabled", checked = true } }),
+                    label("cc_edge_flash_color_label", "polarUiCrowdControlEdgeFlashColorLabel", "Fixed flash color", { depends_on = { control = "cc_edge_flash_category_color", checked = false }, font_size = 15 }),
+                    slider("cc_edge_flash_r", "polarUiCrowdControlEdgeFlashR", "Flash R", 0, 255, 1, { depends_on = { control = "cc_edge_flash_category_color", checked = false } }),
+                    slider("cc_edge_flash_g", "polarUiCrowdControlEdgeFlashG", "Flash G", 0, 255, 1, { depends_on = { control = "cc_edge_flash_category_color", checked = false } }),
+                    slider("cc_edge_flash_b", "polarUiCrowdControlEdgeFlashB", "Flash B", 0, 255, 1, { depends_on = { control = "cc_edge_flash_category_color", checked = false } }),
+                    label("cc_edge_flash_categories_label", "polarUiCrowdControlEdgeFlashCategoriesLabel", "Flash for", { depends_on = { control = "cc_edge_flash_enabled", checked = true }, font_size = 15, advance = 28 }),
+                    checkbox("cc_edge_flash_hard", "polarUiCrowdControlEdgeFlashHard", "Hard control", { depends_on = { control = "cc_edge_flash_enabled", checked = true } }),
+                    checkbox("cc_edge_flash_silence", "polarUiCrowdControlEdgeFlashSilence", "Silence / disarm", { depends_on = { control = "cc_edge_flash_enabled", checked = true } }),
+                    checkbox("cc_edge_flash_root", "polarUiCrowdControlEdgeFlashRoot", "Root / snare", { depends_on = { control = "cc_edge_flash_enabled", checked = true } }),
+                    checkbox("cc_edge_flash_slow", "polarUiCrowdControlEdgeFlashSlow", "Slows", { depends_on = { control = "cc_edge_flash_enabled", checked = true } }),
+                    checkbox("cc_edge_flash_misc", "polarUiCrowdControlEdgeFlashMisc", "Misc control", { depends_on = { control = "cc_edge_flash_enabled", checked = true } }),
+                    checkbox("cc_edge_flash_dot", "polarUiCrowdControlEdgeFlashDot", "DoTs", { depends_on = { control = "cc_edge_flash_enabled", checked = true } })
+                }
+            },
+            {
+                id = "cc_text",
+                title = "Text",
+                hint = "Adjust timer and label placement around the primary icon.",
+                fields = {
+                    slider("cc_label_font_size", "polarUiCrowdControlLabelFontSize", "Label size", 8, 36, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_timer_font_size", "polarUiCrowdControlTimerFontSize", "Timer size", 8, 48, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_secondary_timer_font_size", "polarUiCrowdControlSecondaryTimerFontSize", "Secondary timer size", 8, 24, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_label_offset_x", "polarUiCrowdControlLabelOffsetX", "Label offset X", -160, 160, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_label_offset_y", "polarUiCrowdControlLabelOffsetY", "Label offset Y", -160, 180, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_timer_offset_x", "polarUiCrowdControlTimerOffsetX", "Timer offset X", -120, 120, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_timer_offset_y", "polarUiCrowdControlTimerOffsetY", "Timer offset Y", -120, 120, 1, { depends_on = { control = "cc_enabled", checked = true } })
+                }
+            },
+            {
+                id = "cc_categories",
+                title = "Effect Categories",
+                hint = "Choose which classified player debuffs can appear in the alert.",
+                fields = {
+                    checkbox("cc_show_hard", "polarUiCrowdControlShowHard", "Hard control", { depends_on = { control = "cc_enabled", checked = true } }),
+                    hint(nil, "polarUiCrowdControlHardNames", CC_CATEGORY_DETAILS.hard, { width = 560, depends_on = { control = "cc_enabled", checked = true } }),
+                    checkbox("cc_show_silence", "polarUiCrowdControlShowSilence", "Silence / disarm", { depends_on = { control = "cc_enabled", checked = true } }),
+                    hint(nil, "polarUiCrowdControlSilenceNames", CC_CATEGORY_DETAILS.silence, { width = 560, depends_on = { control = "cc_enabled", checked = true } }),
+                    checkbox("cc_show_root", "polarUiCrowdControlShowRoot", "Root / snare", { depends_on = { control = "cc_enabled", checked = true } }),
+                    hint(nil, "polarUiCrowdControlRootNames", CC_CATEGORY_DETAILS.root, { width = 560, depends_on = { control = "cc_enabled", checked = true } }),
+                    checkbox("cc_show_slow", "polarUiCrowdControlShowSlow", "Slows", { depends_on = { control = "cc_enabled", checked = true } }),
+                    hint(nil, "polarUiCrowdControlSlowNames", CC_CATEGORY_DETAILS.slow, { width = 560, depends_on = { control = "cc_enabled", checked = true } }),
+                    checkbox("cc_show_misc", "polarUiCrowdControlShowMisc", "Misc control", { depends_on = { control = "cc_enabled", checked = true } }),
+                    hint(nil, "polarUiCrowdControlMiscNames", CC_CATEGORY_DETAILS.misc, { width = 560, depends_on = { control = "cc_enabled", checked = true } }),
+                    checkbox("cc_show_dot", "polarUiCrowdControlShowDot", "DoTs", { depends_on = { control = "cc_enabled", checked = true } }),
+                    hint(nil, "polarUiCrowdControlDotNames", CC_CATEGORY_DETAILS.dot, { width = 560, depends_on = { control = "cc_enabled", checked = true } })
+                }
+            },
+            {
+                id = "cc_colors",
+                title = "Colors",
+                hint = "Use readable text colors for normal and urgent timers.",
+                fields = {
+                    label("cc_label_color_label", "polarUiCrowdControlLabelColorLabel", "Label color", { depends_on = { control = "cc_enabled", checked = true }, font_size = 15 }),
+                    slider("cc_label_r", "polarUiCrowdControlLabelR", "Label R", 0, 255, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_label_g", "polarUiCrowdControlLabelG", "Label G", 0, 255, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_label_b", "polarUiCrowdControlLabelB", "Label B", 0, 255, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    label("cc_timer_color_label", "polarUiCrowdControlTimerColorLabel", "Timer color", { depends_on = { control = "cc_enabled", checked = true }, font_size = 15, advance = 28 }),
+                    slider("cc_timer_r", "polarUiCrowdControlTimerR", "Timer R", 0, 255, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_timer_g", "polarUiCrowdControlTimerG", "Timer G", 0, 255, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_timer_b", "polarUiCrowdControlTimerB", "Timer B", 0, 255, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    label("cc_urgent_color_label", "polarUiCrowdControlUrgentColorLabel", "Urgent timer color", { depends_on = { control = "cc_enabled", checked = true }, font_size = 15, advance = 28 }),
+                    slider("cc_urgent_r", "polarUiCrowdControlUrgentR", "Urgent R", 0, 255, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_urgent_g", "polarUiCrowdControlUrgentG", "Urgent G", 0, 255, 1, { depends_on = { control = "cc_enabled", checked = true } }),
+                    slider("cc_urgent_b", "polarUiCrowdControlUrgentB", "Urgent B", 0, 255, 1, { depends_on = { control = "cc_enabled", checked = true } })
                 }
             }
         }

@@ -230,6 +230,7 @@ local PAGE_DEFS = (type(SettingsCatalog) == "table" and type(SettingsCatalog.PAG
     { id = "text", label = "Text", title = "Text", summary = "Name, level, role, guild, and number formatting." },
     { id = "bars", label = "Bars", title = "Bars", summary = "Frame sizing, alpha, bar colors, textures, and value placement." },
     { id = "castbar", label = "Cast Bar", title = "Cast Bar", summary = "Movable player cast bar with customizable colors, text, and textures." },
+    { id = "crowd_control", label = "Crowd Control", title = "Crowd Control", summary = "Player crowd-control alert with priority icons, timers, labels, and category filters." },
     { id = "travel", label = "Travel", title = "Travel Speed", summary = "Movable speed meter for vehicles, mounts, gliders, and on-foot travel." },
     { id = "mount_glider", label = "Mount/Glider", title = "Mount/Glider", summary = "Specialized timers for mount and glider movement abilities." },
     { id = "loadouts", label = "Loadouts", title = "Gear Loadouts", summary = "Per-character gear loadout bar with a drag/drop equipment editor." },
@@ -1052,7 +1053,7 @@ local SetWrappedText = SettingsWidgets.SetWrappedText
 local RefreshControls
 local ApplyControlsToSettings
 
-local SCHEMA_PAGE_IDS = { "general", "repair", "npc", "text", "bars", "castbar", "travel", "mount_glider", "loadouts", "dailies", "auras", "plates" }
+local SCHEMA_PAGE_IDS = { "general", "repair", "npc", "text", "bars", "castbar", "crowd_control", "travel", "mount_glider", "loadouts", "dailies", "auras", "plates" }
 local SCHEMA_PAGE_LEFT = 18
 local SCHEMA_PAGE_TOP = 18
 local SCHEMA_CARD_WIDTH = 650
@@ -1552,6 +1553,165 @@ RefreshControls = function()
     end
     if SettingsPage.controls.castbar_text_a ~= nil then
         refreshSlider(SettingsPage.controls.castbar_text_a, SettingsPage.controls.castbar_text_a_val, tonumber(castBarText[4]) or 255)
+    end
+
+    local crowdControl = type(s.crowd_control) == "table" and s.crowd_control or {}
+    local ccLabelColor = type(crowdControl.label_color) == "table" and crowdControl.label_color or { 255, 255, 255, 255 }
+    local ccTimerColor = type(crowdControl.timer_color) == "table" and crowdControl.timer_color or { 255, 255, 255, 255 }
+    local ccUrgentColor = type(crowdControl.urgent_timer_color) == "table" and crowdControl.urgent_timer_color or { 255, 76, 64, 255 }
+    local ccEdgeFlashColor = type(crowdControl.edge_flash_color) == "table" and crowdControl.edge_flash_color or { 255, 76, 64, 255 }
+    if SettingsPage.controls.cc_enabled ~= nil then
+        SettingsPage.controls.cc_enabled:SetChecked(crowdControl.enabled and true or false)
+    end
+    if SettingsPage.controls.cc_lock_position ~= nil then
+        SettingsPage.controls.cc_lock_position:SetChecked(crowdControl.lock_position and true or false)
+    end
+    if SettingsPage.controls.cc_show_when_empty ~= nil then
+        SettingsPage.controls.cc_show_when_empty:SetChecked(crowdControl.show_when_empty and true or false)
+    end
+    if SettingsPage.controls.cc_show_secondary ~= nil then
+        SettingsPage.controls.cc_show_secondary:SetChecked(crowdControl.show_secondary ~= false)
+    end
+    if SettingsPage.controls.cc_show_label ~= nil then
+        SettingsPage.controls.cc_show_label:SetChecked(crowdControl.show_label ~= false)
+    end
+    if SettingsPage.controls.cc_show_timer ~= nil then
+        SettingsPage.controls.cc_show_timer:SetChecked(crowdControl.show_timer ~= false)
+    end
+    if SettingsPage.controls.cc_show_category ~= nil then
+        SettingsPage.controls.cc_show_category:SetChecked(crowdControl.show_category ~= false)
+    end
+    if SettingsPage.controls.cc_show_hard ~= nil then
+        SettingsPage.controls.cc_show_hard:SetChecked(crowdControl.show_hard ~= false)
+    end
+    if SettingsPage.controls.cc_show_silence ~= nil then
+        SettingsPage.controls.cc_show_silence:SetChecked(crowdControl.show_silence ~= false)
+    end
+    if SettingsPage.controls.cc_show_root ~= nil then
+        SettingsPage.controls.cc_show_root:SetChecked(crowdControl.show_root ~= false)
+    end
+    if SettingsPage.controls.cc_show_slow ~= nil then
+        SettingsPage.controls.cc_show_slow:SetChecked(crowdControl.show_slow ~= false)
+    end
+    if SettingsPage.controls.cc_show_misc ~= nil then
+        SettingsPage.controls.cc_show_misc:SetChecked(crowdControl.show_misc ~= false)
+    end
+    if SettingsPage.controls.cc_show_dot ~= nil then
+        SettingsPage.controls.cc_show_dot:SetChecked(crowdControl.show_dot and true or false)
+    end
+    if SettingsPage.controls.cc_edge_flash_enabled ~= nil then
+        SettingsPage.controls.cc_edge_flash_enabled:SetChecked(crowdControl.edge_flash_enabled == true)
+    end
+    if SettingsPage.controls.cc_edge_flash_category_color ~= nil then
+        SettingsPage.controls.cc_edge_flash_category_color:SetChecked(crowdControl.edge_flash_category_color ~= false)
+    end
+    if SettingsPage.controls.cc_edge_flash_hard ~= nil then
+        SettingsPage.controls.cc_edge_flash_hard:SetChecked(crowdControl.edge_flash_hard == true)
+    end
+    if SettingsPage.controls.cc_edge_flash_silence ~= nil then
+        SettingsPage.controls.cc_edge_flash_silence:SetChecked(crowdControl.edge_flash_silence == true)
+    end
+    if SettingsPage.controls.cc_edge_flash_root ~= nil then
+        SettingsPage.controls.cc_edge_flash_root:SetChecked(crowdControl.edge_flash_root == true)
+    end
+    if SettingsPage.controls.cc_edge_flash_slow ~= nil then
+        SettingsPage.controls.cc_edge_flash_slow:SetChecked(crowdControl.edge_flash_slow == true)
+    end
+    if SettingsPage.controls.cc_edge_flash_misc ~= nil then
+        SettingsPage.controls.cc_edge_flash_misc:SetChecked(crowdControl.edge_flash_misc == true)
+    end
+    if SettingsPage.controls.cc_edge_flash_dot ~= nil then
+        SettingsPage.controls.cc_edge_flash_dot:SetChecked(crowdControl.edge_flash_dot == true)
+    end
+    if SettingsPage.controls.cc_icon_size ~= nil then
+        refreshSlider(SettingsPage.controls.cc_icon_size, SettingsPage.controls.cc_icon_size_val, tonumber(crowdControl.icon_size) or 88)
+    end
+    if SettingsPage.controls.cc_secondary_icon_size ~= nil then
+        refreshSlider(SettingsPage.controls.cc_secondary_icon_size, SettingsPage.controls.cc_secondary_icon_size_val, tonumber(crowdControl.secondary_icon_size) or 36)
+    end
+    if SettingsPage.controls.cc_max_icons ~= nil then
+        refreshSlider(SettingsPage.controls.cc_max_icons, SettingsPage.controls.cc_max_icons_val, tonumber(crowdControl.max_icons) or 5)
+    end
+    if SettingsPage.controls.cc_icon_gap ~= nil then
+        refreshSlider(SettingsPage.controls.cc_icon_gap, SettingsPage.controls.cc_icon_gap_val, tonumber(crowdControl.icon_gap) or 4)
+    end
+    if SettingsPage.controls.cc_panel_alpha ~= nil then
+        refreshSlider(SettingsPage.controls.cc_panel_alpha, SettingsPage.controls.cc_panel_alpha_val, tonumber(crowdControl.panel_alpha) or 45)
+    end
+    if SettingsPage.controls.cc_update_interval ~= nil then
+        refreshSlider(SettingsPage.controls.cc_update_interval, SettingsPage.controls.cc_update_interval_val, tonumber(crowdControl.update_interval_ms) or 50)
+    end
+    if SettingsPage.controls.cc_urgent_threshold ~= nil then
+        refreshSlider(SettingsPage.controls.cc_urgent_threshold, SettingsPage.controls.cc_urgent_threshold_val, tonumber(crowdControl.urgent_threshold_ms) or 2000)
+    end
+    if SettingsPage.controls.cc_edge_flash_duration ~= nil then
+        refreshSlider(SettingsPage.controls.cc_edge_flash_duration, SettingsPage.controls.cc_edge_flash_duration_val, tonumber(crowdControl.edge_flash_duration_ms) or 420)
+    end
+    if SettingsPage.controls.cc_edge_flash_intensity ~= nil then
+        refreshSlider(SettingsPage.controls.cc_edge_flash_intensity, SettingsPage.controls.cc_edge_flash_intensity_val, tonumber(crowdControl.edge_flash_intensity) or 65)
+    end
+    if SettingsPage.controls.cc_edge_flash_thickness ~= nil then
+        refreshSlider(SettingsPage.controls.cc_edge_flash_thickness, SettingsPage.controls.cc_edge_flash_thickness_val, tonumber(crowdControl.edge_flash_thickness) or 96)
+    end
+    if SettingsPage.controls.cc_edge_flash_cooldown ~= nil then
+        refreshSlider(SettingsPage.controls.cc_edge_flash_cooldown, SettingsPage.controls.cc_edge_flash_cooldown_val, tonumber(crowdControl.edge_flash_cooldown_ms) or 750)
+    end
+    if SettingsPage.controls.cc_label_font_size ~= nil then
+        refreshSlider(SettingsPage.controls.cc_label_font_size, SettingsPage.controls.cc_label_font_size_val, tonumber(crowdControl.label_font_size) or 18)
+    end
+    if SettingsPage.controls.cc_timer_font_size ~= nil then
+        refreshSlider(SettingsPage.controls.cc_timer_font_size, SettingsPage.controls.cc_timer_font_size_val, tonumber(crowdControl.timer_font_size) or 28)
+    end
+    if SettingsPage.controls.cc_secondary_timer_font_size ~= nil then
+        refreshSlider(SettingsPage.controls.cc_secondary_timer_font_size, SettingsPage.controls.cc_secondary_timer_font_size_val, tonumber(crowdControl.secondary_timer_font_size) or 12)
+    end
+    if SettingsPage.controls.cc_label_offset_x ~= nil then
+        refreshSlider(SettingsPage.controls.cc_label_offset_x, SettingsPage.controls.cc_label_offset_x_val, tonumber(crowdControl.label_offset_x) or 0)
+    end
+    if SettingsPage.controls.cc_label_offset_y ~= nil then
+        refreshSlider(SettingsPage.controls.cc_label_offset_y, SettingsPage.controls.cc_label_offset_y_val, tonumber(crowdControl.label_offset_y) or 58)
+    end
+    if SettingsPage.controls.cc_timer_offset_x ~= nil then
+        refreshSlider(SettingsPage.controls.cc_timer_offset_x, SettingsPage.controls.cc_timer_offset_x_val, tonumber(crowdControl.timer_offset_x) or 0)
+    end
+    if SettingsPage.controls.cc_timer_offset_y ~= nil then
+        refreshSlider(SettingsPage.controls.cc_timer_offset_y, SettingsPage.controls.cc_timer_offset_y_val, tonumber(crowdControl.timer_offset_y) or 0)
+    end
+    if SettingsPage.controls.cc_label_r ~= nil then
+        refreshSlider(SettingsPage.controls.cc_label_r, SettingsPage.controls.cc_label_r_val, tonumber(ccLabelColor[1]) or 255)
+    end
+    if SettingsPage.controls.cc_label_g ~= nil then
+        refreshSlider(SettingsPage.controls.cc_label_g, SettingsPage.controls.cc_label_g_val, tonumber(ccLabelColor[2]) or 255)
+    end
+    if SettingsPage.controls.cc_label_b ~= nil then
+        refreshSlider(SettingsPage.controls.cc_label_b, SettingsPage.controls.cc_label_b_val, tonumber(ccLabelColor[3]) or 255)
+    end
+    if SettingsPage.controls.cc_timer_r ~= nil then
+        refreshSlider(SettingsPage.controls.cc_timer_r, SettingsPage.controls.cc_timer_r_val, tonumber(ccTimerColor[1]) or 255)
+    end
+    if SettingsPage.controls.cc_timer_g ~= nil then
+        refreshSlider(SettingsPage.controls.cc_timer_g, SettingsPage.controls.cc_timer_g_val, tonumber(ccTimerColor[2]) or 255)
+    end
+    if SettingsPage.controls.cc_timer_b ~= nil then
+        refreshSlider(SettingsPage.controls.cc_timer_b, SettingsPage.controls.cc_timer_b_val, tonumber(ccTimerColor[3]) or 255)
+    end
+    if SettingsPage.controls.cc_urgent_r ~= nil then
+        refreshSlider(SettingsPage.controls.cc_urgent_r, SettingsPage.controls.cc_urgent_r_val, tonumber(ccUrgentColor[1]) or 255)
+    end
+    if SettingsPage.controls.cc_urgent_g ~= nil then
+        refreshSlider(SettingsPage.controls.cc_urgent_g, SettingsPage.controls.cc_urgent_g_val, tonumber(ccUrgentColor[2]) or 76)
+    end
+    if SettingsPage.controls.cc_urgent_b ~= nil then
+        refreshSlider(SettingsPage.controls.cc_urgent_b, SettingsPage.controls.cc_urgent_b_val, tonumber(ccUrgentColor[3]) or 64)
+    end
+    if SettingsPage.controls.cc_edge_flash_r ~= nil then
+        refreshSlider(SettingsPage.controls.cc_edge_flash_r, SettingsPage.controls.cc_edge_flash_r_val, tonumber(ccEdgeFlashColor[1]) or 255)
+    end
+    if SettingsPage.controls.cc_edge_flash_g ~= nil then
+        refreshSlider(SettingsPage.controls.cc_edge_flash_g, SettingsPage.controls.cc_edge_flash_g_val, tonumber(ccEdgeFlashColor[2]) or 76)
+    end
+    if SettingsPage.controls.cc_edge_flash_b ~= nil then
+        refreshSlider(SettingsPage.controls.cc_edge_flash_b, SettingsPage.controls.cc_edge_flash_b_val, tonumber(ccEdgeFlashColor[3]) or 64)
     end
 
     local travelSpeed = type(s.travel_speed) == "table" and s.travel_speed or {}
@@ -2568,6 +2728,159 @@ ApplyControlsToSettings = function()
     end
     if SettingsPage.controls.castbar_text_offset_y ~= nil then
         s.cast_bar.text_offset_y = GetSliderValue(SettingsPage.controls.castbar_text_offset_y)
+    end
+
+    if type(s.crowd_control) ~= "table" then
+        s.crowd_control = {}
+    end
+    if SettingsPage.controls.cc_enabled ~= nil then
+        s.crowd_control.enabled = SettingsPage.controls.cc_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_lock_position ~= nil then
+        s.crowd_control.lock_position = SettingsPage.controls.cc_lock_position:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_when_empty ~= nil then
+        s.crowd_control.show_when_empty = SettingsPage.controls.cc_show_when_empty:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_secondary ~= nil then
+        s.crowd_control.show_secondary = SettingsPage.controls.cc_show_secondary:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_label ~= nil then
+        s.crowd_control.show_label = SettingsPage.controls.cc_show_label:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_timer ~= nil then
+        s.crowd_control.show_timer = SettingsPage.controls.cc_show_timer:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_category ~= nil then
+        s.crowd_control.show_category = SettingsPage.controls.cc_show_category:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_hard ~= nil then
+        s.crowd_control.show_hard = SettingsPage.controls.cc_show_hard:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_silence ~= nil then
+        s.crowd_control.show_silence = SettingsPage.controls.cc_show_silence:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_root ~= nil then
+        s.crowd_control.show_root = SettingsPage.controls.cc_show_root:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_slow ~= nil then
+        s.crowd_control.show_slow = SettingsPage.controls.cc_show_slow:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_misc ~= nil then
+        s.crowd_control.show_misc = SettingsPage.controls.cc_show_misc:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_show_dot ~= nil then
+        s.crowd_control.show_dot = SettingsPage.controls.cc_show_dot:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_edge_flash_enabled ~= nil then
+        s.crowd_control.edge_flash_enabled = SettingsPage.controls.cc_edge_flash_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_edge_flash_category_color ~= nil then
+        s.crowd_control.edge_flash_category_color = SettingsPage.controls.cc_edge_flash_category_color:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_edge_flash_hard ~= nil then
+        s.crowd_control.edge_flash_hard = SettingsPage.controls.cc_edge_flash_hard:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_edge_flash_silence ~= nil then
+        s.crowd_control.edge_flash_silence = SettingsPage.controls.cc_edge_flash_silence:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_edge_flash_root ~= nil then
+        s.crowd_control.edge_flash_root = SettingsPage.controls.cc_edge_flash_root:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_edge_flash_slow ~= nil then
+        s.crowd_control.edge_flash_slow = SettingsPage.controls.cc_edge_flash_slow:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_edge_flash_misc ~= nil then
+        s.crowd_control.edge_flash_misc = SettingsPage.controls.cc_edge_flash_misc:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_edge_flash_dot ~= nil then
+        s.crowd_control.edge_flash_dot = SettingsPage.controls.cc_edge_flash_dot:GetChecked() and true or false
+    end
+    if SettingsPage.controls.cc_icon_size ~= nil then
+        s.crowd_control.icon_size = GetSliderValue(SettingsPage.controls.cc_icon_size)
+    end
+    if SettingsPage.controls.cc_secondary_icon_size ~= nil then
+        s.crowd_control.secondary_icon_size = GetSliderValue(SettingsPage.controls.cc_secondary_icon_size)
+    end
+    if SettingsPage.controls.cc_max_icons ~= nil then
+        s.crowd_control.max_icons = GetSliderValue(SettingsPage.controls.cc_max_icons)
+    end
+    if SettingsPage.controls.cc_icon_gap ~= nil then
+        s.crowd_control.icon_gap = GetSliderValue(SettingsPage.controls.cc_icon_gap)
+    end
+    if SettingsPage.controls.cc_panel_alpha ~= nil then
+        s.crowd_control.panel_alpha = GetSliderValue(SettingsPage.controls.cc_panel_alpha)
+    end
+    if SettingsPage.controls.cc_update_interval ~= nil then
+        s.crowd_control.update_interval_ms = GetSliderValue(SettingsPage.controls.cc_update_interval)
+    end
+    if SettingsPage.controls.cc_urgent_threshold ~= nil then
+        s.crowd_control.urgent_threshold_ms = GetSliderValue(SettingsPage.controls.cc_urgent_threshold)
+    end
+    if SettingsPage.controls.cc_edge_flash_duration ~= nil then
+        s.crowd_control.edge_flash_duration_ms = GetSliderValue(SettingsPage.controls.cc_edge_flash_duration)
+    end
+    if SettingsPage.controls.cc_edge_flash_intensity ~= nil then
+        s.crowd_control.edge_flash_intensity = GetSliderValue(SettingsPage.controls.cc_edge_flash_intensity)
+    end
+    if SettingsPage.controls.cc_edge_flash_thickness ~= nil then
+        s.crowd_control.edge_flash_thickness = GetSliderValue(SettingsPage.controls.cc_edge_flash_thickness)
+    end
+    if SettingsPage.controls.cc_edge_flash_cooldown ~= nil then
+        s.crowd_control.edge_flash_cooldown_ms = GetSliderValue(SettingsPage.controls.cc_edge_flash_cooldown)
+    end
+    if SettingsPage.controls.cc_label_font_size ~= nil then
+        s.crowd_control.label_font_size = GetSliderValue(SettingsPage.controls.cc_label_font_size)
+    end
+    if SettingsPage.controls.cc_timer_font_size ~= nil then
+        s.crowd_control.timer_font_size = GetSliderValue(SettingsPage.controls.cc_timer_font_size)
+    end
+    if SettingsPage.controls.cc_secondary_timer_font_size ~= nil then
+        s.crowd_control.secondary_timer_font_size = GetSliderValue(SettingsPage.controls.cc_secondary_timer_font_size)
+    end
+    if SettingsPage.controls.cc_label_offset_x ~= nil then
+        s.crowd_control.label_offset_x = GetSliderValue(SettingsPage.controls.cc_label_offset_x)
+    end
+    if SettingsPage.controls.cc_label_offset_y ~= nil then
+        s.crowd_control.label_offset_y = GetSliderValue(SettingsPage.controls.cc_label_offset_y)
+    end
+    if SettingsPage.controls.cc_timer_offset_x ~= nil then
+        s.crowd_control.timer_offset_x = GetSliderValue(SettingsPage.controls.cc_timer_offset_x)
+    end
+    if SettingsPage.controls.cc_timer_offset_y ~= nil then
+        s.crowd_control.timer_offset_y = GetSliderValue(SettingsPage.controls.cc_timer_offset_y)
+    end
+    if SettingsPage.controls.cc_label_r ~= nil then
+        s.crowd_control.label_color = {
+            GetSliderValue(SettingsPage.controls.cc_label_r),
+            GetSliderValue(SettingsPage.controls.cc_label_g),
+            GetSliderValue(SettingsPage.controls.cc_label_b),
+            255
+        }
+    end
+    if SettingsPage.controls.cc_timer_r ~= nil then
+        s.crowd_control.timer_color = {
+            GetSliderValue(SettingsPage.controls.cc_timer_r),
+            GetSliderValue(SettingsPage.controls.cc_timer_g),
+            GetSliderValue(SettingsPage.controls.cc_timer_b),
+            255
+        }
+    end
+    if SettingsPage.controls.cc_urgent_r ~= nil then
+        s.crowd_control.urgent_timer_color = {
+            GetSliderValue(SettingsPage.controls.cc_urgent_r),
+            GetSliderValue(SettingsPage.controls.cc_urgent_g),
+            GetSliderValue(SettingsPage.controls.cc_urgent_b),
+            255
+        }
+    end
+    if SettingsPage.controls.cc_edge_flash_r ~= nil then
+        s.crowd_control.edge_flash_color = {
+            GetSliderValue(SettingsPage.controls.cc_edge_flash_r),
+            GetSliderValue(SettingsPage.controls.cc_edge_flash_g),
+            GetSliderValue(SettingsPage.controls.cc_edge_flash_b),
+            255
+        }
     end
 
     if type(s.travel_speed) ~= "table" then
@@ -3854,6 +4167,36 @@ local function EnsureWindow()
         { SettingsPage.controls.castbar_text_g, SettingsPage.controls.castbar_text_g_val },
         { SettingsPage.controls.castbar_text_b, SettingsPage.controls.castbar_text_b_val },
         { SettingsPage.controls.castbar_text_a, SettingsPage.controls.castbar_text_a_val },
+        { SettingsPage.controls.cc_icon_size, SettingsPage.controls.cc_icon_size_val },
+        { SettingsPage.controls.cc_secondary_icon_size, SettingsPage.controls.cc_secondary_icon_size_val },
+        { SettingsPage.controls.cc_max_icons, SettingsPage.controls.cc_max_icons_val },
+        { SettingsPage.controls.cc_icon_gap, SettingsPage.controls.cc_icon_gap_val },
+        { SettingsPage.controls.cc_panel_alpha, SettingsPage.controls.cc_panel_alpha_val },
+        { SettingsPage.controls.cc_update_interval, SettingsPage.controls.cc_update_interval_val },
+        { SettingsPage.controls.cc_urgent_threshold, SettingsPage.controls.cc_urgent_threshold_val },
+        { SettingsPage.controls.cc_edge_flash_duration, SettingsPage.controls.cc_edge_flash_duration_val },
+        { SettingsPage.controls.cc_edge_flash_intensity, SettingsPage.controls.cc_edge_flash_intensity_val },
+        { SettingsPage.controls.cc_edge_flash_thickness, SettingsPage.controls.cc_edge_flash_thickness_val },
+        { SettingsPage.controls.cc_edge_flash_cooldown, SettingsPage.controls.cc_edge_flash_cooldown_val },
+        { SettingsPage.controls.cc_label_font_size, SettingsPage.controls.cc_label_font_size_val },
+        { SettingsPage.controls.cc_timer_font_size, SettingsPage.controls.cc_timer_font_size_val },
+        { SettingsPage.controls.cc_secondary_timer_font_size, SettingsPage.controls.cc_secondary_timer_font_size_val },
+        { SettingsPage.controls.cc_label_offset_x, SettingsPage.controls.cc_label_offset_x_val },
+        { SettingsPage.controls.cc_label_offset_y, SettingsPage.controls.cc_label_offset_y_val },
+        { SettingsPage.controls.cc_timer_offset_x, SettingsPage.controls.cc_timer_offset_x_val },
+        { SettingsPage.controls.cc_timer_offset_y, SettingsPage.controls.cc_timer_offset_y_val },
+        { SettingsPage.controls.cc_label_r, SettingsPage.controls.cc_label_r_val },
+        { SettingsPage.controls.cc_label_g, SettingsPage.controls.cc_label_g_val },
+        { SettingsPage.controls.cc_label_b, SettingsPage.controls.cc_label_b_val },
+        { SettingsPage.controls.cc_timer_r, SettingsPage.controls.cc_timer_r_val },
+        { SettingsPage.controls.cc_timer_g, SettingsPage.controls.cc_timer_g_val },
+        { SettingsPage.controls.cc_timer_b, SettingsPage.controls.cc_timer_b_val },
+        { SettingsPage.controls.cc_urgent_r, SettingsPage.controls.cc_urgent_r_val },
+        { SettingsPage.controls.cc_urgent_g, SettingsPage.controls.cc_urgent_g_val },
+        { SettingsPage.controls.cc_urgent_b, SettingsPage.controls.cc_urgent_b_val },
+        { SettingsPage.controls.cc_edge_flash_r, SettingsPage.controls.cc_edge_flash_r_val },
+        { SettingsPage.controls.cc_edge_flash_g, SettingsPage.controls.cc_edge_flash_g_val },
+        { SettingsPage.controls.cc_edge_flash_b, SettingsPage.controls.cc_edge_flash_b_val },
         { SettingsPage.controls.travel_speed_width, SettingsPage.controls.travel_speed_width_val },
         { SettingsPage.controls.travel_speed_scale, SettingsPage.controls.travel_speed_scale_val },
         { SettingsPage.controls.travel_speed_font_size, SettingsPage.controls.travel_speed_font_size_val },
@@ -4040,6 +4383,27 @@ local function EnsureWindow()
         SettingsPage.controls.alignment_grid_enabled,
         SettingsPage.controls.castbar_enabled,
         SettingsPage.controls.castbar_lock_position,
+        SettingsPage.controls.cc_enabled,
+        SettingsPage.controls.cc_lock_position,
+        SettingsPage.controls.cc_show_when_empty,
+        SettingsPage.controls.cc_show_secondary,
+        SettingsPage.controls.cc_show_label,
+        SettingsPage.controls.cc_show_timer,
+        SettingsPage.controls.cc_show_category,
+        SettingsPage.controls.cc_show_hard,
+        SettingsPage.controls.cc_show_silence,
+        SettingsPage.controls.cc_show_root,
+        SettingsPage.controls.cc_show_slow,
+        SettingsPage.controls.cc_show_misc,
+        SettingsPage.controls.cc_show_dot,
+        SettingsPage.controls.cc_edge_flash_enabled,
+        SettingsPage.controls.cc_edge_flash_category_color,
+        SettingsPage.controls.cc_edge_flash_hard,
+        SettingsPage.controls.cc_edge_flash_silence,
+        SettingsPage.controls.cc_edge_flash_root,
+        SettingsPage.controls.cc_edge_flash_slow,
+        SettingsPage.controls.cc_edge_flash_misc,
+        SettingsPage.controls.cc_edge_flash_dot,
         SettingsPage.controls.travel_speed_enabled,
         SettingsPage.controls.travel_speed_lock_position,
         SettingsPage.controls.travel_speed_only_vehicle_or_mount,

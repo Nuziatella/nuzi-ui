@@ -8,6 +8,7 @@ local AlignmentModule = SafeRequire("nuzi-ui/ui_alignment", "nuzi-ui.ui_alignmen
 local TargetExtrasModule = SafeRequire("nuzi-ui/ui_target_extras", "nuzi-ui.ui_target_extras")
 local CooldownTracker = SafeRequire("nuzi-ui/cooldown_tracker", "nuzi-ui.cooldown_tracker")
 local CastBar = SafeRequire("nuzi-ui/castbar", "nuzi-ui.castbar")
+local CrowdControl = SafeRequire("nuzi-ui/crowd_control", "nuzi-ui.crowd_control")
 local TravelSpeed = SafeRequire("nuzi-ui/travel_speed", "nuzi-ui.travel_speed")
 local MountGlider = SafeRequire("nuzi-ui/mount_glider", "nuzi-ui.mount_glider")
 local GearLoadouts = SafeRequire("nuzi-ui/gear_loadouts", "nuzi-ui.gear_loadouts")
@@ -4643,6 +4644,11 @@ UI.ApplySettings = function(settings)
             CastBar.ApplySettings(settings)
         end)
     end
+    if CrowdControl ~= nil and CrowdControl.ApplySettings ~= nil then
+        pcall(function()
+            CrowdControl.ApplySettings(settings)
+        end)
+    end
     if TravelSpeed ~= nil and TravelSpeed.ApplySettings ~= nil then
         pcall(function()
             TravelSpeed.ApplySettings(settings)
@@ -4701,6 +4707,11 @@ UI.Init = function(settings)
             CastBar.Init(settings)
         end)
     end
+    if CrowdControl ~= nil and CrowdControl.Init ~= nil then
+        pcall(function()
+            CrowdControl.Init(settings)
+        end)
+    end
     if TravelSpeed ~= nil and TravelSpeed.Init ~= nil then
         pcall(function()
             TravelSpeed.Init(settings)
@@ -4738,6 +4749,11 @@ UI.UnLoad = function()
     if CastBar ~= nil and CastBar.Unload ~= nil then
         pcall(function()
             CastBar.Unload()
+        end)
+    end
+    if CrowdControl ~= nil and CrowdControl.Unload ~= nil then
+        pcall(function()
+            CrowdControl.Unload()
         end)
     end
     if TravelSpeed ~= nil and TravelSpeed.Unload ~= nil then
@@ -4829,6 +4845,11 @@ UI.SetEnabled = function(enabled)
     if CastBar ~= nil and CastBar.SetEnabled ~= nil then
         pcall(function()
             CastBar.SetEnabled(UI.enabled)
+        end)
+    end
+    if CrowdControl ~= nil and CrowdControl.SetEnabled ~= nil then
+        pcall(function()
+            CrowdControl.SetEnabled(UI.enabled)
         end)
     end
     if TravelSpeed ~= nil and TravelSpeed.SetEnabled ~= nil then
@@ -5019,6 +5040,15 @@ UI.OnUpdate = function(dt)
         end)
         if not ok and api.Log ~= nil and api.Log.Err ~= nil then
             api.Log:Err("[Nuzi UI] CastBar.OnUpdate failed: " .. tostring(err))
+        end
+    end
+
+    if CrowdControl ~= nil and CrowdControl.OnUpdate ~= nil then
+        local ok, err = pcall(function()
+            CrowdControl.OnUpdate(dt, UI.settings)
+        end)
+        if not ok and api.Log ~= nil and api.Log.Err ~= nil then
+            api.Log:Err("[Nuzi UI] CrowdControl.OnUpdate failed: " .. tostring(err))
         end
     end
 

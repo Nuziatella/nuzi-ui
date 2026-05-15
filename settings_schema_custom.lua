@@ -206,6 +206,14 @@ local function resetCastBarPosition(settings)
     settings.cast_bar.position_initialized = false
 end
 
+local function resetCrowdControlPosition(settings)
+    if type(settings.crowd_control) ~= "table" then
+        settings.crowd_control = {}
+    end
+    settings.crowd_control.pos_x = 860
+    settings.crowd_control.pos_y = 430
+end
+
 local function resetTravelSpeedPosition(settings)
     if type(settings.travel_speed) ~= "table" then
         settings.travel_speed = {}
@@ -1176,6 +1184,9 @@ function Custom.BuildRepairActions(context, parent, y)
     createRepairButton(parent, "polarUiRepairResetCooldowns", "Reset Cooldowns", 0, y, 170, function()
         runRepairAction(context, resetCooldownPositions, "Cooldown tracker positions reset.")
     end)
+    createRepairButton(parent, "polarUiRepairResetCrowdControl", "Reset CC Alert", 190, y, 170, function()
+        runRepairAction(context, resetCrowdControlPosition, "Crowd control alert position reset.")
+    end)
     y = y + 32
 
     createRepairButton(parent, "polarUiRepairResetAll", "Reset All Layout", 0, y, 170, function()
@@ -1188,6 +1199,7 @@ function Custom.BuildRepairActions(context, parent, y)
             resetLauncherPosition(settings)
             resetNameplateOffsets(settings)
             resetCooldownPositions(settings)
+            resetCrowdControlPosition(settings)
         end, "All saved layout positions reset.")
     end)
     y = y + 38

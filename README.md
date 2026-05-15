@@ -8,6 +8,7 @@ Because the stock frames are fine right up until you actually want them to look 
 
 - styles the stock `player`, `target`, `watchtarget`, `target of target`, and stock `party` frames
 - adds an optional movable player cast bar built on the stock X2 casting widget
+- adds an optional player crowd-control alert with priority icons, timers, and category filters
 - adds an optional travel speed meter for vehicles, mounts, gliders, and on-foot movement
 - adds optional mount/glider movement-ability timers in their own settings page
 - adds optional per-character gear loadouts with a clickable swap bar and drag/drop editor
@@ -79,6 +80,23 @@ You can:
 - attach non-player trackers near their nameplate and move them with offsets
 
 Mount and glider ability buttons use internal client cooldown APIs that are not exposed to addons, so they are handled by the dedicated `Mount/Glider` page instead of this generic tracker.
+
+### Crowd Control
+
+The Crowd Control page adds a player CC alert based on your live debuffs.
+
+You can:
+
+- show the highest-priority CC as a large icon
+- show secondary CC effects as smaller icons
+- filter hard CC, silence/disarm, root/snare, slows, miscellaneous CC, and DoTs
+- see the covered effect names under each category in settings
+- show labels, categories, normal timers, and urgent timer colors
+- flash the screen edges for new important CC, with category filters and intensity controls
+- resize icons and tune label or timer offsets
+- show the alert while clear for placement
+- move it with `Shift + drag`
+- lock its position once it is where you want it
 
 ### Mount/Glider
 
@@ -162,7 +180,7 @@ The settings window also handles profile safety tools.
 You can:
 
 - check your current screen size and UI scale on the `UI Repair` page
-- reset saved frame, cast bar, travel speed, mount/glider, loadout, launcher, nameplate, or cooldown positions
+- reset saved frame, cast bar, crowd-control alert, travel speed, mount/glider, loadout, launcher, nameplate, or cooldown positions
 - save backups
 - list previous backups
 - import a backup by index
@@ -170,13 +188,13 @@ You can:
 
 ## Notes
 
-- The launcher icon, settings window, overlays, cooldown trackers, cast bar, travel speed meter, mount/glider strip, loadout UI, and daily quest list all save their positions.
+- The launcher icon, settings window, overlays, cooldown trackers, cast bar, crowd-control alert, travel speed meter, mount/glider strip, loadout UI, and daily quest list all save their positions.
 - Learned mount, glider, and magithropter definitions also save to `.data/mount_glider_devices.txt` so they can be shared without copying another player's UI layout.
 - Cooldown tracker windows for non-player units use nameplate-relative offsets instead of fixed screen coordinates.
 - Backup files live in `.data/backups`.
 - Moving addon windows follows the same `Shift + drag` behavior as the other Nuzi addons.
 
-4.1.37
+4.1.39
 
 ## Credits
 
