@@ -266,6 +266,7 @@ SettingsDefaults.DEFAULT_SETTINGS = {
     },
     nameplates = {
         enabled = false,
+        stock_nametag_colors = false,
         guild_only = false,
         guild_colors = {},
         show_raid_party = true,

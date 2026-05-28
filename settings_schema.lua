@@ -1254,6 +1254,7 @@ SettingsSchema.PAGES = {
                 hint = "Control which nameplates get custom overhead bars and how the runtime behaves.",
                 fields = {
                     checkbox("plates_enabled", "polarUiPlatesEnabled", "Enable overhead plates"),
+                    checkbox("plates_stock_nametag_colors", "polarUiPlatesStockNametagColors", "Use stock colored nametags"),
                     checkbox("plates_guild_only", "polarUiPlatesGuildOnly", "Guild-only overlay (keep stock nameplates)"),
                     checkbox("plates_show_target", "polarUiPlatesShowTarget", "Show target (always)"),
                     checkbox("plates_show_player", "polarUiPlatesShowPlayer", "Show player (always)"),

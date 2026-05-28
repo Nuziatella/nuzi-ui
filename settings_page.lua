@@ -1994,6 +1994,9 @@ RefreshControls = function()
         if SettingsPage.controls.plates_enabled ~= nil then
             SettingsPage.controls.plates_enabled:SetChecked(s.nameplates.enabled and true or false)
         end
+        if SettingsPage.controls.plates_stock_nametag_colors ~= nil then
+            SettingsPage.controls.plates_stock_nametag_colors:SetChecked(s.nameplates.stock_nametag_colors and true or false)
+        end
         if SettingsPage.controls.plates_guild_only ~= nil then
             SettingsPage.controls.plates_guild_only:SetChecked(s.nameplates.guild_only and true or false)
         end
@@ -3081,6 +3084,9 @@ ApplyControlsToSettings = function()
 
     if SettingsPage.controls.plates_enabled ~= nil then
         s.nameplates.enabled = SettingsPage.controls.plates_enabled:GetChecked() and true or false
+    end
+    if SettingsPage.controls.plates_stock_nametag_colors ~= nil then
+        s.nameplates.stock_nametag_colors = SettingsPage.controls.plates_stock_nametag_colors:GetChecked() and true or false
     end
     if SettingsPage.controls.plates_guild_only ~= nil then
         s.nameplates.guild_only = SettingsPage.controls.plates_guild_only:GetChecked() and true or false
@@ -4445,6 +4451,7 @@ local function EnsureWindow()
         SettingsPage.controls.short_numbers,
         SettingsPage.controls.move_buffs,
         SettingsPage.controls.plates_enabled,
+        SettingsPage.controls.plates_stock_nametag_colors,
         SettingsPage.controls.plates_guild_only,
         SettingsPage.controls.plates_show_target,
         SettingsPage.controls.plates_show_player,

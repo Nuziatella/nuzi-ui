@@ -12,7 +12,8 @@ local Nameplates = {
     unit_keys = {},
     unit_state = {},
     tick = 0,
-    discovery_index = 1
+    discovery_index = 1,
+    stock_nametag_color_key = nil
 }
 
 local FAST_UNITS = {
@@ -34,6 +35,30 @@ local DEBUFF_CATEGORY_SETTINGS = {
     slow = "show_slow",
     dot = "show_dot",
     misc = "show_misc"
+}
+local NAMETAG_COLOR_SETTERS = {
+    { fn = "SetColorFriendly", key = "friendly" },
+    { fn = "SetColorFriendlyNPC", key = "friendly_npc" },
+    { fn = "SetColorNeutral", key = "neutral" },
+    { fn = "SetColorParty", key = "party" },
+    { fn = "SetColorRaid", key = "raid" },
+    { fn = "SetColorRaidPK", key = "raid_pk" },
+    { fn = "SetColorPK", key = "pk" },
+    { fn = "SetColorEnemy", key = "enemy" },
+    { fn = "SetColorMonster", key = "monster" },
+    { fn = "SetColorPirate", key = "pirate" }
+}
+local STOCK_NAMETAG_COLORS = {
+    friendly = "16773220",
+    friendly_npc = "16246860",
+    neutral = "12096564",
+    party = "5033194",
+    raid = "2591740",
+    raid_pk = "16723200",
+    pk = "11161855",
+    enemy = "16711680",
+    monster = "16711680",
+    pirate = "16751655"
 }
 
 local function NormalizeUnitToken(unit)
@@ -63,6 +88,60 @@ local function NormalizeUnitId(unitId)
         return tostring(unitId)
     end
     return nil
+end
+
+local function GetNametagApi()
+    return type(api) == "table" and type(api.Nametag) == "table" and api.Nametag or nil
+end
+
+local function StockNametagColorApiAvailable()
+    local nametag = GetNametagApi()
+    if nametag == nil then
+        return false
+    end
+    for _, item in ipairs(NAMETAG_COLOR_SETTERS) do
+        if type(nametag[item.fn]) ~= "function" then
+            return false
+        end
+    end
+    return true
+end
+
+local function ApplyStockNametagColors(cfg)
+    if type(cfg) ~= "table" or cfg.stock_nametag_colors ~= true then
+        return false
+    end
+    local nametag = GetNametagApi()
+    if nametag == nil or not StockNametagColorApiAvailable() then
+        return false
+    end
+
+    local keyParts = {}
+    for _, item in ipairs(NAMETAG_COLOR_SETTERS) do
+        keyParts[#keyParts + 1] = item.fn .. "=" .. tostring(STOCK_NAMETAG_COLORS[item.key] or "")
+    end
+    local colorKey = table.concat(keyParts, ";")
+    if Nameplates.stock_nametag_color_key == colorKey then
+        return true
+    end
+
+    local applied = true
+    for _, item in ipairs(NAMETAG_COLOR_SETTERS) do
+        local color = STOCK_NAMETAG_COLORS[item.key]
+        local setter = nametag[item.fn]
+        if color ~= nil and type(setter) == "function" then
+            local ok = pcall(function()
+                setter(nametag, color)
+            end)
+            if not ok then
+                applied = false
+            end
+        end
+    end
+    if applied then
+        Nameplates.stock_nametag_color_key = colorKey
+    end
+    return applied
 end
 
 local function SafeGetUnitInfoById(unitId)
@@ -1505,12 +1584,18 @@ Nameplates.Init = function(settings)
 end
 
 Nameplates.ApplySettings = function(settings)
+    local oldCfg = GetCfg(Nameplates.settings)
+    local newCfg = GetCfg(settings)
+    if oldCfg.stock_nametag_colors ~= newCfg.stock_nametag_colors then
+        Nameplates.stock_nametag_color_key = nil
+    end
     Nameplates.settings = settings
 end
 
 Nameplates.SetEnabled = function(enabled)
     Nameplates.enabled = enabled and true or false
     if not Nameplates.enabled then
+        Nameplates.stock_nametag_color_key = nil
         HideAllFrames()
         HideAllDebuffs()
     end
@@ -1520,12 +1605,16 @@ Nameplates.OnPositionUpdate = function(settings)
     if settings == nil then
         return
     end
+    local cfg = GetCfg(settings)
+    local stockColorsActive = Nameplates.enabled and cfg.enabled and ApplyStockNametagColors(cfg)
+    if not stockColorsActive then
+        Nameplates.stock_nametag_color_key = nil
+    end
     if Compat ~= nil and not Compat.NameplatesSupported() then
         return
     end
 
-    local cfg = GetCfg(settings)
-    local customEnabled = Nameplates.enabled and cfg.enabled
+    local customEnabled = Nameplates.enabled and cfg.enabled and not stockColorsActive
     local debuffsEnabled = Nameplates.enabled and DebuffsEnabled(cfg)
 
     if customEnabled then
@@ -1564,14 +1653,18 @@ Nameplates.OnUpdate = function(settings)
     if settings == nil then
         return
     end
+    local cfg = GetCfg(settings)
+    local stockColorsActive = Nameplates.enabled and cfg.enabled and ApplyStockNametagColors(cfg)
+    if not stockColorsActive then
+        Nameplates.stock_nametag_color_key = nil
+    end
     if Compat ~= nil and not Compat.NameplatesSupported() then
         HideAllFrames()
         HideAllDebuffs()
         return
     end
 
-    local cfg = GetCfg(settings)
-    local customEnabled = Nameplates.enabled and cfg.enabled
+    local customEnabled = Nameplates.enabled and cfg.enabled and not stockColorsActive
     local debuffsEnabled = Nameplates.enabled and DebuffsEnabled(cfg)
 
     if not customEnabled then
@@ -1657,6 +1750,7 @@ Nameplates.Unload = function()
     Nameplates.unit_state = {}
     Nameplates.tick = 0
     Nameplates.discovery_index = 1
+    Nameplates.stock_nametag_color_key = nil
 end
 
 return Nameplates

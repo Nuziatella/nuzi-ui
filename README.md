@@ -60,6 +60,7 @@ Nameplates are optional and can be enabled separately from the frame restyle wor
 You can:
 
 - show custom raid and party overhead bars
+- use patched stock colored nametags instead of drawing custom overhead bars
 - tune spacing, visibility, and text display
 - keep them aligned with the rest of the addon styling
 
@@ -194,7 +195,7 @@ You can:
 - Backup files live in `.data/backups`.
 - Moving addon windows follows the same `Shift + drag` behavior as the other Nuzi addons.
 
-4.1.39
+4.1.40
 
 ## Credits
 
