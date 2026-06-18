@@ -312,6 +312,9 @@ local function ShouldRunStockFrameMethod(frame, methodName)
     if UNIT_BOUND_STOCK_FRAME_METHODS[methodName] ~= true then
         return true
     end
+    if UI ~= nil and UI.target ~= nil and frame == UI.target.wnd then
+        return true
+    end
     return HasLiveSecondaryFrameUnit(frame)
 end
 
@@ -3413,6 +3416,24 @@ SetWidgetVisible = function(widget, shown)
     end
 end
 
+local function ClearTargetFrameUnitState()
+    if UI == nil or UI.target == nil then
+        return
+    end
+
+    UI.target.current_target_id = nil
+    ClearTargetOverlayText()
+    ResetClassIconFrame(UI.target.wnd)
+end
+
+local function RestoreTargetFrameUnitState()
+    local frame = UI ~= nil and UI.target ~= nil and UI.target.wnd or nil
+    if frame ~= nil and frame.__polar_hidden_for_missing_target then
+        frame.__polar_hidden_for_missing_target = nil
+        SetWidgetVisible(frame, true)
+    end
+end
+
 ResolveFrameStyleTable = function(frame)
     if frame == nil then
         return nil
@@ -4406,6 +4427,7 @@ local function EnsureUi(settings)
     end
     if UI.target.wnd ~= nil then
         UI.target.wnd.__polar_unit = "target"
+        UI.target.wnd.__polar_runtime_unit = "target"
         UI.target.wnd.__polar_small_hpmp = nil
     end
     if UI.watchtarget.wnd ~= nil then
@@ -4780,6 +4802,7 @@ UI.UnLoad = function()
         AlignmentModule.Reset(BuildUiContext())
     end
     UI.enabled = false
+    RestoreTargetFrameUnitState()
     local restoreValues = {
         hp_value_visible = true,
         mp_value_visible = true
@@ -4874,6 +4897,7 @@ UI.SetEnabled = function(enabled)
     end
 
     if not UI.enabled then
+        RestoreTargetFrameUnitState()
         ClearFrameStyleHook(UI.player.wnd)
         ClearFrameStyleHook(UI.target.wnd)
         ClearFrameStyleHook(UI.watchtarget.wnd)
@@ -5121,9 +5145,10 @@ UI.OnUpdate = function(dt)
     if UI.enabled and UI.target.wnd ~= nil then
         local tid = api.Unit:GetUnitId("target")
         if tid == nil then
-            UI.target.current_target_id = nil
-            ClearTargetOverlayText()
+            RestoreTargetFrameUnitState()
+            ClearTargetFrameUnitState()
         else
+            RestoreTargetFrameUnitState()
             local normalizedTid = NormalizeUnitId(tid)
             if UI.target.current_target_id ~= normalizedTid then
                 UI.target.current_target_id = normalizedTid

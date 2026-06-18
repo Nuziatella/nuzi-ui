@@ -379,12 +379,6 @@ function TargetExtras.Update(ctx, settings)
             gs = api.Unit:UnitGearScore("target")
         end
     end)
-    if gs == nil and type(targetUnitInfo) == "table" then
-        gs = targetUnitInfo.gearScore or targetUnitInfo.gearscore or targetUnitInfo.gear_score or targetUnitInfo.gs
-    end
-    if gs == nil and type(targetInfoById) == "table" then
-        gs = targetInfoById.gearScore or targetInfoById.gearscore or targetInfoById.gear_score or targetInfoById.gs
-    end
 
     local className = ResolveClassName(ctx, targetUnitInfo)
     if className == "" then

@@ -45,7 +45,7 @@ local SettingsStore = modules.settings_store
 local NuziUiAddon = {
     name = "Nuzi UI",
     author = "Nuzi",
-    version = "4.1.40",
+    version = "4.1.42",
     desc = "Interface overhaul"
 }
 
