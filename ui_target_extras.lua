@@ -154,6 +154,39 @@ local function ResolveClassName(ctx, info)
     return ctx.TrimText(F_UNIT.GetPlayerJobName(skillset1, skillset2, skillset3))
 end
 
+local function ResolveClassNameFromApi(ctx, api, unit)
+    if api == nil then
+        return ""
+    end
+
+    if api.Ability ~= nil and api.Ability.GetUnitClassName ~= nil then
+        local className = ""
+        pcall(function()
+            className = api.Ability:GetUnitClassName(unit)
+        end)
+        className = ctx.TrimText(className)
+        if className ~= "" then
+            return className
+        end
+    end
+
+    if api.Unit ~= nil and api.Unit.UnitClass ~= nil then
+        local unitClass = nil
+        pcall(function()
+            unitClass = api.Unit:UnitClass(unit)
+        end)
+        if type(unitClass) == "table" then
+            return ResolveClassName(ctx, { class = unitClass })
+        end
+        unitClass = ctx.TrimText(unitClass)
+        if unitClass ~= "" then
+            return unitClass
+        end
+    end
+
+    return ""
+end
+
 function TargetExtras.Ensure(ctx, settings, baseStyle)
     local UI = ctx.UI
     local api = ctx.api
@@ -383,6 +416,9 @@ function TargetExtras.Update(ctx, settings)
     local className = ResolveClassName(ctx, targetUnitInfo)
     if className == "" then
         className = ResolveClassName(ctx, targetInfoById)
+    end
+    if className == "" then
+        className = ResolveClassNameFromApi(ctx, api, "target")
     end
 
     pcall(function()
